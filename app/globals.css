@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  background: #f4fbf7;
+  color: #0a1f1a;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
