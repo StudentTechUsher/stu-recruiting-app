@@ -20,20 +20,35 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
     setNotice(null);
 
     try {
+      const normalizedEmail = email.trim();
       const response = await fetch("/api/auth/login/student", {
         method: "POST",
         headers: {
           "content-type": "application/json"
         },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email: normalizedEmail })
       });
 
-      const data = (await response.json()) as { ok: boolean; error?: string };
-      if (!response.ok || !data.ok) {
-        if (data.error === "invalid_student_email_domain") {
+      const data = (await response.json().catch(() => null)) as
+        | { ok: boolean; error?: string; details?: string }
+        | null;
+      const errorCode = data?.error;
+
+      if (!response.ok || !data?.ok) {
+        if (errorCode === "invalid_email") {
+          setError("Enter a valid email address.");
+        } else if (errorCode === "invalid_student_email_domain") {
           setError("Use a valid campus email domain for student login.");
-        } else if (data.error === "supabase_not_configured") {
+        } else if (errorCode === "supabase_not_configured") {
           setError("Supabase auth is not configured for this environment.");
+        } else if (errorCode === "email_auth_disabled") {
+          setError("Supabase email auth is disabled. Enable Email provider in Supabase Auth settings.");
+        } else if (errorCode === "invalid_magic_link_redirect") {
+          setError("Magic-link redirect URL is not allowed in Supabase. Check your Auth redirect URL settings.");
+        } else if (errorCode === "magic_link_rate_limited") {
+          setError("Too many attempts. Wait a minute, then request a new magic link.");
+        } else if (errorCode === "magic_link_send_failed" && data?.details) {
+          setError(`Unable to send magic link. ${data.details}`);
         } else {
           setError("Unable to send magic link.");
         }
@@ -59,6 +74,8 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
           <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
             Campus email
             <input
+              type="email"
+              autoComplete="email"
               className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
               placeholder="name@school.edu"
               value={email}

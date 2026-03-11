@@ -17,6 +17,13 @@ const getCallbackUrl = (req: Request) => {
   return new URL("/auth/callback", origin).toString();
 };
 
+const inferMagicLinkErrorCode = (message: string) => {
+  if (/email logins are disabled/i.test(message)) return "email_auth_disabled";
+  if (/redirect|redirect_to|emailredirectto|uri|url/i.test(message)) return "invalid_magic_link_redirect";
+  if (/rate limit|too many requests/i.test(message)) return "magic_link_rate_limited";
+  return "magic_link_send_failed";
+};
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = magicLinkSchema.safeParse(body);
@@ -60,7 +67,24 @@ export async function POST(req: Request) {
   });
 
   if (error) {
-    return NextResponse.json({ ok: false, error: "magic_link_send_failed" }, { status: 400 });
+    const status = typeof error.status === "number" ? error.status : 400;
+    const errorMessage = typeof error.message === "string" ? error.message : "unknown_supabase_error";
+    const errorCode = inferMagicLinkErrorCode(errorMessage);
+
+    console.error("student_magic_link_send_failed", {
+      errorCode,
+      status,
+      message: errorMessage
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: errorCode,
+        details: process.env.NODE_ENV === "development" ? errorMessage : undefined
+      },
+      { status }
+    );
   }
 
   const response = NextResponse.json({ ok: true });

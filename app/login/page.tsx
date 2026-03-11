@@ -3,9 +3,20 @@ import { LoginChooserScreen } from "@/components/auth/LoginChooserScreen";
 import { getAuthContext } from "@/lib/auth-context";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
+import { buildMagicLinkCallbackRedirectPath } from "@/lib/auth/magic-link-forward";
 import { isSessionCheckEnabled } from "@/lib/session-flags";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const resolvedSearchParams = await searchParams;
+  const callbackRedirectPath = buildMagicLinkCallbackRedirectPath(resolvedSearchParams);
+  if (callbackRedirectPath) {
+    redirect(callbackRedirectPath);
+  }
+
   const sessionCheckEnabled = isSessionCheckEnabled();
 
   if (sessionCheckEnabled) {
