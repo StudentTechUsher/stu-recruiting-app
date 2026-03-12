@@ -46,7 +46,13 @@ export function RoleOnboardingScreen({ audience }: { audience: OnboardingAudienc
         body: JSON.stringify({ checklist_complete: true })
       });
 
-      const data = (await response.json()) as { ok: boolean; redirectPath?: string };
+      const data = (await response.json()) as { ok: boolean; redirectPath?: string; error?: string };
+      if (response.status === 403 && data?.error === "session_expired") {
+        router.push("/login?error=session_expired");
+        router.refresh();
+        return;
+      }
+
       if (!response.ok || !data.ok || !data.redirectPath) {
         setError("Unable to complete onboarding. Please try again.");
         return;
