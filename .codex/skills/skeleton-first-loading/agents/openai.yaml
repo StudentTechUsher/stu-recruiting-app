@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skeleton First Loading"
+  short_description: "Require skeletons for async page loads"
+  default_prompt: "Apply skeleton-first loading standards for this change."

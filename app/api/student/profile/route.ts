@@ -10,6 +10,20 @@ import { resolveOptionSelections } from "@/lib/text/fuzzy-option-match";
 type StudentRow = { student_data: unknown };
 type CompanyRow = { company_name: string | null };
 type RoleRow = { role_name: string | null };
+type AvatarFileRef = { bucket: string; path: string };
+
+type SupabaseStorageClient = {
+  storage: {
+    from: (bucket: string) => {
+      createSignedUrl: (
+        path: string,
+        expiresIn: number
+      ) => Promise<{ data: { signedUrl?: string | null } | null; error: unknown }>;
+    };
+  };
+};
+
+const AVATAR_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
@@ -34,6 +48,37 @@ const buildOptionList = (values: string[], fallback: readonly string[]): string[
   }
 
   return Array.from(deduped.values());
+};
+
+const hasOwn = (record: Record<string, unknown>, key: string): boolean => Object.prototype.hasOwnProperty.call(record, key);
+
+const parseAvatarFileRef = (value: unknown): AvatarFileRef | null => {
+  const parsed = toRecord(value);
+  const bucket = asTrimmedString(parsed.bucket);
+  const path = asTrimmedString(parsed.path);
+  if (!bucket || !path) return null;
+  return { bucket, path };
+};
+
+const resolveAvatarUrl = async (supabase: unknown, personalInfo: Record<string, unknown>): Promise<string | null> => {
+  const fallbackAvatarUrl = asTrimmedString(personalInfo.avatar_url) ?? asTrimmedString(personalInfo.avatarUrl);
+  const avatarFileRef = parseAvatarFileRef(personalInfo.avatar_file_ref ?? personalInfo.avatarFileRef);
+  if (!avatarFileRef || !supabase) return fallbackAvatarUrl;
+
+  const storageClient = supabase as SupabaseStorageClient;
+  const { data, error } = await storageClient.storage.from(avatarFileRef.bucket).createSignedUrl(avatarFileRef.path, AVATAR_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) return fallbackAvatarUrl;
+  return data.signedUrl;
+};
+
+const hydrateProfilePersonalInfo = async (supabase: unknown, personalInfo: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  const hydrated = { ...personalInfo };
+  const avatarUrl = await resolveAvatarUrl(supabase, hydrated);
+
+  if (avatarUrl) hydrated.avatar_url = avatarUrl;
+  else delete hydrated.avatar_url;
+
+  return hydrated;
 };
 
 export async function GET() {
@@ -66,11 +111,13 @@ export async function GET() {
     studentData = {};
   }
 
+  const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, profilePersonalInfo);
+
   return ok({
     resource: "student_profile",
     profile: {
       id: context.user_id,
-      personal_info: profilePersonalInfo
+      personal_info: hydratedProfilePersonalInfo
     },
     student_data: studentData,
     role_options: roleOptions,
@@ -112,6 +159,24 @@ export async function POST(req: Request) {
   if (lastName) profilePersonalInfo.last_name = lastName;
   if (fullName) profilePersonalInfo.full_name = fullName;
   if (email) profilePersonalInfo.email = email;
+
+  const hasAvatarFileRefInput = hasOwn(personalInfoInput, "avatar_file_ref") || hasOwn(personalInfoInput, "avatarFileRef");
+  if (hasAvatarFileRefInput) {
+    const rawAvatarFileRef = personalInfoInput.avatar_file_ref ?? personalInfoInput.avatarFileRef;
+    if (rawAvatarFileRef === null) {
+      delete profilePersonalInfo.avatar_file_ref;
+      delete profilePersonalInfo.avatar_url;
+    } else {
+      const rawAvatarFileRefRecord = toRecord(rawAvatarFileRef);
+      const parsedAvatarFileRef = parseAvatarFileRef(rawAvatarFileRef);
+      if (!parsedAvatarFileRef) return badRequest("invalid_avatar_file_ref");
+      profilePersonalInfo.avatar_file_ref = {
+        ...rawAvatarFileRefRecord,
+        bucket: parsedAvatarFileRef.bucket,
+        path: parsedAvatarFileRef.path
+      };
+    }
+  }
 
   const supabase = await getSupabaseServerClient();
   if (supabase) {
@@ -200,11 +265,13 @@ export async function POST(req: Request) {
     }
   }
 
+  const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, profilePersonalInfo);
+
   return ok({
     resource: "student_profile",
     profile: {
       id: context.user_id,
-      personal_info: profilePersonalInfo
+      personal_info: hydratedProfilePersonalInfo
     },
     student_data: studentData,
     status: "saved",

@@ -1,4 +1,5 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -27,6 +28,7 @@ type ArtifactRecord = {
   id: string;
   title: string;
   type: ArtifactType;
+  artifactData: Record<string, unknown>;
   source: string;
   description: string;
   link?: string;
@@ -194,6 +196,8 @@ const artifactTypeToneClass: Record<ArtifactType, string> = {
   test: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
 };
 
+const minArtifactsSkeletonMs = 350;
+
 const tagToneClass: Record<ArtifactTag, string> = {
   'Technical depth': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
   'Applied execution': 'bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-100',
@@ -301,6 +305,36 @@ const PlusIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
   </svg>
 );
 
+const ArtifactCardSkeleton = () => (
+  <div className="rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex items-start justify-between gap-2">
+      <div className="h-6 w-20 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
+      <div className="h-4 w-12 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
+    </div>
+    <div className="mt-3 h-4 w-3/4 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-2 h-3 w-1/2 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-3 h-3 w-full rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-2 h-3 w-5/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+  </div>
+);
+
+const ArtifactDetailSkeleton = () => (
+  <>
+    <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
+      <div className="h-4 w-2/3 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+      <div className="mt-2 h-3 w-1/2 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    </div>
+    <div className="mt-4 h-3 w-full rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-2 h-3 w-5/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-2 h-3 w-4/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
+    <div className="mt-4 flex gap-2">
+      <div className="h-5 w-20 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
+      <div className="h-5 w-24 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
+      <div className="h-5 w-16 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
+    </div>
+  </>
+);
+
 const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
   const data = toRecord(row.artifact_data);
   const typeCandidate = toTrimmedString(row.artifact_type) ?? toTrimmedString(data.type);
@@ -315,6 +349,7 @@ const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
     id: row.artifact_id,
     title,
     type: artifactType,
+    artifactData: data,
     source,
     description,
     link: toTrimmedString(data.link) ?? undefined,
@@ -327,7 +362,81 @@ const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
   };
 };
 
+const getArtifactDataString = (data: Record<string, unknown>, key: string, fallback = ''): string => {
+  const value = toTrimmedString(data[key]);
+  return value ?? fallback;
+};
+
+const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm => {
+  const data = artifact.artifactData;
+  const draft = { ...initialDraftArtifactForm };
+
+  if (artifact.type === 'coursework') {
+    draft.courseCode = getArtifactDataString(data, 'course_code');
+    draft.courseTitle = getArtifactDataString(data, 'course_title');
+    draft.instructorName = getArtifactDataString(data, 'instructor_name');
+    draft.courseImpact = getArtifactDataString(data, 'impact_description');
+  }
+
+  if (artifact.type === 'project') {
+    draft.projectTitle = getArtifactDataString(data, 'title', artifact.title);
+    draft.projectDescription = getArtifactDataString(data, 'description', artifact.description);
+    draft.projectDemoLink = getArtifactDataString(data, 'project_demo_link', artifact.link ?? '');
+  }
+
+  if (artifact.type === 'internship') {
+    draft.internshipCompany = getArtifactDataString(data, 'company');
+    draft.internshipJobTitle = getArtifactDataString(data, 'job_title');
+    draft.internshipStartDate = getArtifactDataString(data, 'start_date');
+    draft.internshipEndDate = getArtifactDataString(data, 'end_date');
+    draft.internshipMentorEmail = getArtifactDataString(data, 'mentor_email');
+    draft.internshipImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
+  }
+
+  if (artifact.type === 'certification') {
+    draft.certificationName = getArtifactDataString(data, 'certification_name', artifact.title);
+    draft.certificationAwardedDate = getArtifactDataString(data, 'awarded_date');
+  }
+
+  if (artifact.type === 'leadership') {
+    draft.leadershipOrganization = getArtifactDataString(data, 'organization');
+    draft.leadershipPosition = getArtifactDataString(data, 'position');
+    draft.leadershipImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
+  }
+
+  if (artifact.type === 'competition') {
+    draft.competitionName = getArtifactDataString(data, 'competition_name', artifact.title);
+    draft.competitionPerformance = getArtifactDataString(data, 'performance');
+    draft.competitionPrompt = getArtifactDataString(data, 'deliverable_note');
+  }
+
+  if (artifact.type === 'research') {
+    draft.researchTitle = getArtifactDataString(data, 'research_title', artifact.title);
+    draft.researchArea = getArtifactDataString(data, 'research_area');
+    draft.researchAdvisor = getArtifactDataString(data, 'advisor');
+    draft.researchImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
+  }
+
+  if (artifact.type === 'employment') {
+    draft.jobExperienceCompany = getArtifactDataString(data, 'company');
+    draft.jobExperienceTitle = getArtifactDataString(data, 'job_title');
+    draft.jobExperienceStartDate = getArtifactDataString(data, 'start_date');
+    draft.jobExperienceEndDate = getArtifactDataString(data, 'end_date');
+    draft.jobExperienceImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
+  }
+
+  if (artifact.type === 'test') {
+    draft.testName = getArtifactDataString(data, 'assessment_name', artifact.title);
+    draft.testProvider = getArtifactDataString(data, 'provider', artifact.source);
+    draft.testScore = getArtifactDataString(data, 'score');
+    draft.testEvidenceLink = getArtifactDataString(data, 'link', artifact.link ?? '');
+  }
+
+  return draft;
+};
+
 export const StudentArtifactRepository = () => {
+  const searchParams = useSearchParams();
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
   const [activeFilter, setActiveFilter] = useState<ArtifactFilter>('all');
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -336,6 +445,8 @@ export const StudentArtifactRepository = () => {
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmittingArtifact, setIsSubmittingArtifact] = useState(false);
+  const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
+  const hasAutoOpenedFromQueryRef = useRef(false);
 
   const [draftType, setDraftType] = useState<ArtifactType>('coursework');
   const [draftData, setDraftData] = useState<DraftArtifactForm>({ ...initialDraftArtifactForm });
@@ -369,6 +480,7 @@ export const StudentArtifactRepository = () => {
   const showFirstArtifactTour = !isLoadingArtifacts && artifacts.length === 0;
 
   const loadArtifacts = useCallback(async () => {
+    const loadStartedAt = Date.now();
     setIsLoadingArtifacts(true);
     try {
       const response = await fetch('/api/student/artifacts', { cache: 'no-store' });
@@ -393,6 +505,10 @@ export const StudentArtifactRepository = () => {
       setSelectedArtifactId(null);
       setStatusMessage('Unable to load artifacts right now. Try refreshing in a moment.');
     } finally {
+      const elapsed = Date.now() - loadStartedAt;
+      if (elapsed < minArtifactsSkeletonMs) {
+        await new Promise((resolve) => setTimeout(resolve, minArtifactsSkeletonMs - elapsed));
+      }
       setIsLoadingArtifacts(false);
     }
   }, []);
@@ -400,7 +516,6 @@ export const StudentArtifactRepository = () => {
   useEffect(() => {
     void loadArtifacts();
   }, [loadArtifacts]);
-
 
   const handleDraftTypeChange = (nextType: ArtifactType) => {
     setDraftType(nextType);
@@ -410,9 +525,55 @@ export const StudentArtifactRepository = () => {
     }
   };
 
+  const resetArtifactDraftForm = () => {
+    setDraftType('coursework');
+    setDraftData({ ...initialDraftArtifactForm });
+    setDraftAttachmentName('');
+    if (documentInputRef.current) {
+      documentInputRef.current.value = '';
+    }
+  };
+
+  const closeArtifactDialog = () => {
+    setShowAddArtifactDialog(false);
+    setEditingArtifactId(null);
+    resetArtifactDraftForm();
+  };
+
   const openAddArtifactDialog = () => {
+    setEditingArtifactId(null);
+    resetArtifactDraftForm();
     setShowAddArtifactDialog(true);
   };
+
+  const openEditArtifactDialog = () => {
+    if (!selectedArtifact) return;
+
+    setEditingArtifactId(selectedArtifact.id);
+    setDraftType(selectedArtifact.type);
+    setDraftData(toDraftFormFromArtifact(selectedArtifact));
+    setDraftAttachmentName(selectedArtifact.attachmentName ?? '');
+    if (documentInputRef.current) {
+      documentInputRef.current.value = '';
+    }
+    setShowAddArtifactDialog(true);
+  };
+
+  useEffect(() => {
+    const openAddArtifactParam = searchParams.get('openAddArtifact');
+    const shouldOpenFromQuery = openAddArtifactParam === 'true' || openAddArtifactParam === '1';
+    if (!shouldOpenFromQuery || hasAutoOpenedFromQueryRef.current || showAddArtifactDialog) return;
+
+    hasAutoOpenedFromQueryRef.current = true;
+    setEditingArtifactId(null);
+    setDraftType('coursework');
+    setDraftData({ ...initialDraftArtifactForm });
+    setDraftAttachmentName('');
+    if (documentInputRef.current) {
+      documentInputRef.current.value = '';
+    }
+    setShowAddArtifactDialog(true);
+  }, [searchParams, showAddArtifactDialog]);
 
   const updateDraftField = <K extends keyof DraftArtifactForm>(key: K, value: DraftArtifactForm[K]) => {
     setDraftData((current) => ({
@@ -430,6 +591,8 @@ export const StudentArtifactRepository = () => {
 
   const addArtifact = async () => {
     if (isSubmittingArtifact) return;
+    const artifactIdToEdit = editingArtifactId;
+    const isEditingExistingArtifact = Boolean(artifactIdToEdit);
 
     let title = '';
     let source = artifactTypeSourcePreset[draftType];
@@ -675,15 +838,23 @@ export const StudentArtifactRepository = () => {
       };
 
       const response = await fetch('/api/student/artifacts', {
-        method: 'POST',
+        method: isEditingExistingArtifact ? 'PATCH' : 'POST',
         headers: {
           'content-type': 'application/json'
         },
-        body: JSON.stringify({
-          artifact_type: draftType,
-          artifact_data: artifactData,
-          file_refs: fileRefs
-        })
+        body: JSON.stringify(
+          isEditingExistingArtifact
+            ? {
+                artifact_id: artifactIdToEdit,
+                updates: artifactData,
+                file_refs: fileRefs
+              }
+            : {
+                artifact_type: draftType,
+                artifact_data: artifactData,
+                file_refs: fileRefs
+              }
+        )
       });
 
       const payload = (await response.json().catch(() => null)) as
@@ -692,27 +863,25 @@ export const StudentArtifactRepository = () => {
         | null;
 
       if (!response.ok || !payload || !payload.ok) {
-        setStatusMessage('Unable to save artifact right now. Please try again.');
+        setStatusMessage(isEditingExistingArtifact ? 'Unable to update artifact right now. Please try again.' : 'Unable to save artifact right now. Please try again.');
         return;
       }
 
       const mappedArtifact = mapApiArtifactToRecord(payload.data.artifact);
       if (mappedArtifact) {
-        setArtifacts((current) => [mappedArtifact, ...current]);
+        if (isEditingExistingArtifact) {
+          setArtifacts((current) => current.map((artifact) => (artifact.id === mappedArtifact.id ? mappedArtifact : artifact)));
+        } else {
+          setArtifacts((current) => [mappedArtifact, ...current]);
+        }
         setSelectedArtifactId(mappedArtifact.id);
       } else {
         await loadArtifacts();
       }
 
-      setShowAddArtifactDialog(false);
       setShowMobileDetailSheet(false);
-      setStatusMessage(`Added artifact: ${normalizedTitle}.`);
-
-      setDraftData({ ...initialDraftArtifactForm });
-      setDraftAttachmentName('');
-      if (documentInputRef.current) {
-        documentInputRef.current.value = '';
-      }
+      closeArtifactDialog();
+      setStatusMessage(`${isEditingExistingArtifact ? 'Updated' : 'Added'} artifact: ${normalizedTitle}.`);
     } finally {
       setIsSubmittingArtifact(false);
     }
@@ -721,6 +890,8 @@ export const StudentArtifactRepository = () => {
   const submitAddArtifactDialog = () => {
     void addArtifact();
   };
+
+  const isEditingInDialog = Boolean(editingArtifactId);
 
   return (
     <section aria-labelledby="student-artifact-repository-title" className="w-full overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
@@ -737,15 +908,6 @@ export const StudentArtifactRepository = () => {
               Click Add New Artifact to add evidence that strengthens your profile.
             </p>
           </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Button type="button" size="sm" onClick={() => openAddArtifactDialog()}>
-            <span className="inline-flex items-center gap-2">
-              <PlusIcon />
-              <span>Add New Artifact</span>
-            </span>
-          </Button>
         </div>
 
         {showFirstArtifactTour ? (
@@ -766,7 +928,13 @@ export const StudentArtifactRepository = () => {
           </div>
         ) : null}
 
-        <div className="-mx-4 mt-6 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:overflow-visible lg:px-0">
+        <div className="mt-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5a7a70] dark:text-slate-400">
+            Filter by evidence type
+          </p>
+        </div>
+
+        <div className="-mx-4 mt-2 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:overflow-visible lg:px-0">
           <div className="flex gap-2 pb-2 lg:flex-wrap lg:pb-0">
             <button
               type="button"
@@ -831,9 +999,11 @@ export const StudentArtifactRepository = () => {
 
         <div className="mt-4 space-y-3 lg:hidden">
           {isLoadingArtifacts ? (
-            <p className="rounded-xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] px-4 py-6 text-sm text-[#4f6a62] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-              Loading your artifacts...
-            </p>
+            <>
+              <ArtifactCardSkeleton />
+              <ArtifactCardSkeleton />
+              <ArtifactCardSkeleton />
+            </>
           ) : filteredArtifacts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] px-5 py-10 text-center dark:border-slate-700 dark:bg-slate-900">
               <p className="text-sm font-semibold text-[#2a5044] dark:text-slate-200">No artifacts yet</p>
@@ -893,17 +1063,19 @@ export const StudentArtifactRepository = () => {
                     Artifact cards
                   </p>
                   <h3 className="mt-1 text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">
-                    {filteredArtifacts.length} artifacts in view
+                    {isLoadingArtifacts ? 'Loading artifacts...' : `${filteredArtifacts.length} artifacts in view`}
                   </h3>
                 </div>
-                <Badge>{activeFilter === 'all' ? 'All types' : artifactTypeLabelMap[activeFilter]}</Badge>
+                <Badge>{isLoadingArtifacts ? 'Loading' : activeFilter === 'all' ? 'All types' : artifactTypeLabelMap[activeFilter]}</Badge>
               </div>
             }
           >
             {isLoadingArtifacts ? (
-              <p className="rounded-xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] px-4 py-6 text-sm text-[#4f6a62] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                Loading your artifacts...
-              </p>
+              <div className="space-y-3">
+                <ArtifactCardSkeleton />
+                <ArtifactCardSkeleton />
+                <ArtifactCardSkeleton />
+              </div>
             ) : filteredArtifacts.length === 0 ? (
               <p className="rounded-xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] px-4 py-6 text-sm text-[#4f6a62] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                 No artifacts found for your account yet. Use Add New Artifact to create one.
@@ -991,9 +1163,20 @@ export const StudentArtifactRepository = () => {
           <div className="space-y-4">
             <Card
               className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Artifact detail</h3>}
+              header={
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Artifact detail</h3>
+                  {selectedArtifact && !isLoadingArtifacts ? (
+                    <Button type="button" variant="secondary" size="sm" onClick={openEditArtifactDialog}>
+                      Edit artifact
+                    </Button>
+                  ) : null}
+                </div>
+              }
             >
-              {selectedArtifact ? (
+              {isLoadingArtifacts ? (
+                <ArtifactDetailSkeleton />
+              ) : selectedArtifact ? (
                 <>
                   <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1072,7 +1255,7 @@ export const StudentArtifactRepository = () => {
         <button
           type="button"
           onClick={() => openAddArtifactDialog()}
-          className="fixed bottom-24 right-4 z-40 inline-flex h-12 items-center rounded-full bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] lg:hidden"
+          className="fixed bottom-24 right-4 z-40 inline-flex h-12 items-center rounded-full border border-[#0fd978]/40 bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] sm:bottom-6 sm:right-6"
         >
           <span className="inline-flex items-center gap-2">
             <PlusIcon className="h-4 w-4" />
@@ -1164,19 +1347,21 @@ export const StudentArtifactRepository = () => {
             <button
               type="button"
               aria-label="Close add artifact"
-              onClick={() => setShowAddArtifactDialog(false)}
+              onClick={closeArtifactDialog}
               className="absolute inset-0 bg-[#0a1f1a]/45"
             />
             <div className="absolute inset-x-0 bottom-0 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] p-4 pb-24 dark:border-slate-700 dark:bg-slate-900 lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:max-h-[90vh] lg:w-[min(44rem,calc(100vw-3rem))] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:p-6 lg:pb-6">
               <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
               <div className="mt-4 flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">Add New Artifact</p>
-                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">Capture evidence quickly. You can edit details later.</p>
+                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">{isEditingInDialog ? 'Edit Artifact' : 'Add New Artifact'}</p>
+                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">
+                    {isEditingInDialog ? 'Update this artifact using the same field set as create.' : 'Capture evidence quickly. You can edit details later.'}
+                  </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowAddArtifactDialog(false)}
+                  onClick={closeArtifactDialog}
                   className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400"
                 >
                   Close
@@ -1188,6 +1373,7 @@ export const StudentArtifactRepository = () => {
                 <select
                   value={draftType}
                   onChange={(event) => handleDraftTypeChange(event.target.value as ArtifactType)}
+                  disabled={isEditingInDialog}
                   className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                 >
                   {artifactTypes.map((type) => (
@@ -1605,11 +1791,11 @@ export const StudentArtifactRepository = () => {
                   disabled={isSubmittingArtifact}
                   className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSubmittingArtifact ? 'Saving...' : 'Save artifact'}
+                  {isSubmittingArtifact ? 'Saving...' : isEditingInDialog ? 'Save changes' : 'Save artifact'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAddArtifactDialog(false)}
+                  onClick={closeArtifactDialog}
                   className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Cancel

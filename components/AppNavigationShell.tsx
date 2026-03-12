@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFeatureFlags } from "@/components/FeatureFlagsProvider";
 import {
   getFirstReleasedStudentRoute,
@@ -22,6 +22,42 @@ type NavItem = {
   icon: ComponentType<{ className?: string }>;
   href: string;
   releaseKey?: StudentViewReleaseKey;
+};
+
+type StudentIdentity = {
+  displayName: string;
+  avatarUrl: string;
+};
+
+const asTrimmedString = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  return value.trim();
+};
+
+const resolveStudentDisplayName = (personalInfo: Record<string, unknown>): string => {
+  const firstName = asTrimmedString(personalInfo.first_name);
+  const lastName = asTrimmedString(personalInfo.last_name);
+  const fullName = asTrimmedString(personalInfo.full_name);
+  const email = asTrimmedString(personalInfo.email);
+
+  const derivedName = `${firstName} ${lastName}`.trim();
+  if (derivedName.length > 0) return derivedName;
+  if (fullName.length > 0) return fullName;
+  if (email.length > 0) return email.split("@")[0]?.trim() ?? "Student";
+  return "Student";
+};
+
+const toInitials = (value: string): string => {
+  const tokens = value
+    .split(/[\s@._-]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) return "ST";
+  const first = tokens[0]?.[0] ?? "";
+  const second = tokens[1]?.[0] ?? "";
+  const initials = `${first}${second}`.toUpperCase();
+  return initials.length > 0 ? initials : "ST";
 };
 
 const CandidateIcon = ({ className = "h-4 w-4" }: { className?: string }) => (
@@ -44,6 +80,14 @@ const InterviewPrepIcon = ({ className = "h-4 w-4" }: { className?: string }) =>
     <circle cx="16" cy="8" r="2.5" />
     <path d="M3.5 18a4.5 4.5 0 019 0" />
     <path d="M11.5 18a4.5 4.5 0 019 0" />
+  </svg>
+);
+
+const CompassIcon = ({ className = "h-4 w-4" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M14.9 9.1l-2 5.8-5.8 2 2-5.8 5.8-2z" />
+    <circle cx="12" cy="12" r="1.2" />
   </svg>
 );
 
@@ -120,18 +164,26 @@ const studentNavItems: NavItem[] = [
   },
   {
     key: "student-guidance",
-    label: "AI Guidance",
-    shortLabel: "Guidance",
-    description: "Get coaching with rationale and next steps",
+    label: "Capability Coach",
+    shortLabel: "Coach",
+    description: "Preview upcoming coaching and prepare your profile",
     icon: GuidanceIcon,
-    href: "/student/guidance",
-    releaseKey: "aiGuidance"
+    href: "/student/capability-coach"
+  },
+  {
+    key: "student-targets",
+    label: "My Positions & Employers",
+    shortLabel: "Targets",
+    description: "Set role and employer targets for coaching",
+    icon: CompassIcon,
+    href: "/student/targets",
+    releaseKey: "manageRoles"
   },
   {
     key: "student-interview-prep",
     label: "Interview Prep",
     shortLabel: "Interview",
-    description: "Practice AI-adapted employer questions and review session scoring",
+    description: "Practice role-based interview responses and review prior sessions",
     icon: InterviewPrepIcon,
     href: "/student/interview-prep",
     releaseKey: "interviewPrep"
@@ -140,10 +192,9 @@ const studentNavItems: NavItem[] = [
     key: "student-profile",
     label: "Profile",
     shortLabel: "Profile",
-    description: "Manage profile details, links, and focus targets",
+    description: "Manage profile details, links, and avatar",
     icon: CandidateIcon,
-    href: "/student/profile",
-    releaseKey: "manageRoles"
+    href: "/student/profile"
   }
 ];
 
@@ -176,6 +227,7 @@ export function AppNavigationShell({
   const pathname = usePathname();
   const router = useRouter();
   const { studentViewReleaseFlags } = useFeatureFlags();
+  const [studentIdentity, setStudentIdentity] = useState<StudentIdentity | null>(null);
   const baseNavItems = getNavItems(audience);
   const navItems =
     audience !== "student"
@@ -183,9 +235,12 @@ export function AppNavigationShell({
       : baseNavItems.filter((item) => (item.releaseKey ? studentViewReleaseFlags[item.releaseKey] : true));
   const mobileBottomNavItems =
     audience === "student"
-      ? baseNavItems.filter((item) => item.key === "student-artifacts" || item.key === "student-profile")
+      ? navItems.filter(
+          (item) => item.key === "student-artifacts" || item.key === "student-targets" || item.key === "student-profile"
+        )
       : [];
-  const showMobileBottomNav = audience === "student" && mobileBottomNavItems.length > 0;
+  const showMobileBottomNav = showNavigation && audience === "student" && mobileBottomNavItems.length > 0;
+  const studentInitials = useMemo(() => toInitials(studentIdentity?.displayName ?? "Student"), [studentIdentity?.displayName]);
 
   useEffect(() => {
     if (audience !== "student") return;
@@ -193,6 +248,43 @@ export function AppNavigationShell({
 
     router.replace(getFirstReleasedStudentRoute(studentViewReleaseFlags));
   }, [audience, pathname, router, studentViewReleaseFlags]);
+
+  useEffect(() => {
+    if (audience !== "student") return;
+
+    let isActive = true;
+    const loadStudentIdentity = async () => {
+      try {
+        const response = await fetch("/api/student/profile", { cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as
+          | { ok: true; data?: { profile?: { personal_info?: Record<string, unknown> } } }
+          | { ok: false; error?: string }
+          | null;
+
+        if (!isActive || !response.ok || !payload || !payload.ok) return;
+
+        const personalInfo = payload.data?.profile?.personal_info ?? {};
+        setStudentIdentity({
+          displayName: resolveStudentDisplayName(personalInfo),
+          avatarUrl: asTrimmedString(personalInfo.avatar_url) || asTrimmedString(personalInfo.avatarUrl)
+        });
+      } catch {
+        if (!isActive) return;
+        setStudentIdentity((current) => current ?? { displayName: "Student", avatarUrl: "" });
+      }
+    };
+
+    const handleStudentProfileUpdated = () => {
+      void loadStudentIdentity();
+    };
+
+    void loadStudentIdentity();
+    window.addEventListener("student-profile-updated", handleStudentProfileUpdated);
+    return () => {
+      isActive = false;
+      window.removeEventListener("student-profile-updated", handleStudentProfileUpdated);
+    };
+  }, [audience]);
 
   return (
     <div className="min-h-[100dvh] w-full overflow-x-clip bg-[#f1f7f4] text-[#0a1f1a] dark:bg-slate-950 dark:text-slate-100">
@@ -206,6 +298,29 @@ export function AppNavigationShell({
             >
               stu.
             </Link>
+
+            {audience === "student" ? (
+              <div className="mt-4 rounded-2xl border border-[#d4e1db] bg-[#f6fbf8] p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e5f2ec] text-xs font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
+                    {studentIdentity?.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={studentIdentity.avatarUrl} alt="Student avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      studentInitials
+                    )}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#5a776e] dark:text-slate-400">
+                      Student
+                    </span>
+                    <span className="block truncate text-sm font-semibold text-[#173f33] dark:text-slate-100">
+                      {studentIdentity?.displayName ?? "Student"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ) : null}
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-[#446258] dark:text-slate-400">
               {audience === "admin" ? "Admin Navigation" : `${audience === "recruiter" ? "Recruiter" : "Student"} Navigation`}
@@ -275,27 +390,28 @@ export function AppNavigationShell({
           className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[999] w-[calc(100%-1rem)] max-w-sm -translate-x-1/2 lg:hidden"
         >
           <div className="rounded-2xl border border-[#cad9d2] bg-white/85 p-1.5 shadow-[0_12px_36px_-20px_rgba(10,31,26,0.65)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/85">
-            <div className="grid grid-cols-2 gap-1">
-            {mobileBottomNavItems.map((item) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
-              const mobileLabel = item.key === "student-profile" ? "Profile" : item.shortLabel;
+            <div className={`grid gap-1 ${mobileBottomNavItems.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+              {mobileBottomNavItems.map((item) => {
+                const isActive = pathname === item.href;
+                const Icon = item.icon;
+                const mobileLabel =
+                  item.key === "student-profile" ? "Profile" : item.key === "student-targets" ? "Targets" : item.shortLabel;
 
-              return (
-                <Link
-                  key={`mobile-bottom-${item.key}`}
-                  href={item.href}
-                  className={`inline-flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                    isActive
-                      ? "border-[#0fd978] bg-[#e9fef3] text-[#12392f] dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-100"
-                      : "border-transparent bg-transparent text-[#46655b] hover:bg-[#f3f9f6] dark:text-slate-300 dark:hover:bg-slate-800/80"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {mobileLabel}
-                </Link>
-              );
-            })}
+                return (
+                  <Link
+                    key={`mobile-bottom-${item.key}`}
+                    href={item.href}
+                    className={`inline-flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                      isActive
+                        ? "border-[#0fd978] bg-[#e9fef3] text-[#12392f] dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-100"
+                        : "border-transparent bg-transparent text-[#46655b] hover:bg-[#f3f9f6] dark:text-slate-300 dark:hover:bg-slate-800/80"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {mobileLabel}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         </nav>

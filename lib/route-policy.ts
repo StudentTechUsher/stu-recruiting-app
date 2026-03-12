@@ -39,9 +39,11 @@ export const routePersonaPolicy: Record<string, Persona[]> = {
   "/recruiter/outcomes": ["recruiter", "org_admin"],
   "/student/onboarding": ["student"],
   "/student/profile": ["student"],
+  "/student/targets": ["student"],
   "/student/dashboard": ["student"],
   "/student/artifacts": ["student"],
   "/student/pathway": ["student"],
+  "/student/capability-coach": ["student"],
   "/student/guidance": ["student"],
   "/student/interview-prep": ["student"]
 };

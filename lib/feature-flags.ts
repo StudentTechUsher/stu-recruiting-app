@@ -10,10 +10,10 @@ export type StudentViewReleaseFlags = Record<StudentViewReleaseKey, boolean>;
 
 export const defaultStudentViewReleaseFlags: StudentViewReleaseFlags = {
   artifactRepository: true,
-  capabilityDashboard: false,
+  capabilityDashboard: true,
   pathwayPlanner: false,
   aiGuidance: false,
-  interviewPrep: false,
+  interviewPrep: true,
   manageRoles: true
 };
 
@@ -36,12 +36,12 @@ export const studentViewReleaseRouteMap: Record<StudentViewReleaseKey, string> =
   pathwayPlanner: "/student/pathway",
   aiGuidance: "/student/guidance",
   interviewPrep: "/student/interview-prep",
-  manageRoles: "/student/profile"
+  manageRoles: "/student/targets"
 };
 
 const studentRouteReleaseOrder: StudentViewReleaseKey[] = [
-  "artifactRepository",
   "capabilityDashboard",
+  "artifactRepository",
   "pathwayPlanner",
   "aiGuidance",
   "interviewPrep",

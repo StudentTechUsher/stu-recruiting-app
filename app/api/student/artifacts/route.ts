@@ -36,6 +36,42 @@ const allowedArtifactTypes = new Set([
   "test"
 ]);
 
+const editableArtifactDataKeys = new Set([
+  "title",
+  "source",
+  "description",
+  "type",
+  "tags",
+  "link",
+  "attachment_name",
+  "reference_contact_name",
+  "reference_contact_role",
+  "reference_quote",
+  "course_code",
+  "course_title",
+  "instructor_name",
+  "impact_description",
+  "project_demo_link",
+  "company",
+  "job_title",
+  "start_date",
+  "end_date",
+  "mentor_email",
+  "impact_statement",
+  "certification_name",
+  "awarded_date",
+  "organization",
+  "position",
+  "performance",
+  "deliverable_note",
+  "research_title",
+  "research_area",
+  "advisor",
+  "assessment_name",
+  "provider",
+  "score"
+]);
+
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -52,6 +88,36 @@ const toFileRefs = (value: unknown): Record<string, unknown>[] => {
   return value
     .filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry))
     .map((entry) => entry as Record<string, unknown>);
+};
+
+const toEditableArtifactUpdatesRecord = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+
+  const updates: Record<string, unknown> = {};
+  const source = value as Record<string, unknown>;
+
+  for (const [key, rawValue] of Object.entries(source)) {
+    if (!editableArtifactDataKeys.has(key)) continue;
+
+    if (rawValue === null) {
+      updates[key] = null;
+      continue;
+    }
+
+    if (typeof rawValue === "string") {
+      const normalized = rawValue.trim();
+      updates[key] = normalized.length > 0 ? normalized : null;
+      continue;
+    }
+
+    if (key === "tags" && Array.isArray(rawValue)) {
+      const tags = rawValue.filter((item) => typeof item === "string").map((item) => (item as string).trim()).filter(Boolean);
+      updates[key] = tags.length > 0 ? tags : null;
+      continue;
+    }
+  }
+
+  return updates;
 };
 
 export async function GET() {
@@ -144,5 +210,71 @@ export async function POST(req: Request) {
     status: "created",
     session_source: context.session_source ?? "none",
     created_at: now
+  });
+}
+
+export async function PATCH(req: Request) {
+  const context = await getAuthContext();
+  if (!hasPersona(context, ["student"])) return forbidden();
+
+  const supabase = await getSupabaseServerClient();
+  if (!supabase) return badRequest("supabase_unavailable");
+
+  const payload = await req.json().catch(() => null);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return badRequest("invalid_payload");
+
+  const payloadRecord = payload as Record<string, unknown>;
+  const artifactId = toTrimmedString(payloadRecord.artifact_id);
+  if (!artifactId) return badRequest("artifact_id_required");
+
+  const updates = toEditableArtifactUpdatesRecord(payloadRecord.updates);
+  if (Object.keys(updates).length === 0) return badRequest("artifact_updates_required");
+  const fileRefs = toFileRefs(payloadRecord.file_refs);
+
+  const { data: existing, error: existingError } = await supabase
+    .from("artifacts")
+    .select("artifact_id, artifact_data")
+    .eq("artifact_id", artifactId)
+    .eq("profile_id", context.user_id)
+    .single<{ artifact_id: string; artifact_data: unknown }>();
+
+  if (existingError || !existing) return badRequest("artifact_not_found");
+
+  const nextArtifactData = {
+    ...toRecord(existing.artifact_data)
+  };
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null) {
+      delete nextArtifactData[key];
+    } else {
+      nextArtifactData[key] = value;
+    }
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    artifact_data: nextArtifactData
+  };
+  if (fileRefs.length > 0) {
+    updatePayload.file_refs = fileRefs;
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("artifacts")
+    .update(updatePayload)
+    .eq("artifact_id", artifactId)
+    .eq("profile_id", context.user_id)
+    .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
+    .single<ArtifactRow>();
+
+  if (updateError || !updated) return badRequest("artifact_update_failed");
+
+  return ok({
+    resource: "artifacts",
+    artifact: {
+      ...updated
+    },
+    status: "updated",
+    session_source: context.session_source ?? "none"
   });
 }

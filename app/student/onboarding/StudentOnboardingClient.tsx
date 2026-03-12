@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { AppNavigationShell } from "@/components/AppNavigationShell";
 import { StudentOnboardingSignup } from "@/components/mock/StudentOnboardingSignup/StudentOnboardingSignup";
 
 export function StudentOnboardingClient({
@@ -34,15 +33,13 @@ export function StudentOnboardingClient({
   };
 
   return (
-    <AppNavigationShell audience="student" showNavigation={false}>
-      <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
-        <StudentOnboardingSignup
-          onComplete={completeOnboarding}
-          defaultCampusEmail={defaultCampusEmail}
-          focusCompanyOptions={focusCompanyOptions}
-          focusRoleOptions={focusRoleOptions}
-        />
-      </main>
-    </AppNavigationShell>
+    <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
+      <StudentOnboardingSignup
+        onComplete={completeOnboarding}
+        defaultCampusEmail={defaultCampusEmail}
+        focusCompanyOptions={focusCompanyOptions}
+        focusRoleOptions={focusRoleOptions}
+      />
+    </main>
   );
 }

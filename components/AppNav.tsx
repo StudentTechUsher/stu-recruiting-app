@@ -15,12 +15,14 @@ const navGroups = [
     label: "Student",
     items: [
       ["Onboarding", "/student/onboarding"],
+      ["My Positions & Employers", "/student/targets"],
+      ["Interview Prep", "/student/interview-prep"],
       ["Profile", "/student/profile"],
       ["Dashboard", "/student/dashboard"],
       ["Artifacts", "/student/artifacts"],
       ["Pathway", "/student/pathway"],
-      ["Guidance", "/student/guidance"],
-      ["Interview Prep", "/student/interview-prep"]
+      ["Capability Coach", "/student/capability-coach"],
+      ["Guidance", "/student/guidance"]
     ]
   },
   {
