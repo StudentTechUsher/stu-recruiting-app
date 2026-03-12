@@ -11,8 +11,8 @@ export type StudentViewReleaseFlags = Record<StudentViewReleaseKey, boolean>;
 export const defaultStudentViewReleaseFlags: StudentViewReleaseFlags = {
   artifactRepository: true,
   capabilityDashboard: true,
-  pathwayPlanner: false,
-  aiGuidance: false,
+  pathwayPlanner: true,
+  aiGuidance: true,
   interviewPrep: true,
   manageRoles: true
 };
@@ -25,9 +25,9 @@ export type StudentOnboardingPreviewFlagKey =
 export type StudentOnboardingPreviewFlags = Record<StudentOnboardingPreviewFlagKey, boolean>;
 
 export const defaultStudentOnboardingPreviewFlags: StudentOnboardingPreviewFlags = {
-  aiGuidancePanelPreview: false,
-  personalizedPathwayPreview: false,
-  nextStudentViewsEnabledPreview: false
+  aiGuidancePanelPreview: true,
+  personalizedPathwayPreview: true,
+  nextStudentViewsEnabledPreview: true
 };
 
 export const studentViewReleaseRouteMap: Record<StudentViewReleaseKey, string> = {
