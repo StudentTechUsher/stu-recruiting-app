@@ -1,10 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type StudentMagicLinkLoginScreenProps = {
   sessionCheckEnabled: boolean;
+};
+type MagicLinkResponse = {
+  ok: boolean;
+  error?: string;
+  details?: string;
+  throttled?: boolean;
+  retryAfterSeconds?: number;
+};
+
+const DEFAULT_RETRY_AFTER_SECONDS = 60;
+
+const parseRetryAfterSeconds = (response: Response, data: MagicLinkResponse | null) => {
+  if (typeof data?.retryAfterSeconds === "number" && Number.isFinite(data.retryAfterSeconds) && data.retryAfterSeconds > 0) {
+    return Math.floor(data.retryAfterSeconds);
+  }
+
+  const retryAfterHeader = response.headers.get("retry-after");
+  if (retryAfterHeader) {
+    const parsed = Number.parseInt(retryAfterHeader, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return DEFAULT_RETRY_AFTER_SECONDS;
 };
 
 export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagicLinkLoginScreenProps) {
@@ -12,15 +37,36 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [lastRequestedEmail, setLastRequestedEmail] = useState("");
+  const normalizedEmail = email.trim().toLowerCase();
+  const isCooldownActive = cooldownSeconds > 0 && normalizedEmail !== "" && normalizedEmail === lastRequestedEmail;
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+
+    const intervalId = window.setInterval(() => {
+      setCooldownSeconds((current) => (current <= 1 ? 0 : current - 1));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [cooldownSeconds]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isCooldownActive) {
+      setError(null);
+      setNotice(`A sign-in link was requested recently. Wait ${cooldownSeconds} seconds, then try again.`);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setNotice(null);
 
     try {
       const normalizedEmail = email.trim();
+      const normalizedEmailKey = normalizedEmail.toLowerCase();
       const response = await fetch("/api/auth/login/student", {
         method: "POST",
         headers: {
@@ -29,10 +75,9 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
         body: JSON.stringify({ email: normalizedEmail })
       });
 
-      const data = (await response.json().catch(() => null)) as
-        | { ok: boolean; error?: string; details?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as MagicLinkResponse | null;
       const errorCode = data?.error;
+      const retryAfterSeconds = parseRetryAfterSeconds(response, data);
 
       if (!response.ok || !data?.ok) {
         if (errorCode === "invalid_email") {
@@ -45,8 +90,10 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
           setError("Supabase email auth is disabled. Enable Email provider in Supabase Auth settings.");
         } else if (errorCode === "invalid_magic_link_redirect") {
           setError("Magic-link redirect URL is not allowed in Supabase. Check your Auth redirect URL settings.");
-        } else if (errorCode === "magic_link_rate_limited") {
-          setError("Too many attempts. Wait a minute, then request a new magic link.");
+        } else if (errorCode === "magic_link_rate_limited" || response.status === 429) {
+          setLastRequestedEmail(normalizedEmailKey);
+          setCooldownSeconds(retryAfterSeconds);
+          setNotice(`A sign-in link was requested recently. Wait ${retryAfterSeconds} seconds, then try again.`);
         } else if (errorCode === "magic_link_send_failed" && data?.details) {
           setError(`Unable to send magic link. ${data.details}`);
         } else {
@@ -55,7 +102,13 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
         return;
       }
 
-      setNotice("Magic link sent. Check your inbox and open the sign-in link.");
+      setLastRequestedEmail(normalizedEmailKey);
+      setCooldownSeconds(retryAfterSeconds);
+      if (data.throttled) {
+        setNotice(`A sign-in link was requested recently. Wait ${retryAfterSeconds} seconds, then try again.`);
+      } else {
+        setNotice("Magic link sent. Check your inbox and open the sign-in link.");
+      }
     } catch {
       setError("Unable to send magic link.");
     } finally {
@@ -86,10 +139,10 @@ export function StudentMagicLinkLoginScreen({ sessionCheckEnabled }: StudentMagi
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || isCooldownActive}
             className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "Sending link..." : "Send magic link"}
+            {loading ? "Sending link..." : isCooldownActive ? `Wait ${cooldownSeconds}s` : "Send magic link"}
           </button>
         </form>
 

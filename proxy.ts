@@ -7,6 +7,7 @@ import { resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { getHomeRouteForPersona, getOnboardingRouteForPersona } from "@/lib/session-routing";
 import { getSupabaseConfig } from "@/lib/supabase/config";
+import { clearSupabaseAuthCookies, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -61,8 +62,28 @@ export async function proxy(request: NextRequest) {
     }
   });
 
-  const { data, error } = await supabase.auth.getUser();
-  const user = data.user;
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
+  let error: unknown = null;
+
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+    error = result.error;
+  } catch (thrownError) {
+    error = thrownError;
+  }
+
+  const hasStaleRefreshToken = isRefreshTokenNotFoundError(error);
+  const toLoginRedirect = () => {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    const redirectResponse = NextResponse.redirect(url);
+    if (hasStaleRefreshToken) {
+      clearSupabaseAuthCookies(request.cookies.getAll(), redirectResponse);
+    }
+    return redirectResponse;
+  };
+
   const profile = user ? await getProfileByUserId(supabase, user.id) : null;
   const persona = user ? resolvePersonaFromProfileOrUser(profile?.role, user) : null;
   const postAuthRoute = persona
@@ -83,9 +104,7 @@ export async function proxy(request: NextRequest) {
       url.pathname = postAuthRoute;
       return NextResponse.redirect(url);
     }
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return toLoginRedirect();
   }
 
   if (pathname === "/login") {
@@ -98,9 +117,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (error || !user || !persona) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return toLoginRedirect();
   }
 
   if (!isOnboarded && onboardingRoute && !isOnboardingRoute && !isApiPath) {

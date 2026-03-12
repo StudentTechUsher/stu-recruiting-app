@@ -6,6 +6,7 @@ import { resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
 import { getHomeRouteForPersona } from "@/lib/session-routing";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
+import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -13,6 +14,19 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6)
 });
+
+const safeSignOut = async (supabase: { auth: { signOut: () => Promise<{ error: unknown }> } }) => {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error && !isRefreshTokenNotFoundError(error)) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isRefreshTokenNotFoundError(error)) {
+      throw error;
+    }
+  }
+};
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
@@ -52,11 +66,11 @@ export async function POST(req: Request) {
   const profile = await getProfileByUserId(supabase, data.user.id);
   const persona = resolvePersonaFromProfileOrUser(profile?.role, data.user);
   if (!persona) {
-    await supabase.auth.signOut();
+    await safeSignOut(supabase);
     return NextResponse.json({ ok: false, error: "role_unassigned" }, { status: 403 });
   }
   if (persona === "student") {
-    await supabase.auth.signOut();
+    await safeSignOut(supabase);
     return NextResponse.json({ ok: false, error: "use_student_magic_link" }, { status: 403 });
   }
 

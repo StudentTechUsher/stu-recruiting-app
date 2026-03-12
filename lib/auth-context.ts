@@ -4,6 +4,7 @@ import { isSessionCheckEnabled } from "@/lib/session-flags";
 import { resolveAssignmentsFromUser, resolveOrgIdFromUser, resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfileByUserId } from "@/lib/auth/profile";
+import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 
 const parsePersonaFromHeader = (value: string | null): Persona => {
   if (!value) return "student";
@@ -154,10 +155,23 @@ export async function getAuthContext(): Promise<AuthContext> {
   const supabase = await getSupabaseServerClient();
   if (!supabase) return toUnauthenticatedContext();
 
-  const { data, error } = await supabase.auth.getUser();
-  const user = data.user;
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
+  let error: unknown = null;
 
-  if (error || !user) return toUnauthenticatedContext();
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+    error = result.error;
+  } catch (thrownError) {
+    error = thrownError;
+  }
+
+  if (error || !user) {
+    if (!isRefreshTokenNotFoundError(error)) {
+      console.error("auth_context_get_user_failed", { message: error instanceof Error ? error.message : String(error) });
+    }
+    return toUnauthenticatedContext();
+  }
 
   const sessionUser: SessionUserSnapshot = {
     id: user.id,

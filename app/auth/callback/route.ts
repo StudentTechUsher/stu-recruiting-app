@@ -7,6 +7,7 @@ import { resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
+import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -16,6 +17,19 @@ const toLoginRedirect = (requestUrl: string, errorCode: string) => {
   const loginUrl = new URL("/login", requestUrl);
   loginUrl.searchParams.set("error", errorCode);
   return loginUrl;
+};
+
+const safeSignOut = async (supabase: { auth: { signOut: () => Promise<{ error: unknown }> } }) => {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error && !isRefreshTokenNotFoundError(error)) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isRefreshTokenNotFoundError(error)) {
+      throw error;
+    }
+  }
 };
 
 export async function GET(req: Request) {
@@ -64,8 +78,17 @@ export async function GET(req: Request) {
     return NextResponse.redirect(toLoginRedirect(req.url, "invalid_magic_link"), 303);
   }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  const user = userData.user ?? userFromAuthFlow;
+  let user: { id: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> } | null =
+    userFromAuthFlow;
+  let userError: unknown = null;
+
+  try {
+    const userResult = await supabase.auth.getUser();
+    user = userResult.data.user ?? userFromAuthFlow;
+    userError = userResult.error;
+  } catch (error) {
+    userError = error;
+  }
 
   if (userError || !user) {
     return NextResponse.redirect(toLoginRedirect(req.url, "invalid_magic_link"), 303);
@@ -75,7 +98,7 @@ export async function GET(req: Request) {
   const persona = resolvePersonaFromProfileOrUser(profile?.role, user);
 
   if (!persona) {
-    await supabase.auth.signOut();
+    await safeSignOut(supabase);
     const response = NextResponse.redirect(toLoginRedirect(req.url, "role_unassigned"), 303);
     cookieAccumulator.apply(response);
     return response;

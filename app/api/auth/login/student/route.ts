@@ -4,12 +4,14 @@ import { z } from "zod";
 import { getSupabaseConfig, getAuthAppUrl } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { isAllowedStudentEmail } from "@/lib/auth/student-email-policy";
+import { consumeMagicLinkThrottle } from "@/lib/auth/magic-link-throttle";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
 const magicLinkSchema = z.object({
   email: z.string().email()
 });
+const MAGIC_LINK_RETRY_AFTER_SECONDS = 60;
 
 const getCallbackUrl = (req: Request) => {
   const explicit = getAuthAppUrl();
@@ -34,6 +36,19 @@ export async function POST(req: Request) {
 
   if (!isAllowedStudentEmail(parsed.data.email)) {
     return NextResponse.json({ ok: false, error: "invalid_student_email_domain" }, { status: 400 });
+  }
+
+  const throttleResult = consumeMagicLinkThrottle({ email: parsed.data.email, request: req });
+  if (throttleResult.throttled) {
+    const response = NextResponse.json({
+      ok: true,
+      throttled: true,
+      retryAfterSeconds: throttleResult.retryAfterSeconds
+    });
+    response.headers.set("retry-after", String(throttleResult.retryAfterSeconds));
+    response.headers.set("x-stu-login-email", parsed.data.email);
+    response.headers.set("x-stu-persona", "student");
+    return response;
   }
 
   const config = getSupabaseConfig();
@@ -70,6 +85,23 @@ export async function POST(req: Request) {
     const status = typeof error.status === "number" ? error.status : 400;
     const errorMessage = typeof error.message === "string" ? error.message : "unknown_supabase_error";
     const errorCode = inferMagicLinkErrorCode(errorMessage);
+
+    if (errorCode === "magic_link_rate_limited" || status === 429) {
+      console.warn("student_magic_link_rate_limited", {
+        status,
+        message: errorMessage
+      });
+
+      const response = NextResponse.json({
+        ok: true,
+        throttled: true,
+        retryAfterSeconds: MAGIC_LINK_RETRY_AFTER_SECONDS
+      });
+      response.headers.set("retry-after", String(MAGIC_LINK_RETRY_AFTER_SECONDS));
+      response.headers.set("x-stu-login-email", parsed.data.email);
+      response.headers.set("x-stu-persona", "student");
+      return response;
+    }
 
     console.error("student_magic_link_send_failed", {
       errorCode,
