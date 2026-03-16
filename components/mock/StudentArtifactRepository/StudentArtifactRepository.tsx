@@ -197,6 +197,7 @@ const artifactTypeToneClass: Record<ArtifactType, string> = {
 };
 
 const minArtifactsSkeletonMs = 350;
+const artifactIntroTourStorageKey = 'stu_artifact_intro_seen_v1';
 
 const tagToneClass: Record<ArtifactTag, string> = {
   'Technical depth': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
@@ -442,6 +443,7 @@ export const StudentArtifactRepository = () => {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [showMobileDetailSheet, setShowMobileDetailSheet] = useState(false);
   const [showAddArtifactDialog, setShowAddArtifactDialog] = useState(false);
+  const [showArtifactIntroTour, setShowArtifactIntroTour] = useState(false);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmittingArtifact, setIsSubmittingArtifact] = useState(false);
@@ -477,7 +479,7 @@ export const StudentArtifactRepository = () => {
     return Math.max(...signalCoverage.map((item) => item.count), 1);
   }, [signalCoverage]);
 
-  const showFirstArtifactTour = !isLoadingArtifacts && artifacts.length === 0;
+  const showFirstArtifactTour = !isLoadingArtifacts && artifacts.length === 0 && !showArtifactIntroTour;
 
   const loadArtifacts = useCallback(async () => {
     const loadStartedAt = Date.now();
@@ -546,6 +548,27 @@ export const StudentArtifactRepository = () => {
     setShowAddArtifactDialog(true);
   };
 
+  const dismissArtifactIntroTour = () => {
+    setShowArtifactIntroTour(false);
+    try {
+      window.localStorage.setItem(artifactIntroTourStorageKey, '1');
+    } catch {
+      // ignore storage access failures (private mode / sandboxed contexts)
+    }
+
+    const nextUrl = new URL(window.location.href);
+    if (nextUrl.searchParams.has('tour')) {
+      nextUrl.searchParams.delete('tour');
+      const search = nextUrl.searchParams.toString();
+      window.history.replaceState({}, '', `${nextUrl.pathname}${search.length > 0 ? `?${search}` : ''}${nextUrl.hash}`);
+    }
+  };
+
+  const startFirstArtifactTour = () => {
+    dismissArtifactIntroTour();
+    openAddArtifactDialog();
+  };
+
   const openEditArtifactDialog = () => {
     if (!selectedArtifact) return;
 
@@ -574,6 +597,26 @@ export const StudentArtifactRepository = () => {
     }
     setShowAddArtifactDialog(true);
   }, [searchParams, showAddArtifactDialog]);
+
+  useEffect(() => {
+    if (isLoadingArtifacts) return;
+
+    const introParam = searchParams.get('tour');
+    const forceShowFromQuery = introParam === 'artifacts' || introParam === 'artifact-intro';
+    const hasNoArtifacts = artifacts.length === 0;
+
+    if (!forceShowFromQuery && !hasNoArtifacts) return;
+
+    let hasSeenIntroTour = false;
+    try {
+      hasSeenIntroTour = window.localStorage.getItem(artifactIntroTourStorageKey) === '1';
+    } catch {
+      hasSeenIntroTour = false;
+    }
+
+    if (hasSeenIntroTour && !forceShowFromQuery) return;
+    setShowArtifactIntroTour(true);
+  }, [artifacts.length, isLoadingArtifacts, searchParams]);
 
   const updateDraftField = <K extends keyof DraftArtifactForm>(key: K, value: DraftArtifactForm[K]) => {
     setDraftData((current) => ({
@@ -909,6 +952,27 @@ export const StudentArtifactRepository = () => {
             </p>
           </div>
         </div>
+
+        {showArtifactIntroTour ? (
+          <div className="mt-4 rounded-2xl border border-[#bfe0d1] bg-[#ecfaf3] p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+            <p className="text-sm font-semibold text-[#1b4a3a] dark:text-emerald-100">First-time tour</p>
+            <p className="mt-1 text-xs text-[#3e6658] dark:text-slate-300">
+              Artifacts are proof of your work, like projects, coursework, internships, and certifications. Adding one artifact now helps
+              coaching personalize your next steps.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" size="sm" onClick={() => startFirstArtifactTour()}>
+                <span className="inline-flex items-center gap-2">
+                  <PlusIcon />
+                  <span>Create first artifact</span>
+                </span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => dismissArtifactIntroTour()}>
+                Skip for now
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {showFirstArtifactTour ? (
           <div className="mt-4 rounded-2xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] p-4 dark:border-slate-700 dark:bg-slate-900">

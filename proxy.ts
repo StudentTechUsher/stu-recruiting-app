@@ -8,6 +8,7 @@ import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { getHomeRouteForPersona, getOnboardingRouteForPersona } from "@/lib/session-routing";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { clearSupabaseAuthCookies, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import { devIdentityCookieName, resolveDevPersonaFromCookieValue } from "@/lib/dev-auth";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -34,6 +35,37 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   if (isPublicPath(pathname)) {
+    return NextResponse.next();
+  }
+
+  const devPersona = resolveDevPersonaFromCookieValue(request.cookies.get(devIdentityCookieName)?.value);
+  if (devPersona) {
+    const homeRoute = getHomeRouteForPersona(devPersona);
+
+    if (pathname === "/" || pathname === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = homeRoute;
+      return NextResponse.redirect(url);
+    }
+
+    if (pathname.startsWith("/admin") && devPersona !== "org_admin") {
+      const url = request.nextUrl.clone();
+      url.pathname = homeRoute;
+      return NextResponse.redirect(url);
+    }
+
+    if (pathname.startsWith("/recruiter") && devPersona === "student") {
+      const url = request.nextUrl.clone();
+      url.pathname = homeRoute;
+      return NextResponse.redirect(url);
+    }
+
+    if (pathname.startsWith("/student") && devPersona !== "student") {
+      const url = request.nextUrl.clone();
+      url.pathname = homeRoute;
+      return NextResponse.redirect(url);
+    }
+
     return NextResponse.next();
   }
 

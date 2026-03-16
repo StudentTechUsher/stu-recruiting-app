@@ -5,6 +5,7 @@ import { resolveAssignmentsFromUser, resolveOrgIdFromUser, resolvePersonaFromPro
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfileByUserId } from "@/lib/auth/profile";
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import { buildDevAuthContext, resolveDevPersonaFromCookieHeader } from "@/lib/dev-auth";
 
 const parsePersonaFromHeader = (value: string | null): Persona => {
   if (!value) return "student";
@@ -142,6 +143,10 @@ const createMockSessionData = (h: Headers): { sessionUser: SessionUserSnapshot; 
 
 export async function getAuthContext(): Promise<AuthContext> {
   const h = await headers();
+  const devPersona = resolveDevPersonaFromCookieHeader(h.get("cookie"));
+  if (devPersona) {
+    return buildDevAuthContext(devPersona);
+  }
 
   if (!isSessionCheckEnabled()) {
     const mockSessionData = createMockSessionData(h);

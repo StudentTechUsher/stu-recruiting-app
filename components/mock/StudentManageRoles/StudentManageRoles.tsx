@@ -620,7 +620,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
               ? "Manage profile and focus targets"
               : showProfileSections
                 ? "Manage profile"
-                : "My Positions and My Employers"}
+                : "My Positions & Employers"}
           </h2>
           <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
             {showProfileSections && showTargetSections

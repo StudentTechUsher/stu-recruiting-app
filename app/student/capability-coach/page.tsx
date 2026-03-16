@@ -37,7 +37,7 @@ export default function StudentCapabilityCoachPage() {
               You can sign up today and still see what this coaching experience will unlock once it launches.
             </p>
             <Badge className="mt-3 bg-[#fff5e8] text-[#7a4d20] ring-1 ring-[#f2c896] dark:bg-amber-500/20 dark:text-amber-100 dark:ring-amber-400/35">
-              Early access preview
+              Coming soon
             </Badge>
           </header>
 

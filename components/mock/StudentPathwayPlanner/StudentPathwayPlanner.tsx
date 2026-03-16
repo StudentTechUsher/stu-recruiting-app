@@ -386,9 +386,14 @@ export const StudentPathwayPlanner = ({
               many milestones while keeping progression clear.
             </p>
           </div>
-          <Badge className="bg-[#e9fef3] text-[#0a402d] ring-1 ring-[#b8e9ce] dark:bg-emerald-500/20 dark:text-emerald-100 dark:ring-emerald-400/35">
-            Target: {targetProfileLabel}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-amber-100 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/20 dark:text-amber-100 dark:ring-amber-400/35">
+              Coming Soon
+            </Badge>
+            <Badge className="bg-[#e9fef3] text-[#0a402d] ring-1 ring-[#b8e9ce] dark:bg-emerald-500/20 dark:text-emerald-100 dark:ring-emerald-400/35">
+              Target: {targetProfileLabel}
+            </Badge>
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">

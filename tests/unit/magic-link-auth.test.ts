@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { POST } from "@/app/api/auth/login/student/route";
+import { POST as studentMagicLinkPost } from "@/app/api/auth/login/student/route";
+import { POST as recruiterMagicLinkPost } from "@/app/api/auth/login/recruiter/route";
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 import { resetMagicLinkThrottleStateForTests } from "@/lib/auth/magic-link-throttle";
 
@@ -23,8 +24,8 @@ vi.mock("@/lib/auth/student-email-policy", () => ({
   isAllowedStudentEmail: isAllowedStudentEmailMock
 }));
 
-const makeRequest = (body: unknown) =>
-  new Request("https://app.example.com/api/auth/login/student", {
+const makeRequest = (pathname: string, body: unknown) =>
+  new Request(`https://app.example.com${pathname}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -53,13 +54,14 @@ describe("student magic-link auth route", () => {
       auth: { signInWithOtp: signInWithOtpMock }
     });
 
-    const response = await POST(makeRequest({ email: "student@asu.edu" }));
+    const response = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@asu.edu" }));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(response.headers.get("x-stu-login-email")).toBe("student@asu.edu");
     expect(response.headers.get("x-stu-persona")).toBe("student");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=student");
     expect(signInWithOtpMock).toHaveBeenCalledWith({
       email: "student@asu.edu",
       options: {
@@ -76,7 +78,7 @@ describe("student magic-link auth route", () => {
   it("returns 400 when student email domain policy fails", async () => {
     isAllowedStudentEmailMock.mockReturnValue(false);
 
-    const response = await POST(makeRequest({ email: "student@gmail.com" }));
+    const response = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@gmail.com" }));
     const payload = await response.json();
 
     expect(response.status).toBe(400);
@@ -87,7 +89,7 @@ describe("student magic-link auth route", () => {
   it("returns 500 when Supabase config is missing", async () => {
     getSupabaseConfigMock.mockReturnValue(null);
 
-    const response = await POST(makeRequest({ email: "student@asu.edu" }));
+    const response = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@asu.edu" }));
     const payload = await response.json();
 
     expect(response.status).toBe(500);
@@ -106,7 +108,7 @@ describe("student magic-link auth route", () => {
       auth: { signInWithOtp: signInWithOtpMock }
     });
 
-    const response = await POST(makeRequest({ email: "student@asu.edu" }));
+    const response = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@asu.edu" }));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -114,6 +116,7 @@ describe("student magic-link auth route", () => {
     expect(response.headers.get("retry-after")).toBe("60");
     expect(response.headers.get("x-stu-login-email")).toBe("student@asu.edu");
     expect(response.headers.get("x-stu-persona")).toBe("student");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=student");
   });
 
   it("blocks immediate repeat requests for the same email before calling Supabase", async () => {
@@ -122,9 +125,9 @@ describe("student magic-link auth route", () => {
       auth: { signInWithOtp: signInWithOtpMock }
     });
 
-    const firstResponse = await POST(makeRequest({ email: "student@asu.edu" }));
+    const firstResponse = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@asu.edu" }));
     const firstPayload = await firstResponse.json();
-    const secondResponse = await POST(makeRequest({ email: "student@asu.edu" }));
+    const secondResponse = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@asu.edu" }));
     const secondPayload = await secondResponse.json();
 
     expect(firstResponse.status).toBe(200);
@@ -133,6 +136,72 @@ describe("student magic-link auth route", () => {
     expect(secondPayload).toEqual({ ok: true, throttled: true, retryAfterSeconds: 60 });
     expect(secondResponse.headers.get("retry-after")).toBe("60");
     expect(signInWithOtpMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recruiter magic-link auth route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    resetMagicLinkThrottleStateForTests();
+    getSupabaseConfigMock.mockReturnValue({
+      url: "https://supabase.example.com",
+      anonKey: "anon-key"
+    });
+    getAuthAppUrlMock.mockReturnValue("https://app.example.com");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends a recruiter magic link with recruiter metadata", async () => {
+    const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
+    createServerClientMock.mockReturnValue({
+      auth: { signInWithOtp: signInWithOtpMock }
+    });
+
+    const response = await recruiterMagicLinkPost(makeRequest("/api/auth/login/recruiter", { email: "recruiter@company.com" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true });
+    expect(response.headers.get("x-stu-login-email")).toBe("recruiter@company.com");
+    expect(response.headers.get("x-stu-persona")).toBe("recruiter");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=recruiter");
+    expect(signInWithOtpMock).toHaveBeenCalledWith({
+      email: "recruiter@company.com",
+      options: {
+        emailRedirectTo: "https://app.example.com/auth/callback",
+        shouldCreateUser: true,
+        data: {
+          role: "recruiter",
+          stu_persona: "recruiter"
+        }
+      }
+    });
+  });
+
+  it("handles recruiter OTP throttling as guided success with retry metadata", async () => {
+    const signInWithOtpMock = vi.fn().mockResolvedValue({
+      error: {
+        status: 429,
+        message: "Too many requests"
+      }
+    });
+    createServerClientMock.mockReturnValue({
+      auth: { signInWithOtp: signInWithOtpMock }
+    });
+
+    const response = await recruiterMagicLinkPost(makeRequest("/api/auth/login/recruiter", { email: "recruiter@company.com" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, throttled: true, retryAfterSeconds: 60 });
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(response.headers.get("x-stu-login-email")).toBe("recruiter@company.com");
+    expect(response.headers.get("x-stu-persona")).toBe("recruiter");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=recruiter");
   });
 });
 

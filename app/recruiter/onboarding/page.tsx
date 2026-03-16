@@ -1,5 +1,5 @@
-import { RoleOnboardingScreen } from "@/components/auth/RoleOnboardingScreen";
+import { RecruiterApprovalPendingScreen } from "@/components/auth/RecruiterApprovalPendingScreen";
 
 export default function RecruiterOnboardingPage() {
-  return <RoleOnboardingScreen audience="recruiter" />;
+  return <RecruiterApprovalPendingScreen />;
 }

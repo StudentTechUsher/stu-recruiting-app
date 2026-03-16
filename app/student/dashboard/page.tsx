@@ -336,52 +336,104 @@ export default function StudentDashboardPage() {
                 )))}
           </div>
 
-          <Card
-            className="mt-6 bg-white/95 p-5 dark:bg-slate-900/80"
-            header={
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Personal Career Coach</h3>
-                <Badge className="bg-[#fff5e8] text-[#7a4d20] dark:bg-amber-500/20 dark:text-amber-100">Draft recommendations</Badge>
-              </div>
-            }
-          >
-            {isLoading ? (
-              <div aria-hidden="true" className="grid gap-3 md:grid-cols-3">
-                {Array.from({ length: 3 }).map((_, index) => (
-                  <div key={`coach-draft-skeleton-${index}`} className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className={`${skeletonBlockClassName} h-3 w-2/3`} />
-                    <div className={`${skeletonBlockClassName} mt-2 h-3 w-full`} />
-                    <div className={`${skeletonBlockClassName} mt-2 h-3 w-5/6`} />
-                    <div className={`${skeletonBlockClassName} mt-3 h-8 w-40`} />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-3">
-                {draftCoachRecommendations.map((recommendation) => (
-                  <div
-                    key={recommendation.id}
-                    className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900"
-                  >
-                    <p className="text-sm font-semibold text-[#14372d] dark:text-slate-100">{recommendation.title}</p>
-                    <p className="mt-2 text-xs leading-5 text-[#4c6860] dark:text-slate-300">{recommendation.detail}</p>
-                    {recommendation.href && recommendation.cta ? (
-                      <div className="mt-3">
-                        <Link
-                          href={recommendation.href}
-                          className="inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          {recommendation.cta}
-                        </Link>
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Personal Career Coach</h3>
+                  <Badge className="bg-[#fff5e8] text-[#7a4d20] dark:bg-amber-500/20 dark:text-amber-100">Draft recommendations</Badge>
+                </div>
+              }
+            >
+              {isLoading ? (
+                <div aria-hidden="true" className="flex flex-col gap-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={`coach-draft-skeleton-${index}`} className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
+                      <div className={`${skeletonBlockClassName} h-3 w-2/3`} />
+                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-full`} />
+                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-5/6`} />
+                      <div className={`${skeletonBlockClassName} mt-3 h-8 w-40`} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {draftCoachRecommendations.map((recommendation) => (
+                    <div
+                      key={recommendation.id}
+                      className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900 flex flex-col justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-[#14372d] dark:text-slate-100">{recommendation.title}</p>
+                        <p className="mt-2 text-xs leading-5 text-[#4c6860] dark:text-slate-300">{recommendation.detail}</p>
                       </div>
-                    ) : (
-                      <p className="mt-3 text-[11px] font-medium text-[#4c6860] dark:text-slate-300">No action needed right now.</p>
-                    )}
+                      {recommendation.href && recommendation.cta ? (
+                        <div className="mt-3">
+                          <Link
+                            href={recommendation.href}
+                            className="inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                          >
+                            {recommendation.cta}
+                          </Link>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-[11px] font-medium text-[#4c6860] dark:text-slate-300">No action needed right now.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Employer Spotlight</h3>
+                  <Badge className="bg-[#eef6ff] text-[#1f4f7a] dark:bg-sky-500/20 dark:text-sky-100">Sponsored matches</Badge>
+                </div>
+              }
+            >
+              <div className="flex flex-col gap-3">
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-4 dark:border-slate-700 dark:bg-slate-900 flex items-start gap-4">
+                  <div className="h-12 w-12 shrink-0 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xl dark:bg-indigo-900/50 dark:text-indigo-300">
+                    A
                   </div>
-                ))}
+                  <div className="flex-1">
+                    <h4 className="text-base font-semibold text-[#14372d] dark:text-slate-100">Acme Corp</h4>
+                    <p className="mt-1 text-xs leading-5 text-[#4c6860] dark:text-slate-300">
+                      Your capability vector is a high match for their Software Engineering roles. They are actively seeking students with your artifact signal.
+                    </p>
+                    <Link
+                      href="#"
+                      className="mt-3 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      View Openings
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-4 dark:border-slate-700 dark:bg-slate-900 flex items-start gap-4">
+                  <div className="h-12 w-12 shrink-0 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xl dark:bg-emerald-900/50 dark:text-emerald-300">
+                    G
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-base font-semibold text-[#14372d] dark:text-slate-100">Global Tech</h4>
+                    <p className="mt-1 text-xs leading-5 text-[#4c6860] dark:text-slate-300">
+                      Based on your recent Systems Architecture artifacts, you are a glowing match for our Summer Internship program.
+                    </p>
+                    <Link
+                      href="#"
+                      className="mt-3 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Learn More
+                    </Link>
+                  </div>
+                </div>
               </div>
-            )}
-          </Card>
+            </Card>
+          </div>
 
           {loadError ? (
             <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">

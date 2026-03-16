@@ -3,6 +3,8 @@ import { createServerClient } from "@supabase/ssr";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import { clearDevIdentityCookie } from "@/lib/dev-auth";
+import { clearMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -21,6 +23,8 @@ const safeSignOut = async (supabase: { auth: { signOut: () => Promise<{ error: u
 
 export async function POST(req: Request) {
   const response = NextResponse.redirect(new URL("/", req.url), 303);
+  clearDevIdentityCookie(response);
+  clearMagicLinkIntentCookie(response);
   const config = getSupabaseConfig();
 
   if (!config) {

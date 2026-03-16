@@ -3,14 +3,19 @@ import { expect, test } from "@playwright/test";
 test("login route renders chooser", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByText("Choose sign-in path")).toBeVisible();
-  await expect(page.getByText("Students use magic links.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Magic link" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Password login" })).toBeVisible();
+  await expect(page.getByText("Students and recruiters use magic links.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Student magic link/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Recruiter magic link/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Org admin password/i })).toHaveCount(0);
 });
 
-test("student and staff login routes render", async ({ page }) => {
+test("student, recruiter, and staff login routes render", async ({ page }) => {
   await page.goto("/login/student");
   await expect(page.getByText("Get magic link")).toBeVisible();
+
+  await page.goto("/login/recruiter");
+  await expect(page.getByText("Get magic link")).toBeVisible();
+  await expect(page.getByText("Use your work email to request recruiter access.", { exact: false })).toBeVisible();
 
   await page.goto("/login/staff");
   await expect(page.getByText("Password login")).toBeVisible();

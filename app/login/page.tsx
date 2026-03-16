@@ -5,6 +5,7 @@ import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { buildMagicLinkCallbackRedirectPath } from "@/lib/auth/magic-link-forward";
 import { isSessionCheckEnabled } from "@/lib/session-flags";
+import { isDevIdentitiesEnabled } from "@/lib/dev-auth";
 
 export default async function LoginPage({
   searchParams
@@ -18,6 +19,7 @@ export default async function LoginPage({
   }
 
   const sessionCheckEnabled = isSessionCheckEnabled();
+  const devIdentitiesEnabled = isDevIdentitiesEnabled();
 
   if (sessionCheckEnabled) {
     const context = await getAuthContext();
@@ -32,5 +34,5 @@ export default async function LoginPage({
     }
   }
 
-  return <LoginChooserScreen sessionCheckEnabled={sessionCheckEnabled} />;
+  return <LoginChooserScreen devIdentitiesEnabled={devIdentitiesEnabled} />;
 }

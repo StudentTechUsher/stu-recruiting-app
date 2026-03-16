@@ -12,6 +12,7 @@ import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import type { AuthContext, SessionUserSnapshot } from "@/lib/route-policy";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
+import { buildDevAuthContext, resolveDevPersonaFromCookieHeader } from "@/lib/dev-auth";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -37,6 +38,15 @@ const resolveRequestAuthContext = async (req: Request): Promise<{
   const applyCookies = (response: NextResponse) => {
     cookieAccumulator.apply(response);
   };
+
+  const devPersona = resolveDevPersonaFromCookieHeader(req.headers.get("cookie"));
+  if (devPersona) {
+    return {
+      context: buildDevAuthContext(devPersona),
+      supabase: null,
+      applyCookies
+    };
+  }
 
   if (!config) {
     return {
@@ -172,8 +182,22 @@ export async function POST(req: Request) {
     onboardingCompletedAt: now,
     studentViewReleaseFlags: defaultStudentViewReleaseFlags
   });
+  const redirectPathWithTour =
+    context.persona === "student" && redirectPath.startsWith("/student/artifacts")
+      ? (() => {
+          const next = new URL(redirectPath, "http://local");
+          next.searchParams.set("tour", "artifacts");
+          return `${next.pathname}${next.search}`;
+        })()
+      : redirectPath;
 
-  const response = NextResponse.json({ ok: true, resource: "onboarding_complete", context, redirectPath, completedAt: now });
+  const response = NextResponse.json({
+    ok: true,
+    resource: "onboarding_complete",
+    context,
+    redirectPath: redirectPathWithTour,
+    completedAt: now
+  });
   applyCookies(response);
   return response;
 }

@@ -8,6 +8,11 @@ import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import {
+  clearMagicLinkIntentCookie,
+  getMagicLinkLoginPathForPersona,
+  resolveMagicLinkIntentFromCookieHeader
+} from "@/lib/auth/magic-link-intent";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -96,11 +101,23 @@ export async function GET(req: Request) {
 
   const profile = await getProfileByUserId(supabase, user.id);
   const persona = resolvePersonaFromProfileOrUser(profile?.role, user);
+  const intendedPersona = resolveMagicLinkIntentFromCookieHeader(req.headers.get("cookie"));
 
   if (!persona) {
     await safeSignOut(supabase);
     const response = NextResponse.redirect(toLoginRedirect(req.url, "role_unassigned"), 303);
     cookieAccumulator.apply(response);
+    clearMagicLinkIntentCookie(response);
+    return response;
+  }
+
+  if (intendedPersona && intendedPersona !== persona) {
+    await safeSignOut(supabase);
+    const mismatchLoginUrl = new URL(getMagicLinkLoginPathForPersona(intendedPersona), req.url);
+    mismatchLoginUrl.searchParams.set("error", "wrong_account_type");
+    const response = NextResponse.redirect(mismatchLoginUrl, 303);
+    cookieAccumulator.apply(response);
+    clearMagicLinkIntentCookie(response);
     return response;
   }
 
@@ -112,5 +129,6 @@ export async function GET(req: Request) {
 
   const response = NextResponse.redirect(new URL(redirectPath, req.url), 303);
   cookieAccumulator.apply(response);
+  clearMagicLinkIntentCookie(response);
   return response;
 }

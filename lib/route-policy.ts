@@ -31,7 +31,7 @@ export type AuthContext = {
 export const routePersonaPolicy: Record<string, Persona[]> = {
   "/admin/onboarding": ["org_admin"],
   "/admin/recruiter-assignments": ["org_admin"],
-  "/recruiter/onboarding": ["recruiter", "org_admin"],
+  "/recruiter/onboarding": ["recruiter"],
   "/recruiter/capability-models": ["recruiter", "org_admin"],
   "/recruiter/pipeline": ["recruiter", "org_admin"],
   "/recruiter/off-platform-scoring": ["recruiter", "org_admin"],

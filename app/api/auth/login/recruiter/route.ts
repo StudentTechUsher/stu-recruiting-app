@@ -1,0 +1,126 @@
+import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { z } from "zod";
+import { getSupabaseConfig, getAuthAppUrl } from "@/lib/supabase/config";
+import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
+import { consumeMagicLinkThrottle } from "@/lib/auth/magic-link-throttle";
+import { applyMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
+
+type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
+
+const magicLinkSchema = z.object({
+  email: z.string().email()
+});
+const MAGIC_LINK_RETRY_AFTER_SECONDS = 60;
+
+const getCallbackUrl = (req: Request) => {
+  const explicit = getAuthAppUrl();
+  const origin = explicit ?? new URL(req.url).origin;
+  return new URL("/auth/callback", origin).toString();
+};
+
+const inferMagicLinkErrorCode = (message: string) => {
+  if (/email logins are disabled/i.test(message)) return "email_auth_disabled";
+  if (/redirect|redirect_to|emailredirectto|uri|url/i.test(message)) return "invalid_magic_link_redirect";
+  if (/rate limit|too many requests/i.test(message)) return "magic_link_rate_limited";
+  return "magic_link_send_failed";
+};
+
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => null);
+  const parsed = magicLinkSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 });
+  }
+
+  const throttleResult = consumeMagicLinkThrottle({ email: parsed.data.email, request: req });
+  if (throttleResult.throttled) {
+    const response = NextResponse.json({
+      ok: true,
+      throttled: true,
+      retryAfterSeconds: throttleResult.retryAfterSeconds
+    });
+    response.headers.set("retry-after", String(throttleResult.retryAfterSeconds));
+    response.headers.set("x-stu-login-email", parsed.data.email);
+    response.headers.set("x-stu-persona", "recruiter");
+    applyMagicLinkIntentCookie(response, "recruiter");
+    return response;
+  }
+
+  const config = getSupabaseConfig();
+  if (!config) {
+    return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+  }
+
+  const cookieAccumulator = buildCookieAccumulator();
+
+  const supabase = createServerClient(config.url, config.anonKey, {
+    cookies: {
+      getAll() {
+        return parseRequestCookies(req.headers.get("cookie"));
+      },
+      setAll(cookiesToSet: SupabaseCookie[]) {
+        cookieAccumulator.push(cookiesToSet);
+      }
+    }
+  });
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email: parsed.data.email,
+    options: {
+      emailRedirectTo: getCallbackUrl(req),
+      shouldCreateUser: true,
+      data: {
+        role: "recruiter",
+        stu_persona: "recruiter"
+      }
+    }
+  });
+
+  if (error) {
+    const status = typeof error.status === "number" ? error.status : 400;
+    const errorMessage = typeof error.message === "string" ? error.message : "unknown_supabase_error";
+    const errorCode = inferMagicLinkErrorCode(errorMessage);
+
+    if (errorCode === "magic_link_rate_limited" || status === 429) {
+      console.warn("recruiter_magic_link_rate_limited", {
+        status,
+        message: errorMessage
+      });
+
+      const response = NextResponse.json({
+        ok: true,
+        throttled: true,
+        retryAfterSeconds: MAGIC_LINK_RETRY_AFTER_SECONDS
+      });
+      response.headers.set("retry-after", String(MAGIC_LINK_RETRY_AFTER_SECONDS));
+      response.headers.set("x-stu-login-email", parsed.data.email);
+      response.headers.set("x-stu-persona", "recruiter");
+      applyMagicLinkIntentCookie(response, "recruiter");
+      return response;
+    }
+
+    console.error("recruiter_magic_link_send_failed", {
+      errorCode,
+      status,
+      message: errorMessage
+    });
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: errorCode,
+        details: process.env.NODE_ENV === "development" ? errorMessage : undefined
+      },
+      { status }
+    );
+  }
+
+  const response = NextResponse.json({ ok: true });
+  cookieAccumulator.apply(response);
+  response.headers.set("x-stu-login-email", parsed.data.email);
+  response.headers.set("x-stu-persona", "recruiter");
+  applyMagicLinkIntentCookie(response, "recruiter");
+  return response;
+}

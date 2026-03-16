@@ -5,6 +5,7 @@ import { getSupabaseConfig, getAuthAppUrl } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { isAllowedStudentEmail } from "@/lib/auth/student-email-policy";
 import { consumeMagicLinkThrottle } from "@/lib/auth/magic-link-throttle";
+import { applyMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
     response.headers.set("retry-after", String(throttleResult.retryAfterSeconds));
     response.headers.set("x-stu-login-email", parsed.data.email);
     response.headers.set("x-stu-persona", "student");
+    applyMagicLinkIntentCookie(response, "student");
     return response;
   }
 
@@ -100,6 +102,7 @@ export async function POST(req: Request) {
       response.headers.set("retry-after", String(MAGIC_LINK_RETRY_AFTER_SECONDS));
       response.headers.set("x-stu-login-email", parsed.data.email);
       response.headers.set("x-stu-persona", "student");
+      applyMagicLinkIntentCookie(response, "student");
       return response;
     }
 
@@ -123,5 +126,6 @@ export async function POST(req: Request) {
   cookieAccumulator.apply(response);
   response.headers.set("x-stu-login-email", parsed.data.email);
   response.headers.set("x-stu-persona", "student");
+  applyMagicLinkIntentCookie(response, "student");
   return response;
 }

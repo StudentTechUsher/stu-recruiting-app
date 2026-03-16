@@ -1,6 +1,7 @@
 import { badRequest, forbidden, ok } from "@/lib/api-response";
 import { getAuthContext } from "@/lib/auth-context";
 import { hasPersona } from "@/lib/authorization";
+import { consumeAIFeatureQuota } from "@/lib/ai/feature-quota";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { extractTextFromPdfBuffer } from "@/lib/transcript/pdf-text";
 import { parseTranscriptTextWithOpenAI } from "@/lib/transcript/openai-parser";
@@ -68,6 +69,24 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
 
   if (!session || session.profile_id !== auth.user_id) return forbidden();
   if (session.status === "processing") return badRequest("transcript_parse_already_processing");
+
+  const quota = await consumeAIFeatureQuota({
+    userId: auth.user_id,
+    featureKey: "transcript_parse",
+    supabase
+  });
+  if (!quota.allowed) {
+    return Response.json(
+      {
+        ok: false,
+        error: "ai_feature_quota_exceeded",
+        feature: "transcript_parse",
+        remaining: quota.remaining,
+        max_uses: quota.maxUses
+      },
+      { status: 429 }
+    );
+  }
 
   await supabase
     .from("transcript_parse_sessions")

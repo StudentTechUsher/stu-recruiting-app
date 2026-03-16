@@ -35,6 +35,8 @@ export function StaffPasswordLoginScreen({ sessionCheckEnabled }: StaffPasswordL
           setError("Your account is valid but has no assigned Stu role. Contact an org admin.");
         } else if (data.error === "use_student_magic_link") {
           setError("Student accounts must use the magic-link sign-in flow.");
+        } else if (data.error === "use_recruiter_magic_link") {
+          setError("Recruiter accounts must use the recruiter magic-link sign-in flow.");
         } else if (data.error === "supabase_not_configured") {
           setError("Supabase auth is not configured for this environment.");
         } else {
@@ -55,9 +57,9 @@ export function StaffPasswordLoginScreen({ sessionCheckEnabled }: StaffPasswordL
   return (
     <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,#d7ffe8_0,#f4fbf7_45%,#f8fff9_100%)] px-4 py-12">
       <section className="w-full max-w-md rounded-[28px] border border-emerald-200 bg-white p-7 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.5)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Staff sign-in</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Org admin sign-in</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a]">Password login</h1>
-        <p className="mt-2 text-sm text-[#3c5f52]">Recruiters and org admins sign in with credentials.</p>
+        <p className="mt-2 text-sm text-[#3c5f52]">Org admin accounts continue using email and password.</p>
 
         <form className="mt-5 space-y-4" onSubmit={onSubmit}>
           <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
