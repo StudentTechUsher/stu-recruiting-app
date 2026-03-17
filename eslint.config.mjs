@@ -5,7 +5,14 @@ const config = [
   ...nextCoreWebVitals,
   ...nextTypeScript,
   {
-    ignores: ["node_modules/**", ".next/**", "playwright-report/**", "test-results/**", "next-env.d.ts"]
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "playwright-report/**",
+      "test-results/**",
+      "next-env.d.ts",
+      "supabase/functions/**"
+    ]
   }
 ];
 

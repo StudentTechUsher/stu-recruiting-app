@@ -5,6 +5,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 const ARTIFACT_BUCKET = "student-artifacts-private";
 const DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const allowedFileRefKinds = new Set(["artifact_supporting_file", "syllabus"]);
 const allowedExtensions = new Set([
   "pdf",
   "doc",
@@ -42,6 +43,12 @@ const getFileExtension = (fileName: string): string => {
   return parts.length > 1 ? parts[parts.length - 1] : "";
 };
 
+const toTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
 export async function POST(req: Request) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
@@ -52,6 +59,8 @@ export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   const uploaded = form?.get("file");
   if (!(uploaded instanceof File)) return badRequest("artifact_file_required");
+  const requestedKind = toTrimmedString(form?.get("kind"));
+  const fileRefKind = requestedKind && allowedFileRefKinds.has(requestedKind) ? requestedKind : "artifact_supporting_file";
 
   const fileName = uploaded.name || "artifact-file";
   const extension = getFileExtension(fileName);
@@ -72,7 +81,7 @@ export async function POST(req: Request) {
 
   const now = new Date().toISOString();
   const fileRef = {
-    kind: "artifact_supporting_file",
+    kind: fileRefKind,
     bucket: ARTIFACT_BUCKET,
     path: filePath,
     file_name: fileName,

@@ -1,7 +1,7 @@
 import { getAuthContext } from "@/lib/auth-context";
 import { hasPersona } from "@/lib/authorization";
 import { ok, badRequest, forbidden } from "@/lib/api-response";
-import { fetchGreenhousePipeline } from "@/lib/ats/greenhouse";
+import { fetchGreenhouseJobs } from "@/lib/ats/greenhouse";
 
 export async function GET(request: Request) {
   const context = await getAuthContext();
@@ -9,8 +9,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   try {
-    const result = await fetchGreenhousePipeline(context.org_id, {
-      jobId: searchParams.get("job_id") ?? undefined,
+    const result = await fetchGreenhouseJobs(context.org_id, {
       page: Number(searchParams.get("page") ?? 1),
     });
     return ok(result);

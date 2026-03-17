@@ -30,6 +30,7 @@ type TranscriptSessionRow = {
 
 const allowedArtifactTypes = new Set([
   "coursework",
+  "club",
   "project",
   "internship",
   "certification",
@@ -73,7 +74,10 @@ const editableArtifactDataKeys = new Set([
   "advisor",
   "assessment_name",
   "provider",
-  "score"
+  "score",
+  "verification_status",
+  "verification_method",
+  "verification_source"
 ]);
 
 const toRecord = (value: unknown): Record<string, unknown> => {
@@ -92,6 +96,45 @@ const toFileRefs = (value: unknown): Record<string, unknown>[] => {
   return value
     .filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry))
     .map((entry) => entry as Record<string, unknown>);
+};
+
+const hasCourseworkVerificationFile = (fileRefs: Record<string, unknown>[]): boolean => {
+  if (fileRefs.length === 0) return false;
+  return fileRefs.some((fileRef) => {
+    const kind = toTrimmedString(fileRef.kind);
+    return kind === "syllabus" || kind === "artifact_supporting_file";
+  });
+};
+
+const isTranscriptBackedCoursework = (artifactData: Record<string, unknown>): boolean => {
+  const parsedCourseId = toTrimmedString(artifactData.parsed_course_id);
+  if (parsedCourseId) return true;
+
+  const provenance = toRecord(artifactData.provenance);
+  return toTrimmedString(provenance.source) === "transcript_parse";
+};
+
+const withCourseworkVerificationMetadata = ({
+  artifactData,
+  transcriptBacked
+}: {
+  artifactData: Record<string, unknown>;
+  transcriptBacked: boolean;
+}): Record<string, unknown> => {
+  if (transcriptBacked) {
+    return {
+      ...artifactData,
+      verification_status: "verified",
+      verification_method: "transcript_parse"
+    };
+  }
+
+  return {
+    ...artifactData,
+    verification_status: "pending",
+    verification_method: "syllabus_upload",
+    verification_source: "manual_coursework_submission"
+  };
 };
 
 const toEditableArtifactUpdatesRecord = (value: unknown): Record<string, unknown> => {
@@ -202,6 +245,14 @@ export async function POST(req: Request) {
   if (!title || !source || !description) return badRequest("artifact_data_required_fields_missing");
 
   const fileRefs = toFileRefs(payloadRecord.file_refs);
+  const transcriptBackedCoursework = artifactType === "coursework" ? isTranscriptBackedCoursework(artifactData) : false;
+  if (artifactType === "coursework" && !transcriptBackedCoursework && !hasCourseworkVerificationFile(fileRefs)) {
+    return badRequest("coursework_syllabus_required");
+  }
+  const artifactDataToPersist =
+    artifactType === "coursework"
+      ? withCourseworkVerificationMetadata({ artifactData, transcriptBacked: transcriptBackedCoursework })
+      : artifactData;
   const now = new Date().toISOString();
 
   const { data: inserted, error } = await supabase
@@ -209,7 +260,7 @@ export async function POST(req: Request) {
     .insert({
       profile_id: context.user_id,
       artifact_type: artifactType,
-      artifact_data: artifactData,
+      artifact_data: artifactDataToPersist,
       file_refs: fileRefs
     })
     .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
@@ -248,14 +299,14 @@ export async function PATCH(req: Request) {
 
   const { data: existing, error: existingError } = await supabase
     .from("artifacts")
-    .select("artifact_id, artifact_data")
+    .select("artifact_id, artifact_type, artifact_data, file_refs")
     .eq("artifact_id", artifactId)
     .eq("profile_id", context.user_id)
-    .single<{ artifact_id: string; artifact_data: unknown }>();
+    .single<{ artifact_id: string; artifact_type: string; artifact_data: unknown; file_refs: unknown }>();
 
   if (existingError || !existing) return badRequest("artifact_not_found");
 
-  const nextArtifactData = {
+  let nextArtifactData = {
     ...toRecord(existing.artifact_data)
   };
 
@@ -265,6 +316,18 @@ export async function PATCH(req: Request) {
     } else {
       nextArtifactData[key] = value;
     }
+  }
+
+  const nextFileRefs = fileRefs.length > 0 ? fileRefs : toFileRefs(existing.file_refs);
+  if (existing.artifact_type === "coursework") {
+    const transcriptBackedCoursework = isTranscriptBackedCoursework(nextArtifactData);
+    if (!transcriptBackedCoursework && !hasCourseworkVerificationFile(nextFileRefs)) {
+      return badRequest("coursework_syllabus_required");
+    }
+    nextArtifactData = withCourseworkVerificationMetadata({
+      artifactData: nextArtifactData,
+      transcriptBacked: transcriptBackedCoursework
+    });
   }
 
   const updatePayload: Record<string, unknown> = {
@@ -290,6 +353,45 @@ export async function PATCH(req: Request) {
       ...updated
     },
     status: "updated",
+    session_source: context.session_source ?? "none"
+  });
+}
+
+export async function DELETE(req: Request) {
+  const context = await getAuthContext();
+  if (!hasPersona(context, ["student"])) return forbidden();
+
+  const supabase = await getSupabaseServerClient();
+  if (!supabase) return badRequest("supabase_unavailable");
+
+  const payload = await req.json().catch(() => null);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return badRequest("invalid_payload");
+
+  const payloadRecord = payload as Record<string, unknown>;
+  const artifactId = toTrimmedString(payloadRecord.artifact_id);
+  if (!artifactId) return badRequest("artifact_id_required");
+
+  const { data: existing, error: existingError } = await supabase
+    .from("artifacts")
+    .select("artifact_id")
+    .eq("artifact_id", artifactId)
+    .eq("profile_id", context.user_id)
+    .single<{ artifact_id: string }>();
+
+  if (existingError || !existing) return badRequest("artifact_not_found");
+
+  const { error: deleteError } = await supabase
+    .from("artifacts")
+    .delete()
+    .eq("artifact_id", artifactId)
+    .eq("profile_id", context.user_id);
+
+  if (deleteError) return badRequest("artifact_delete_failed");
+
+  return ok({
+    resource: "artifacts",
+    artifact_id: artifactId,
+    status: "deleted",
     session_source: context.session_source ?? "none"
   });
 }

@@ -21,3 +21,6 @@ coverage/
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# dev SQLite DB
+.greenhouse-dev.db

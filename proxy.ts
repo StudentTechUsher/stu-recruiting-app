@@ -24,7 +24,8 @@ const isPublicPath = (pathname: string) => {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/images") ||
     pathname === "/favicon.ico" ||
-    pathname.startsWith("/api/auth")
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/dev")
   );
 };
 

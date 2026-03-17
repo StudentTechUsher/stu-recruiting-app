@@ -1,11 +1,23 @@
 import { getAuthContext } from "@/lib/auth-context";
 import { badRequest, forbidden, ok } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
+import {
+  extractArtifactsFromGithub,
+  persistExtractedArtifacts,
+  type SupabaseClientLike,
+  upsertStudentExtractionMetadata
+} from "@/lib/artifacts/extraction";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+};
+
+const toTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 };
 
 export async function POST(req: Request) {
@@ -14,6 +26,7 @@ export async function POST(req: Request) {
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) return badRequest("supabase_unavailable");
+  const extractionSupabase = supabase as unknown as SupabaseClientLike;
 
   const payload = await req.json().catch(() => null);
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return badRequest("invalid_payload");
@@ -22,52 +35,96 @@ export async function POST(req: Request) {
   if (!githubUsername || typeof githubUsername !== "string") return badRequest("github_username_required");
 
   const usernameNormalized = githubUsername.trim();
+  const githubUrl = `https://github.com/${usernameNormalized}`;
+  const expectedStudentName =
+    toTrimmedString(context.profile?.personal_info?.full_name) ??
+    toTrimmedString(context.profile?.personal_info?.first_name) ??
+    null;
 
-  // Invoke the Supabase Edge Function to process the GitHub profile
-  const { data, error } = await supabase.functions.invoke("extract-github", {
-    body: {
-      profile_id: context.user_id,
-      github_username: usernameNormalized
-    }
-  });
-
-  if (error) {
-    console.error("Github extraction edge function failed:", error);
-    return badRequest("github_extraction_failed");
-  }
-
-  // Write source_extraction_log back into student_data
   const { data: studentRows } = await supabase
     .from("students")
     .select("student_data")
     .eq("profile_id", context.user_id)
     .limit(1);
+  const studentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
+  const profileLinks = toRecord(studentData.profile_links);
+  const linkedInProfileUrl = toTrimmedString(profileLinks.linkedin);
+  if (!linkedInProfileUrl) return badRequest("github_linkedin_profile_required");
 
-  const existingStudentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
-  const existingLog = toRecord(existingStudentData.source_extraction_log);
-
-  const updatedStudentData = {
-    ...existingStudentData,
-    source_extraction_log: {
-      ...existingLog,
-      github: {
-        last_extracted_at: new Date().toISOString(),
-        extracted_from: `https://github.com/${usernameNormalized}`,
-        artifact_count: Array.isArray((data as Record<string, unknown>)?.artifacts)
-          ? ((data as Record<string, unknown>).artifacts as unknown[]).length
-          : 0
+  try {
+    await upsertStudentExtractionMetadata({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      sourceKey: "github",
+      extractedFrom: githubUrl,
+      artifactCount: 0,
+      status: "extracting",
+      profileLinks: {
+        github: githubUrl
       }
+    });
+  } catch (metadataError) {
+    console.error("Github extraction start metadata update failed:", metadataError);
+  }
+
+  try {
+    const extractedArtifacts = await extractArtifactsFromGithub({
+      githubUsername: usernameNormalized,
+      expectedStudentName,
+      requiredLinkedinUrl: linkedInProfileUrl
+    });
+    const persistedArtifacts = await persistExtractedArtifacts({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      artifacts: extractedArtifacts
+    });
+
+    await upsertStudentExtractionMetadata({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      sourceKey: "github",
+      extractedFrom: githubUrl,
+      artifactCount: persistedArtifacts.length,
+      status: "succeeded",
+      profileLinks: {
+        github: githubUrl
+      }
+    });
+
+    return ok({
+      resource: "artifacts_extraction",
+      status: "success",
+      data: {
+        artifacts: persistedArtifacts
+      },
+      session_source: context.session_source ?? "none"
+    });
+  } catch (error) {
+    console.error("Github extraction failed:", error);
+    const errorMessage = error instanceof Error ? error.message : "github_extraction_failed";
+    try {
+      await upsertStudentExtractionMetadata({
+        supabase: extractionSupabase,
+        profileId: context.user_id,
+        sourceKey: "github",
+        extractedFrom: githubUrl,
+        artifactCount: 0,
+        status: "failed",
+        errorMessage,
+        profileLinks: {
+          github: githubUrl
+        }
+      });
+    } catch (metadataError) {
+      console.error("Github extraction failure metadata update failed:", metadataError);
     }
-  };
-
-  await supabase
-    .from("students")
-    .upsert({ profile_id: context.user_id, student_data: updatedStudentData }, { onConflict: "profile_id" });
-
-  return ok({
-    resource: "artifacts_extraction",
-    status: "success",
-    data,
-    session_source: context.session_source ?? "none"
-  });
+    if (
+      errorMessage === "github_linkedin_profile_required" ||
+      errorMessage === "github_linkedin_link_required" ||
+      errorMessage === "github_profile_name_mismatch"
+    ) {
+      return badRequest(errorMessage);
+    }
+    return badRequest("github_extraction_failed");
+  }
 }

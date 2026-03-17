@@ -1,11 +1,18 @@
 import { getAuthContext } from "@/lib/auth-context";
 import { badRequest, forbidden, ok } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
+import {
+  extractArtifactsFromLinkedin,
+  persistExtractedArtifacts,
+  type SupabaseClientLike,
+  upsertStudentExtractionMetadata
+} from "@/lib/artifacts/extraction";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
-const toRecord = (value: unknown): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
+const toTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 };
 
 export async function POST(req: Request) {
@@ -14,6 +21,7 @@ export async function POST(req: Request) {
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) return badRequest("supabase_unavailable");
+  const extractionSupabase = supabase as unknown as SupabaseClientLike;
 
   const payload = await req.json().catch(() => null);
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return badRequest("invalid_payload");
@@ -22,52 +30,80 @@ export async function POST(req: Request) {
   if (!profileUrl || typeof profileUrl !== "string") return badRequest("profile_url_required");
 
   const urlNormalized = profileUrl.trim();
+  const expectedStudentName =
+    toTrimmedString(context.profile?.personal_info?.full_name) ??
+    toTrimmedString(context.profile?.personal_info?.first_name) ??
+    null;
 
-  // Invoke the Supabase Edge Function to process the LinkedIn or generic profile
-  const { data, error } = await supabase.functions.invoke("extract-profile", {
-    body: {
-      profile_id: context.user_id,
-      profile_url: urlNormalized
-    }
-  });
-
-  if (error) {
-    console.error("Profile extraction edge function failed:", error);
-    return badRequest("profile_extraction_failed");
+  try {
+    await upsertStudentExtractionMetadata({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      sourceKey: "linkedin",
+      extractedFrom: urlNormalized,
+      artifactCount: 0,
+      status: "extracting",
+      profileLinks: {
+        linkedin: urlNormalized
+      }
+    });
+  } catch (metadataError) {
+    console.error("LinkedIn extraction start metadata update failed:", metadataError);
   }
 
-  // Write source_extraction_log back into student_data
-  const { data: studentRows } = await supabase
-    .from("students")
-    .select("student_data")
-    .eq("profile_id", context.user_id)
-    .limit(1);
+  try {
+    const extractedArtifacts = await extractArtifactsFromLinkedin({
+      profileUrl: urlNormalized,
+      expectedStudentName
+    });
+    const persistedArtifacts = await persistExtractedArtifacts({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      artifacts: extractedArtifacts
+    });
 
-  const existingStudentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
-  const existingLog = toRecord(existingStudentData.source_extraction_log);
-
-  const updatedStudentData = {
-    ...existingStudentData,
-    source_extraction_log: {
-      ...existingLog,
-      linkedin: {
-        last_extracted_at: new Date().toISOString(),
-        extracted_from: urlNormalized,
-        artifact_count: Array.isArray((data as Record<string, unknown>)?.artifacts)
-          ? ((data as Record<string, unknown>).artifacts as unknown[]).length
-          : 0
+    await upsertStudentExtractionMetadata({
+      supabase: extractionSupabase,
+      profileId: context.user_id,
+      sourceKey: "linkedin",
+      extractedFrom: urlNormalized,
+      artifactCount: persistedArtifacts.length,
+      status: "succeeded",
+      profileLinks: {
+        linkedin: urlNormalized
       }
+    });
+
+    return ok({
+      resource: "artifacts_extraction",
+      status: "success",
+      data: {
+        artifacts: persistedArtifacts
+      },
+      session_source: context.session_source ?? "none"
+    });
+  } catch (error) {
+    console.error("Profile extraction failed:", error);
+    const errorMessage = error instanceof Error ? error.message : "linkedin_extraction_failed";
+    try {
+      await upsertStudentExtractionMetadata({
+        supabase: extractionSupabase,
+        profileId: context.user_id,
+        sourceKey: "linkedin",
+        extractedFrom: urlNormalized,
+        artifactCount: 0,
+        status: "failed",
+        errorMessage,
+        profileLinks: {
+          linkedin: urlNormalized
+        }
+      });
+    } catch (metadataError) {
+      console.error("LinkedIn extraction failure metadata update failed:", metadataError);
     }
-  };
-
-  await supabase
-    .from("students")
-    .upsert({ profile_id: context.user_id, student_data: updatedStudentData }, { onConflict: "profile_id" });
-
-  return ok({
-    resource: "artifacts_extraction",
-    status: "success",
-    data,
-    session_source: context.session_source ?? "none"
-  });
+    if (errorMessage === "linkedin_profile_name_mismatch") {
+      return badRequest(errorMessage);
+    }
+    return badRequest("profile_extraction_failed");
+  }
 }
