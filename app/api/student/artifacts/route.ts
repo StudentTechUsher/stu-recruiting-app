@@ -12,6 +12,10 @@ type ArtifactRow = {
   updated_at: string;
 };
 
+type StudentDataRow = {
+  student_data: unknown;
+};
+
 type TranscriptSessionRow = {
   session_id: string;
   profile_id: string;
@@ -134,7 +138,7 @@ export async function GET() {
     });
   }
 
-  const [{ data }, { data: sessionRows }] = (await Promise.all([
+  const [{ data }, { data: sessionRows }, { data: studentRows }] = (await Promise.all([
     supabase
       .from("artifacts")
       .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
@@ -145,8 +149,13 @@ export async function GET() {
       .select("session_id, profile_id, transcript_artifact_id, status, parser_model, parse_summary, parse_error, created_at, updated_at")
       .eq("profile_id", context.user_id)
       .order("created_at", { ascending: false })
+      .limit(1),
+    supabase
+      .from("students")
+      .select("student_data")
+      .eq("profile_id", context.user_id)
       .limit(1)
-  ])) as [{ data: ArtifactRow[] | null }, { data: TranscriptSessionRow[] | null }];
+  ])) as [{ data: ArtifactRow[] | null }, { data: TranscriptSessionRow[] | null }, { data: StudentDataRow[] | null }];
 
   const artifacts = (data ?? []).map((row) => ({
     artifact_id: row.artifact_id,
@@ -157,11 +166,17 @@ export async function GET() {
     updated_at: row.updated_at
   }));
 
+  const studentData = toRecord((studentRows ?? [])[0]?.student_data);
+  const sourceExtractionLog = toRecord(studentData.source_extraction_log);
+  const profileLinks = toRecord(studentData.profile_links);
+
   return ok({
     resource: "artifacts",
     profile_id: context.user_id,
     artifacts,
     latest_transcript_session: sessionRows?.[0] ?? null,
+    source_extraction_log: sourceExtractionLog,
+    profile_links: profileLinks,
     session_source: context.session_source ?? "none"
   });
 }

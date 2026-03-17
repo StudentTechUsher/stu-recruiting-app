@@ -49,8 +49,24 @@ type ArtifactApiRow = {
   updated_at: string;
 };
 
+type SourceExtractionEntry = {
+  last_extracted_at?: string;
+  extracted_from?: string;
+  extracted_from_filename?: string;
+  artifact_count?: number;
+};
+
+type SourceExtractionLog = {
+  github?: SourceExtractionEntry;
+  linkedin?: SourceExtractionEntry;
+  resume?: SourceExtractionEntry;
+  transcript?: SourceExtractionEntry;
+};
+
 type ArtifactsApiPayload = {
   artifacts?: ArtifactApiRow[];
+  source_extraction_log?: SourceExtractionLog;
+  profile_links?: Record<string, string | null>;
 };
 
 type DraftArtifactForm = {
@@ -306,6 +322,24 @@ const PlusIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
   </svg>
 );
 
+const UploadIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
 const ArtifactCardSkeleton = () => (
   <div className="rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
     <div className="flex items-start justify-between gap-2">
@@ -436,6 +470,8 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
   return draft;
 };
 
+type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin';
+
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -449,6 +485,97 @@ export const StudentArtifactRepository = () => {
   const [isSubmittingArtifact, setIsSubmittingArtifact] = useState(false);
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
   const hasAutoOpenedFromQueryRef = useRef(false);
+
+  // Import from Source dialog
+  const [showImportSourceDialog, setShowImportSourceDialog] = useState(false);
+  const [importSourceType, setImportSourceType] = useState<ImportSourceType>('resume');
+  const [importGithubUsername, setImportGithubUsername] = useState('');
+  const [importLinkedinUrl, setImportLinkedinUrl] = useState('');
+  const [importFileName, setImportFileName] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Source extraction state
+  const [sourceExtractionLog, setSourceExtractionLog] = useState<SourceExtractionLog>({});
+  const [savedProfileLinks, setSavedProfileLinks] = useState<Record<string, string | null>>({});
+
+  const openImportSourceDialog = (type?: ImportSourceType) => {
+    const resolvedType = type ?? 'resume';
+    setImportSourceType(resolvedType);
+    // Pre-fill from saved profile links
+    const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : '';
+    const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : '';
+    // Extract username from full github URL if stored that way
+    const githubUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0] ?? savedGithub;
+    setImportGithubUsername(githubUsername);
+    setImportLinkedinUrl(savedLinkedin);
+    setImportFileName('');
+    setImportStatusMessage(null);
+    setShowImportSourceDialog(true);
+  };
+
+  const closeImportSourceDialog = () => {
+    setShowImportSourceDialog(false);
+    setImportStatusMessage(null);
+    if (importFileInputRef.current) importFileInputRef.current.value = '';
+  };
+
+  const submitImport = async () => {
+    if (isImporting) return;
+    setImportStatusMessage(null);
+    setIsImporting(true);
+
+    try {
+      if (importSourceType === 'resume' || importSourceType === 'transcript') {
+        const file = importFileInputRef.current?.files?.[0];
+        if (!file) {
+          setImportStatusMessage('Please select a file to upload.');
+          return;
+        }
+        const form = new FormData();
+        form.set('file', file);
+        const endpoint = importSourceType === 'resume' ? '/api/student/extract/resume' : '/api/student/extract/transcript';
+        const res = await fetch(endpoint, { method: 'POST', body: form });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload?.ok) throw new Error(payload?.error ?? 'extraction_failed');
+        setImportStatusMessage(`Successfully processed your ${importSourceType}. Review the extracted artifacts below.`);
+        await loadArtifacts();
+      } else if (importSourceType === 'github') {
+        if (!importGithubUsername.trim()) {
+          setImportStatusMessage('Please enter your GitHub username.');
+          return;
+        }
+        const res = await fetch('/api/student/extract/github', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ github_username: importGithubUsername.trim() })
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload?.ok) throw new Error(payload?.error ?? 'extraction_failed');
+        setImportStatusMessage('GitHub repos processed. New project artifacts have been added.');
+        await loadArtifacts();
+      } else if (importSourceType === 'linkedin') {
+        if (!importLinkedinUrl.trim()) {
+          setImportStatusMessage('Please enter your LinkedIn profile URL.');
+          return;
+        }
+        const res = await fetch('/api/student/extract/linkedin', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ profile_url: importLinkedinUrl.trim() })
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || !payload?.ok) throw new Error(payload?.error ?? 'extraction_failed');
+        setImportStatusMessage('LinkedIn profile processed. New artifacts have been added.');
+        await loadArtifacts();
+      }
+    } catch {
+      setImportStatusMessage('Something went wrong during import. Please try again.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   const [draftType, setDraftType] = useState<ArtifactType>('coursework');
   const [draftData, setDraftData] = useState<DraftArtifactForm>({ ...initialDraftArtifactForm });
@@ -502,6 +629,14 @@ export const StudentArtifactRepository = () => {
 
       setArtifacts(mapped);
       setSelectedArtifactId(mapped[0]?.id ?? null);
+
+      // Populate extraction log and profile links from API response
+      if (payload.data.source_extraction_log) {
+        setSourceExtractionLog(payload.data.source_extraction_log);
+      }
+      if (payload.data.profile_links) {
+        setSavedProfileLinks(payload.data.profile_links);
+      }
     } catch {
       setArtifacts([]);
       setSelectedArtifactId(null);
@@ -967,6 +1102,12 @@ export const StudentArtifactRepository = () => {
                   <span>Create first artifact</span>
                 </span>
               </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <UploadIcon />
+                  <span>Import from source</span>
+                </span>
+              </Button>
               <Button type="button" size="sm" variant="secondary" onClick={() => dismissArtifactIntroTour()}>
                 Skip for now
               </Button>
@@ -986,6 +1127,12 @@ export const StudentArtifactRepository = () => {
                 <span className="inline-flex items-center gap-2">
                   <PlusIcon />
                   <span>Add New Artifact</span>
+                </span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <UploadIcon />
+                  <span>Import from source</span>
                 </span>
               </Button>
             </div>
@@ -1040,23 +1187,36 @@ export const StudentArtifactRepository = () => {
         {!isLoadingArtifacts && artifacts.length > 0 ? (
           <div className="-mx-4 mt-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
             <div className="flex gap-2 pb-1" style={{ minWidth: 'max-content' }}>
-              {signalCoverage.map((signal) => (
-                <div
-                  key={`mobile-cov-${signal.tag}`}
-                  className="w-28 shrink-0 rounded-xl border border-[#d4e1db] bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <p className="truncate text-[9px] font-semibold leading-tight text-[#4f6a62] dark:text-slate-400">{signal.tag}</p>
-                    <span className="shrink-0 text-[10px] font-bold text-[#0f2b23] dark:text-slate-100">{signal.count}</span>
+              {signalCoverage.map((signal, idx) => {
+                const barColors = [
+                  '#12f987', // green
+                  '#38bdf8', // sky blue
+                  '#a78bfa', // violet
+                  '#fb923c', // orange
+                  '#f472b6', // pink
+                  '#34d399', // emerald
+                  '#facc15', // yellow
+                  '#60a5fa', // blue
+                ];
+                const color = barColors[idx % barColors.length];
+                return (
+                  <div
+                    key={`mobile-cov-${signal.tag}`}
+                    className="w-28 shrink-0 rounded-xl border border-[#d4e1db] bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="truncate text-[9px] font-semibold leading-tight text-[#4f6a62] dark:text-slate-400">{signal.tag}</p>
+                      <span className="shrink-0 text-[10px] font-bold text-[#0f2b23] dark:text-slate-100">{signal.count}</span>
+                    </div>
+                    <div className="mt-1.5 h-1 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: signal.count === 0 ? '0%' : `${Math.max((signal.count / maxTagCount) * 100, 14)}%`, backgroundColor: color }}
+                      />
+                    </div>
                   </div>
-                  <div className="mt-1.5 h-1 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                    <div
-                      className="h-full rounded-full bg-[#12f987]"
-                      style={{ width: signal.count === 0 ? '0%' : `${Math.max((signal.count / maxTagCount) * 100, 14)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -1290,13 +1450,94 @@ export const StudentArtifactRepository = () => {
 
             <Card
               className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Source documents</h3>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <UploadIcon className="h-3.5 w-3.5" />
+                      <span>Import</span>
+                    </span>
+                  </Button>
+                </div>
+              }
+            >
+              <p className="text-xs text-[#4f6a62] dark:text-slate-400">
+                Upload a resume or transcript, connect your GitHub, or link your LinkedIn profile to automatically generate artifacts.
+              </p>
+              <div className="mt-3 space-y-2">
+                {([
+                  { type: 'resume' as ImportSourceType, label: 'Resume', hint: '.pdf or .docx' },
+                  { type: 'transcript' as ImportSourceType, label: 'Transcript', hint: '.pdf or .docx' },
+                  { type: 'github' as ImportSourceType, label: 'GitHub', hint: 'Username' },
+                  { type: 'linkedin' as ImportSourceType, label: 'LinkedIn', hint: 'Profile URL' },
+                ] as const).map(({ type, label, hint }) => {
+                  const entry = sourceExtractionLog[type];
+                  const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null;
+                  const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null;
+
+                  // Detect staleness for URL-based sources
+                  let isStale = false;
+                  if (type === 'github' && entry?.extracted_from && savedGithub) {
+                    const savedUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
+                    const extractedUsername = entry.extracted_from.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
+                    isStale = savedUsername !== extractedUsername;
+                  }
+                  if (type === 'linkedin' && entry?.extracted_from && savedLinkedin) {
+                    isStale = entry.extracted_from !== savedLinkedin;
+                  }
+
+                  const lastSyncedLabel = entry?.last_extracted_at
+                    ? new Date(entry.last_extracted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : null;
+
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => { setImportSourceType(type); openImportSourceDialog(type); }}
+                      className="flex w-full items-center justify-between rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2.5 text-left transition-colors hover:border-[#a8c8bc] hover:bg-[#eef7f2] dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+                    >
+                      <span className="text-xs font-semibold text-[#1b3d35] dark:text-slate-200">{label}</span>
+                      <span className="flex items-center gap-1.5">
+                        {isStale ? (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                            Re-import
+                          </span>
+                        ) : lastSyncedLabel ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+                            Synced {lastSyncedLabel}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-[#5a7a70] dark:text-slate-400">{hint} ↗</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
               header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Signal coverage summary</h3>}
             >
               <div className="mb-3 inline-flex items-center rounded-full border border-[#f3cf8a] bg-[#fff7e7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#7a5300] dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200">
                 Coming Soon
               </div>
               <div className="space-y-2">
-                {signalCoverage.map((signal) => {
+                {signalCoverage.map((signal, idx) => {
+                  const barColors = [
+                    '#12f987', // green
+                    '#38bdf8', // sky blue
+                    '#a78bfa', // violet
+                    '#fb923c', // orange
+                    '#f472b6', // pink
+                    '#34d399', // emerald
+                    '#facc15', // yellow
+                    '#60a5fa', // blue
+                  ];
+                  const color = barColors[idx % barColors.length];
                   const width = Math.max((signal.count / maxTagCount) * 100, signal.count === 0 ? 0 : 14);
 
                   return (
@@ -1306,7 +1547,7 @@ export const StudentArtifactRepository = () => {
                         <span>{signal.count}</span>
                       </div>
                       <div className="h-2 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                        <div className="h-full rounded-full bg-[#12f987]" style={{ width: `${width}%` }} />
+                        <div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: color }} />
                       </div>
                     </div>
                   );
@@ -1402,6 +1643,139 @@ export const StudentArtifactRepository = () => {
                   </a>
                 ) : null}
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showImportSourceDialog ? (
+          <div className="fixed inset-0 z-[1200]">
+            <button
+              type="button"
+              aria-label="Close import dialog"
+              onClick={closeImportSourceDialog}
+              className="absolute inset-0 bg-[#0a1f1a]/45"
+            />
+            <div className="absolute inset-x-0 bottom-0 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] p-4 pb-24 dark:border-slate-700 dark:bg-slate-900 lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:max-h-[90vh] lg:w-[min(38rem,calc(100vw-3rem))] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:p-6 lg:pb-6">
+              <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
+              <div className="mt-4 flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">Import Artifacts from Source</p>
+                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">
+                    Upload a document or connect a profile to auto-generate artifact drafts.
+                  </p>
+                </div>
+                <button type="button" onClick={closeImportSourceDialog} className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400">Close</button>
+              </div>
+
+              {/* Source type tabs */}
+              <div className="mt-4 flex gap-1.5 rounded-xl border border-[#d4e1db] bg-[#f0f7f3] p-1 dark:border-slate-700 dark:bg-slate-800">
+                {(['resume', 'transcript', 'github', 'linkedin'] as ImportSourceType[]).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => { setImportSourceType(type); setImportStatusMessage(null); }}
+                    className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition-colors ${
+                      importSourceType === type
+                        ? 'bg-white text-[#0a1f1a] shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                        : 'text-[#4f6a62] hover:text-[#1b3d35] dark:text-slate-400 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {type === 'linkedin' ? 'LinkedIn' : type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4">
+                {(importSourceType === 'resume' || importSourceType === 'transcript') && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Upload your {importSourceType} as a <strong>.pdf</strong> or <strong>.docx</strong>.
+                      Our AI will extract relevant artifacts automatically.
+                    </p>
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => importFileInputRef.current?.click()}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#c4d5ce] bg-white px-4 py-6 text-sm font-semibold text-[#3a574e] transition-colors hover:border-[#8fbfb0] hover:bg-[#eef7f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500"
+                      >
+                        <UploadIcon className="h-5 w-5" />
+                        {importFileName ? importFileName : 'Click to select file'}
+                      </button>
+                      <input
+                        ref={importFileInputRef}
+                        type="file"
+                        accept=".pdf,.docx"
+                        className="sr-only"
+                        onChange={(e) => setImportFileName(e.target.files?.[0]?.name ?? '')}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {importSourceType === 'github' && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Enter your GitHub username. We&apos;ll scan your public repositories and generate <strong>Project</strong> artifacts for your strongest repos.
+                    </p>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      GitHub username
+                      <input
+                        value={importGithubUsername}
+                        onChange={(e) => setImportGithubUsername(e.target.value)}
+                        placeholder="octocat"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      Only public repos are scanned. Repos that appear to be tutorials, forks with no commits, or have no README are skipped.
+                    </p>
+                  </>
+                )}
+
+                {importSourceType === 'linkedin' && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Enter your public LinkedIn profile URL. We&apos;ll extract your experience and generate relevant artifacts.
+                    </p>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      Profile URL
+                      <input
+                        value={importLinkedinUrl}
+                        onChange={(e) => setImportLinkedinUrl(e.target.value)}
+                        placeholder="https://www.linkedin.com/in/yourname"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      Your profile must be publicly visible for this to work.
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void submitImport()}
+                  disabled={isImporting}
+                  className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isImporting ? 'Importing...' : 'Import artifacts'}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeImportSourceDialog}
+                  className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {importStatusMessage && (
+                <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  {importStatusMessage}
+                </p>
+              )}
             </div>
           </div>
         ) : null}
