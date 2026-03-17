@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as studentMagicLinkPost } from "@/app/api/auth/login/student/route";
 import { POST as recruiterMagicLinkPost } from "@/app/api/auth/login/recruiter/route";
-import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import { isExpectedUnauthenticatedAuthError, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 import { resetMagicLinkThrottleStateForTests } from "@/lib/auth/magic-link-throttle";
 
 const { createServerClientMock, getSupabaseConfigMock, getAuthAppUrlMock, isAllowedStudentEmailMock } = vi.hoisted(() => ({
@@ -216,5 +216,23 @@ describe("refresh token error detection", () => {
 
   it("does not classify unrelated errors as refresh token errors", () => {
     expect(isRefreshTokenNotFoundError({ code: "invalid_grant", message: "wrong password" })).toBe(false);
+  });
+});
+
+describe("expected unauthenticated auth error detection", () => {
+  it("detects auth_session_missing by code", () => {
+    expect(isExpectedUnauthenticatedAuthError({ code: "auth_session_missing" })).toBe(true);
+  });
+
+  it("detects session-not-found errors by code pattern", () => {
+    expect(isExpectedUnauthenticatedAuthError({ code: "session_not_found" })).toBe(true);
+  });
+
+  it("detects auth session missing by message", () => {
+    expect(isExpectedUnauthenticatedAuthError({ message: "Auth session missing!" })).toBe(true);
+  });
+
+  it("does not classify unrelated errors as expected unauthenticated", () => {
+    expect(isExpectedUnauthenticatedAuthError({ code: "invalid_grant", message: "wrong password" })).toBe(false);
   });
 });

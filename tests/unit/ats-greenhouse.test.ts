@@ -17,24 +17,27 @@ const makeApplication = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+// Use empty orgId in tests — Supabase lookup fails gracefully, falls back to env var
+const TEST_ORG = "";
+
 describe("getGreenhouseConfig", () => {
   afterEach(() => {
     delete process.env.GREENHOUSE_API_KEY;
   });
 
-  it("returns null when env var is missing", () => {
+  it("returns null when env var is missing", async () => {
     delete process.env.GREENHOUSE_API_KEY;
-    expect(getGreenhouseConfig()).toBeNull();
+    expect(await getGreenhouseConfig(TEST_ORG)).toBeNull();
   });
 
-  it("returns null when env var is blank", () => {
+  it("returns null when env var is blank", async () => {
     process.env.GREENHOUSE_API_KEY = "   ";
-    expect(getGreenhouseConfig()).toBeNull();
+    expect(await getGreenhouseConfig(TEST_ORG)).toBeNull();
   });
 
-  it("returns config when env var is set", () => {
+  it("returns config when env var is set", async () => {
     process.env.GREENHOUSE_API_KEY = "test-key";
-    const config = getGreenhouseConfig();
+    const config = await getGreenhouseConfig(TEST_ORG);
     expect(config).not.toBeNull();
     expect(config?.apiKey).toBe("test-key");
     expect(config?.baseUrl).toBe("https://harvest.greenhouse.io/v1");
@@ -53,7 +56,7 @@ describe("fetchGreenhousePipeline", () => {
 
   it("throws when not configured", async () => {
     delete process.env.GREENHOUSE_API_KEY;
-    await expect(fetchGreenhousePipeline({})).rejects.toThrow("greenhouse_not_configured");
+    await expect(fetchGreenhousePipeline(TEST_ORG, {})).rejects.toThrow("greenhouse_not_configured");
   });
 
   it("normalizes a Greenhouse application into NormalizedATSCandidate", async () => {
@@ -63,7 +66,7 @@ describe("fetchGreenhousePipeline", () => {
       json: async () => [app],
     }));
 
-    const result = await fetchGreenhousePipeline({ page: 1 });
+    const result = await fetchGreenhousePipeline(TEST_ORG, { page: 1 });
 
     expect(result.source).toBe("greenhouse");
     expect(result.page).toBe(1);
@@ -91,7 +94,7 @@ describe("fetchGreenhousePipeline", () => {
       json: async () => [app],
     }));
 
-    const result = await fetchGreenhousePipeline({});
+    const result = await fetchGreenhousePipeline(TEST_ORG, {});
     expect(result.candidates[0].status).toBe("rejected");
   });
 
@@ -102,7 +105,7 @@ describe("fetchGreenhousePipeline", () => {
       json: async () => [app],
     }));
 
-    const result = await fetchGreenhousePipeline({});
+    const result = await fetchGreenhousePipeline(TEST_ORG, {});
     expect(result.candidates[0].status).toBe("hired");
   });
 
@@ -113,7 +116,7 @@ describe("fetchGreenhousePipeline", () => {
       json: async () => [app],
     }));
 
-    const result = await fetchGreenhousePipeline({});
+    const result = await fetchGreenhousePipeline(TEST_ORG, {});
     expect(result.candidates[0].status).toBe("other");
   });
 
@@ -124,7 +127,7 @@ describe("fetchGreenhousePipeline", () => {
       json: async () => apps,
     }));
 
-    const result = await fetchGreenhousePipeline({});
+    const result = await fetchGreenhousePipeline(TEST_ORG, {});
     expect(result.has_more).toBe(true);
   });
 
@@ -135,7 +138,7 @@ describe("fetchGreenhousePipeline", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await fetchGreenhousePipeline({ jobId: "42" });
+    await fetchGreenhousePipeline(TEST_ORG, { jobId: "42" });
 
     const calledUrl = fetchMock.mock.calls[0][0] as string;
     expect(calledUrl).toContain("job_id=42");
@@ -143,6 +146,6 @@ describe("fetchGreenhousePipeline", () => {
 
   it("throws on non-OK response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
-    await expect(fetchGreenhousePipeline({})).rejects.toThrow("greenhouse_api_error");
+    await expect(fetchGreenhousePipeline(TEST_ORG, {})).rejects.toThrow("greenhouse_api_error");
   });
 });

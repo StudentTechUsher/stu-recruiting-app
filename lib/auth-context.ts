@@ -4,7 +4,7 @@ import { isSessionCheckEnabled } from "@/lib/session-flags";
 import { resolveAssignmentsFromUser, resolveOrgIdFromUser, resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getProfileByUserId } from "@/lib/auth/profile";
-import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
+import { isExpectedUnauthenticatedAuthError } from "@/lib/supabase/auth-session";
 import { buildDevAuthContext, resolveDevPersonaFromCookieHeader } from "@/lib/dev-auth";
 
 const parsePersonaFromHeader = (value: string | null): Persona => {
@@ -42,6 +42,16 @@ const toUnauthenticatedContext = (): AuthContext => ({
   session_source: "none",
   session_user: null
 });
+
+const toErrorDetails = (error: unknown): { message: string; code: string } => {
+  if (!error || typeof error !== "object") {
+    return { message: String(error), code: "" };
+  }
+
+  const message = "message" in error && typeof error.message === "string" ? error.message : String(error);
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  return { message, code };
+};
 
 const deriveFirstName = (sessionUser: SessionUserSnapshot, profile: ProfileSnapshot | null): string | null => {
   const fromProfile = profile?.personal_info?.first_name;
@@ -171,10 +181,14 @@ export async function getAuthContext(): Promise<AuthContext> {
     error = thrownError;
   }
 
-  if (error || !user) {
-    if (!isRefreshTokenNotFoundError(error)) {
-      console.error("auth_context_get_user_failed", { message: error instanceof Error ? error.message : String(error) });
+  if (error) {
+    if (!isExpectedUnauthenticatedAuthError(error)) {
+      console.error("auth_context_get_user_failed", toErrorDetails(error));
     }
+    return toUnauthenticatedContext();
+  }
+
+  if (!user) {
     return toUnauthenticatedContext();
   }
 

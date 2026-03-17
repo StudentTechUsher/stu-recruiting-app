@@ -130,6 +130,8 @@ export function buildCourseworkArtifactData({
     course_meta: course.course_meta,
     transcript_session_id: transcriptSessionId,
     parsed_course_id: parsedCourseId,
+    verification_status: "verified",
+    verification_method: "transcript_parse",
     provenance: {
       source: "transcript_parse",
       transcript_artifact_id: transcriptArtifactId

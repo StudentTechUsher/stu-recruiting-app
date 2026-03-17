@@ -2,6 +2,9 @@ import type { NextResponse } from "next/server";
 
 const REFRESH_TOKEN_NOT_FOUND_CODE = "refresh_token_not_found";
 const refreshTokenMessagePattern = /invalid refresh token|refresh token not found/i;
+const AUTH_SESSION_MISSING_CODE = "auth_session_missing";
+const sessionNotFoundCodePattern = /(auth_)?session(_not_found|_missing)/i;
+const sessionMissingMessagePattern = /auth session missing|session not found|session is missing/i;
 
 const toErrorMessage = (error: unknown) => {
   if (!error || typeof error !== "object") return "";
@@ -19,6 +22,15 @@ export const isRefreshTokenNotFoundError = (error: unknown) => {
   const code = toErrorCode(error);
   if (code.toLowerCase() === REFRESH_TOKEN_NOT_FOUND_CODE) return true;
   return refreshTokenMessagePattern.test(toErrorMessage(error));
+};
+
+export const isExpectedUnauthenticatedAuthError = (error: unknown) => {
+  if (isRefreshTokenNotFoundError(error)) return true;
+
+  const code = toErrorCode(error).toLowerCase();
+  if (code === AUTH_SESSION_MISSING_CODE || sessionNotFoundCodePattern.test(code)) return true;
+
+  return sessionMissingMessagePattern.test(toErrorMessage(error));
 };
 
 export const isSupabaseAuthCookie = (cookieName: string) => {

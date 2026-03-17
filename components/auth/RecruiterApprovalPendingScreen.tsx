@@ -22,8 +22,7 @@ export function RecruiterApprovalPendingScreen() {
               Your recruiter dashboard is waiting on approval
             </h1>
             <p className="mt-3 text-sm leading-7 text-[#436059]">
-              We received your recruiter sign-in, but dashboard access stays locked until Stu confirms your employer is an
-              active paying customer.
+              We received your recruiter sign-in, but dashboard access stays locked until Stu confirms you are an authorized recruiter.
             </p>
 
             <div className="mt-5 space-y-2 rounded-2xl border border-[#d2dfd9] bg-[#f8fcfa] p-4 text-sm text-[#21453a]">

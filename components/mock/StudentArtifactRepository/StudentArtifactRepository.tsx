@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -6,6 +6,7 @@ import { Card } from '../ui/Card';
 
 type ArtifactType =
   | 'coursework'
+  | 'club'
   | 'project'
   | 'internship'
   | 'certification'
@@ -29,6 +30,7 @@ type ArtifactRecord = {
   title: string;
   type: ArtifactType;
   artifactData: Record<string, unknown>;
+  fileRefs: Array<Record<string, unknown>>;
   source: string;
   description: string;
   link?: string;
@@ -49,9 +51,35 @@ type ArtifactApiRow = {
   updated_at: string;
 };
 
+type SourceExtractionEntry = {
+  last_extracted_at?: string;
+  extracted_from?: string;
+  extracted_from_filename?: string;
+  artifact_count?: number;
+  status?: 'extracting' | 'succeeded' | 'failed';
+  error_message?: string | null;
+  storage_file_ref?: {
+    bucket?: string;
+    path?: string;
+    kind?: string;
+  };
+};
+
+type SourceExtractionLog = {
+  github?: SourceExtractionEntry;
+  linkedin?: SourceExtractionEntry;
+  resume?: SourceExtractionEntry;
+  transcript?: SourceExtractionEntry;
+};
+
 type ArtifactsApiPayload = {
   artifacts?: ArtifactApiRow[];
+  source_extraction_log?: SourceExtractionLog;
+  profile_links?: Record<string, string | null>;
 };
+
+type SourceDocumentType = 'resume' | 'transcript';
+type SnackbarState = { kind: 'success' | 'error' | 'info'; message: string } | null;
 
 type DraftArtifactForm = {
   courseCode: string;
@@ -129,10 +157,11 @@ const initialDraftArtifactForm: DraftArtifactForm = {
 
 const artifactTypes: Array<{ id: ArtifactType; label: string }> = [
   { id: 'coursework', label: 'Coursework' },
+  { id: 'club', label: 'Club' },
   { id: 'project', label: 'Project' },
   { id: 'internship', label: 'Internship' },
   { id: 'certification', label: 'Certification' },
-  { id: 'leadership', label: 'Club / leadership' },
+  { id: 'leadership', label: 'Leadership' },
   { id: 'competition', label: 'Competition' },
   { id: 'research', label: 'Research' },
   { id: 'employment', label: 'Employment' },
@@ -150,6 +179,7 @@ const artifactTagOptions: ArtifactTag[] = [
 
 const artifactTypeLabelMap: Record<ArtifactType, string> = {
   coursework: 'Coursework',
+  club: 'Club',
   project: 'Project',
   internship: 'Internship',
   certification: 'Certification',
@@ -162,6 +192,7 @@ const artifactTypeLabelMap: Record<ArtifactType, string> = {
 
 const artifactTypeSourcePreset: Record<ArtifactType, string> = {
   coursework: 'SIS sync',
+  club: 'Club participation',
   project: 'GitHub',
   internship: 'Internship evidence',
   certification: 'Certification upload',
@@ -174,6 +205,7 @@ const artifactTypeSourcePreset: Record<ArtifactType, string> = {
 
 const artifactTypeTagPreset: Record<ArtifactType, ArtifactTag[]> = {
   coursework: ['Technical depth', 'Systems thinking'],
+  club: ['Collaboration signal', 'Communication signal'],
   project: ['Applied execution', 'Technical depth'],
   internship: ['Applied execution', 'Communication signal'],
   certification: ['Technical depth', 'Reliability signal'],
@@ -186,6 +218,7 @@ const artifactTypeTagPreset: Record<ArtifactType, ArtifactTag[]> = {
 
 const artifactTypeToneClass: Record<ArtifactType, string> = {
   coursework: 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-100',
+  club: 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100',
   project: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
   internship: 'bg-lime-100 text-lime-800 dark:bg-lime-500/20 dark:text-lime-100',
   certification: 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-100',
@@ -224,6 +257,47 @@ const toTrimmedString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+};
+
+const toFileRefs = (value: unknown): Array<Record<string, unknown>> => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => typeof entry === 'object' && entry !== null && !Array.isArray(entry))
+    .map((entry) => entry as Record<string, unknown>);
+};
+
+const isTranscriptBackedCoursework = (artifactData: Record<string, unknown>): boolean => {
+  const parsedCourseId = toTrimmedString(artifactData.parsed_course_id);
+  if (parsedCourseId) return true;
+  const provenance = toRecord(artifactData.provenance);
+  return toTrimmedString(provenance.source) === 'transcript_parse';
+};
+
+const hasCourseworkVerificationFile = (fileRefs: Array<Record<string, unknown>>): boolean => {
+  if (fileRefs.length === 0) return false;
+  return fileRefs.some((ref) => {
+    const kind = toTrimmedString(ref.kind);
+    return kind === 'syllabus' || kind === 'artifact_supporting_file';
+  });
+};
+
+const getArtifactVerificationStatus = (artifact: ArtifactRecord): 'verified' | 'unverified' => {
+  const verificationStatus = toTrimmedString(artifact.artifactData.verification_status)?.toLowerCase();
+  if (verificationStatus === 'verified') return 'verified';
+  if (verificationStatus === 'unverified' || verificationStatus === 'pending') return 'unverified';
+  if (isTranscriptBackedCoursework(artifact.artifactData)) return 'verified';
+
+  const source = artifact.source.toLowerCase();
+  const link = (artifact.link ?? '').toLowerCase();
+  if (source.includes('transcript') || source.includes('github') || link.includes('github.com')) {
+    return 'verified';
+  }
+  return 'unverified';
+};
+
+const verificationToneClass: Record<'verified' | 'unverified', string> = {
+  verified: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100',
+  unverified: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100'
 };
 
 const isArtifactType = (value: unknown): value is ArtifactType => {
@@ -306,6 +380,37 @@ const PlusIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
   </svg>
 );
 
+const UploadIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+const SpinnerIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    className={`${className} animate-spin`}
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="12" r="10" className="stroke-current opacity-25" strokeWidth="3" />
+    <path className="fill-current opacity-90" d="M22 12a10 10 0 0 0-10-10v4a6 6 0 0 1 6 6h4Z" />
+  </svg>
+);
+
 const ArtifactCardSkeleton = () => (
   <div className="rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
     <div className="flex items-start justify-between gap-2">
@@ -317,23 +422,6 @@ const ArtifactCardSkeleton = () => (
     <div className="mt-3 h-3 w-full rounded bg-[#e6f1ec] dark:bg-slate-700" />
     <div className="mt-2 h-3 w-5/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
   </div>
-);
-
-const ArtifactDetailSkeleton = () => (
-  <>
-    <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
-      <div className="h-4 w-2/3 rounded bg-[#e6f1ec] dark:bg-slate-700" />
-      <div className="mt-2 h-3 w-1/2 rounded bg-[#e6f1ec] dark:bg-slate-700" />
-    </div>
-    <div className="mt-4 h-3 w-full rounded bg-[#e6f1ec] dark:bg-slate-700" />
-    <div className="mt-2 h-3 w-5/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
-    <div className="mt-2 h-3 w-4/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
-    <div className="mt-4 flex gap-2">
-      <div className="h-5 w-20 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
-      <div className="h-5 w-24 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
-      <div className="h-5 w-16 rounded-full bg-[#e6f1ec] dark:bg-slate-700" />
-    </div>
-  </>
 );
 
 const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
@@ -351,6 +439,7 @@ const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
     title,
     type: artifactType,
     artifactData: data,
+    fileRefs: toFileRefs(row.file_refs),
     source,
     description,
     link: toTrimmedString(data.link) ?? undefined,
@@ -405,6 +494,12 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
     draft.leadershipImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
   }
 
+  if (artifact.type === 'club') {
+    draft.leadershipOrganization = getArtifactDataString(data, 'organization');
+    draft.leadershipPosition = getArtifactDataString(data, 'position');
+    draft.leadershipImpact = getArtifactDataString(data, 'impact_statement', artifact.description);
+  }
+
   if (artifact.type === 'competition') {
     draft.competitionName = getArtifactDataString(data, 'competition_name', artifact.title);
     draft.competitionPerformance = getArtifactDataString(data, 'performance');
@@ -436,19 +531,239 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
   return draft;
 };
 
+type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin';
+
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
   const [activeFilter, setActiveFilter] = useState<ArtifactFilter>('all');
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
-  const [showMobileDetailSheet, setShowMobileDetailSheet] = useState(false);
   const [showAddArtifactDialog, setShowAddArtifactDialog] = useState(false);
   const [showArtifactIntroTour, setShowArtifactIntroTour] = useState(false);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmittingArtifact, setIsSubmittingArtifact] = useState(false);
+  const [isDeletingArtifact, setIsDeletingArtifact] = useState(false);
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
   const hasAutoOpenedFromQueryRef = useRef(false);
+
+  // Extract from source dialog
+  const [showImportSourceDialog, setShowImportSourceDialog] = useState(false);
+  const [importSourceType, setImportSourceType] = useState<ImportSourceType>('resume');
+  const [importGithubUsername, setImportGithubUsername] = useState('');
+  const [importLinkedinUrl, setImportLinkedinUrl] = useState('');
+  const [importFileName, setImportFileName] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Source extraction state
+  const [sourceExtractionLog, setSourceExtractionLog] = useState<SourceExtractionLog>({});
+  const [savedProfileLinks, setSavedProfileLinks] = useState<Record<string, string | null>>({});
+  const [openingSourceDocument, setOpeningSourceDocument] = useState<SourceDocumentType | null>(null);
+  const [snackbar, setSnackbar] = useState<SnackbarState>(null);
+
+  const openImportSourceDialog = (type?: ImportSourceType) => {
+    const resolvedType = type ?? 'resume';
+    setImportSourceType(resolvedType);
+    // Pre-fill from saved profile links
+    const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : '';
+    const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : '';
+    // Extract username from full github URL if stored that way
+    const githubUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0] ?? savedGithub;
+    setImportGithubUsername(githubUsername);
+    setImportLinkedinUrl(savedLinkedin);
+    setImportFileName('');
+    setImportStatusMessage(null);
+    setShowImportSourceDialog(true);
+  };
+
+  const closeImportSourceDialog = () => {
+    setShowImportSourceDialog(false);
+    setImportStatusMessage(null);
+    if (importFileInputRef.current) importFileInputRef.current.value = '';
+  };
+
+  const setSourceExtractionEntry = (source: ImportSourceType, updates: Partial<SourceExtractionEntry>) => {
+    setSourceExtractionLog((current) => ({
+      ...current,
+      [source]: {
+        ...(current[source] ?? {}),
+        ...updates
+      }
+    }));
+  };
+
+  const hasSourceDocumentFile = (entry: SourceExtractionEntry | undefined) => {
+    const fileRef = entry?.storage_file_ref;
+    if (!fileRef) return false;
+    return typeof fileRef.bucket === 'string' && fileRef.bucket.trim().length > 0 && typeof fileRef.path === 'string' && fileRef.path.trim().length > 0;
+  };
+
+  const openSourceDocument = async (event: MouseEvent<HTMLButtonElement>, source: SourceDocumentType) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (openingSourceDocument) return;
+
+    setOpeningSourceDocument(source);
+    try {
+      const response = await fetch('/api/student/artifacts/source-document-url', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ source })
+      });
+      const payload = await response.json().catch(() => null);
+      const payloadRecord = typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
+      const dataRecord =
+        typeof payloadRecord.data === 'object' && payloadRecord.data !== null && !Array.isArray(payloadRecord.data)
+          ? (payloadRecord.data as Record<string, unknown>)
+          : {};
+      const signedUrl = typeof dataRecord.signed_url === 'string' ? dataRecord.signed_url : null;
+
+      if (!response.ok || !payloadRecord.ok || !signedUrl) {
+        throw new Error('source_document_url_unavailable');
+      }
+
+      const opened = window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        setStatusMessage('Popup blocked. Allow popups for this site and try again.');
+      }
+    } catch {
+      setStatusMessage('Unable to open the source document right now. Please try again.');
+    } finally {
+      setOpeningSourceDocument(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!snackbar) return;
+    const timeoutId = window.setTimeout(() => setSnackbar(null), 4200);
+    return () => window.clearTimeout(timeoutId);
+  }, [snackbar]);
+
+  const submitImport = async () => {
+    if (isImporting) return;
+    setImportStatusMessage(null);
+    const source = importSourceType;
+    const sourceLabel = source === 'linkedin' ? 'LinkedIn' : source.charAt(0).toUpperCase() + source.slice(1);
+
+    try {
+      let response: Response;
+
+      setIsImporting(true);
+
+      if (source === 'resume' || source === 'transcript') {
+        const file = importFileInputRef.current?.files?.[0];
+        if (!file) {
+          setImportStatusMessage('Please select a file to upload.');
+          return;
+        }
+
+        setSourceExtractionEntry(source, {
+          status: 'extracting',
+          extracted_from_filename: file.name,
+          error_message: null
+        });
+        closeImportSourceDialog();
+        setSnackbar({ kind: 'info', message: `${sourceLabel} extraction started. This may take up to a minute.` });
+
+        const form = new FormData();
+        form.set('file', file);
+        const endpoint = source === 'resume' ? '/api/student/extract/resume' : '/api/student/extract/transcript';
+        response = await fetch(endpoint, { method: 'POST', body: form });
+      } else if (source === 'github') {
+        const username = importGithubUsername.trim();
+        if (!username) {
+          setImportStatusMessage('Please enter your GitHub username.');
+          return;
+        }
+        const linkedInProfileUrl = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin.trim() : '';
+        if (!linkedInProfileUrl) {
+          setImportStatusMessage('Add your LinkedIn profile URL first, then retry GitHub extraction.');
+          return;
+        }
+
+        setSourceExtractionEntry(source, {
+          status: 'extracting',
+          extracted_from: `https://github.com/${username}`,
+          error_message: null
+        });
+        closeImportSourceDialog();
+        setSnackbar({ kind: 'info', message: 'GitHub extraction started. This may take up to a minute.' });
+
+        response = await fetch('/api/student/extract/github', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ github_username: username })
+        });
+      } else if (source === 'linkedin') {
+        const profileUrl = importLinkedinUrl.trim();
+        if (!profileUrl) {
+          setImportStatusMessage('Please enter your LinkedIn profile URL.');
+          return;
+        }
+
+        setSourceExtractionEntry(source, {
+          status: 'extracting',
+          extracted_from: profileUrl,
+          error_message: null
+        });
+        closeImportSourceDialog();
+        setSnackbar({ kind: 'info', message: 'LinkedIn extraction started. This may take up to a minute.' });
+
+        response = await fetch('/api/student/extract/linkedin', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ profile_url: profileUrl })
+        });
+      } else {
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        const maybeError =
+          typeof payload === 'object' && payload !== null && !Array.isArray(payload) && typeof payload.error === 'string'
+            ? payload.error
+            : 'extraction_failed';
+        throw new Error(maybeError);
+      }
+
+      const payloadRecord = typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
+      const payloadData =
+        typeof payloadRecord.data === 'object' && payloadRecord.data !== null && !Array.isArray(payloadRecord.data)
+          ? (payloadRecord.data as Record<string, unknown>)
+          : {};
+      const addedArtifacts = Array.isArray(payloadData.artifacts) ? payloadData.artifacts.length : 0;
+      const artifactLabel = addedArtifacts === 1 ? 'artifact' : 'artifacts';
+
+      await loadArtifacts();
+      setSnackbar({ kind: 'success', message: `${sourceLabel} extraction complete. Added ${addedArtifacts} ${artifactLabel}.` });
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : 'extraction_failed';
+      const failureMessage =
+        errorCode === 'github_linkedin_profile_required'
+          ? 'Add your LinkedIn profile URL first, then retry GitHub extraction.'
+          : errorCode === 'github_linkedin_link_required'
+            ? 'Your GitHub profile must include your LinkedIn profile URL as a social link before extraction.'
+            : errorCode === 'github_profile_name_mismatch'
+              ? 'GitHub profile name does not appear to match your student profile. Update profile names and try again.'
+              : errorCode === 'linkedin_profile_name_mismatch'
+                ? 'LinkedIn profile name does not appear to match your student profile. Verify the URL and try again.'
+                : `${sourceLabel} extraction failed. Please try again.`;
+
+      setSourceExtractionEntry(source, {
+        status: 'failed',
+        error_message: failureMessage
+      });
+      setSnackbar({ kind: 'error', message: failureMessage });
+      if (source === 'resume' || source === 'transcript') {
+        await loadArtifacts().catch(() => undefined);
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   const [draftType, setDraftType] = useState<ArtifactType>('coursework');
   const [draftData, setDraftData] = useState<DraftArtifactForm>({ ...initialDraftArtifactForm });
@@ -460,11 +775,6 @@ export const StudentArtifactRepository = () => {
     if (activeFilter === 'all') return artifacts;
     return artifacts.filter((artifact) => artifact.type === activeFilter);
   }, [activeFilter, artifacts]);
-
-  const selectedArtifact = useMemo(() => {
-    if (!selectedArtifactId) return filteredArtifacts[0] ?? artifacts[0] ?? null;
-    return artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? filteredArtifacts[0] ?? artifacts[0] ?? null;
-  }, [artifacts, filteredArtifacts, selectedArtifactId]);
 
   const signalCoverage = useMemo(() => {
     return artifactTagOptions
@@ -478,6 +788,11 @@ export const StudentArtifactRepository = () => {
   const maxTagCount = useMemo(() => {
     return Math.max(...signalCoverage.map((item) => item.count), 1);
   }, [signalCoverage]);
+
+  const activeDocumentSource = importSourceType === 'resume' || importSourceType === 'transcript' ? importSourceType : null;
+  const activeDocumentSourceEntry = activeDocumentSource ? sourceExtractionLog[activeDocumentSource] : undefined;
+  const hasExistingActiveDocument = activeDocumentSource ? hasSourceDocumentFile(activeDocumentSourceEntry) : false;
+  const activeDocumentLabel = activeDocumentSource ? activeDocumentSource.charAt(0).toUpperCase() + activeDocumentSource.slice(1) : 'Document';
 
   const showFirstArtifactTour = !isLoadingArtifacts && artifacts.length === 0 && !showArtifactIntroTour;
 
@@ -501,7 +816,18 @@ export const StudentArtifactRepository = () => {
         .filter((row): row is ArtifactRecord => Boolean(row));
 
       setArtifacts(mapped);
-      setSelectedArtifactId(mapped[0]?.id ?? null);
+      setSelectedArtifactId((current) => {
+        if (!current) return null;
+        return mapped.some((artifact) => artifact.id === current) ? current : null;
+      });
+
+      // Populate extraction log and profile links from API response
+      if (payload.data.source_extraction_log) {
+        setSourceExtractionLog(payload.data.source_extraction_log);
+      }
+      if (payload.data.profile_links) {
+        setSavedProfileLinks(payload.data.profile_links);
+      }
     } catch {
       setArtifacts([]);
       setSelectedArtifactId(null);
@@ -569,13 +895,11 @@ export const StudentArtifactRepository = () => {
     openAddArtifactDialog();
   };
 
-  const openEditArtifactDialog = () => {
-    if (!selectedArtifact) return;
-
-    setEditingArtifactId(selectedArtifact.id);
-    setDraftType(selectedArtifact.type);
-    setDraftData(toDraftFormFromArtifact(selectedArtifact));
-    setDraftAttachmentName(selectedArtifact.attachmentName ?? '');
+  const openEditArtifactDialog = (artifact: ArtifactRecord) => {
+    setEditingArtifactId(artifact.id);
+    setDraftType(artifact.type);
+    setDraftData(toDraftFormFromArtifact(artifact));
+    setDraftAttachmentName(artifact.attachmentName ?? '');
     if (documentInputRef.current) {
       documentInputRef.current.value = '';
     }
@@ -636,6 +960,8 @@ export const StudentArtifactRepository = () => {
     if (isSubmittingArtifact) return;
     const artifactIdToEdit = editingArtifactId;
     const isEditingExistingArtifact = Boolean(artifactIdToEdit);
+    const editingArtifact = artifactIdToEdit ? artifacts.find((artifact) => artifact.id === artifactIdToEdit) ?? null : null;
+    const selectedFile = documentInputRef.current?.files?.[0] ?? null;
 
     let title = '';
     let source = artifactTypeSourcePreset[draftType];
@@ -651,9 +977,23 @@ export const StudentArtifactRepository = () => {
       const courseTitle = draftData.courseTitle.trim();
       const instructorName = draftData.instructorName.trim();
       const impact = draftData.courseImpact.trim();
+      const isTranscriptSourcedCoursework = editingArtifact ? isTranscriptBackedCoursework(editingArtifact.artifactData) : false;
+      const hasExistingVerificationFile = editingArtifact ? hasCourseworkVerificationFile(editingArtifact.fileRefs) : false;
 
       if (courseCode.length < 2 || courseTitle.length < 2 || instructorName.length < 2 || impact.length < 10) {
         setStatusMessage('Coursework requires course code, title, instructor name, and an impact statement.');
+        return;
+      }
+
+      const selectedFileExtension = selectedFile?.name.split('.').pop()?.toLowerCase() ?? '';
+      const hasValidSyllabusFileExtension = selectedFile ? ['pdf', 'doc', 'docx'].includes(selectedFileExtension) : false;
+      if (selectedFile && !hasValidSyllabusFileExtension) {
+        setStatusMessage('Coursework syllabus must be a PDF or Word document (.pdf, .doc, .docx).');
+        return;
+      }
+
+      if (!isTranscriptSourcedCoursework && !selectedFile && !hasExistingVerificationFile) {
+        setStatusMessage('Manual coursework artifacts require a syllabus file for verification.');
         return;
       }
 
@@ -664,6 +1004,11 @@ export const StudentArtifactRepository = () => {
       artifactDataPayload.course_title = courseTitle;
       artifactDataPayload.instructor_name = instructorName;
       artifactDataPayload.impact_description = impact;
+      if (!isTranscriptSourcedCoursework) {
+        artifactDataPayload.verification_status = 'pending';
+        artifactDataPayload.verification_method = 'syllabus_upload';
+        artifactDataPayload.verification_source = 'manual_coursework_submission';
+      }
     }
 
     if (draftType === 'project') {
@@ -735,17 +1080,21 @@ export const StudentArtifactRepository = () => {
       artifactDataPayload.awarded_date = awardedDate;
     }
 
-    if (draftType === 'leadership') {
+    if (draftType === 'leadership' || draftType === 'club') {
       const organization = draftData.leadershipOrganization.trim();
       const position = draftData.leadershipPosition.trim();
       const impact = draftData.leadershipImpact.trim();
       if (organization.length < 2 || position.length < 2 || impact.length < 10) {
-        setStatusMessage('Leadership artifacts require organization, position, and impact statement.');
+        setStatusMessage(
+          draftType === 'club'
+            ? 'Club artifacts require organization, role/title, and impact statement.'
+            : 'Leadership artifacts require organization, position, and impact statement.'
+        );
         return;
       }
 
       title = `${position} · ${organization}`;
-      source = 'Leadership evidence';
+      source = draftType === 'club' ? 'Club participation evidence' : 'Leadership evidence';
       description = impact;
       artifactDataPayload.organization = organization;
       artifactDataPayload.position = position;
@@ -843,11 +1192,11 @@ export const StudentArtifactRepository = () => {
     setIsSubmittingArtifact(true);
     try {
       let fileRefs: Array<Record<string, unknown>> = [];
-      const selectedFile = documentInputRef.current?.files?.[0];
 
       if (selectedFile) {
         const uploadForm = new FormData();
         uploadForm.set('file', selectedFile);
+        uploadForm.set('kind', draftType === 'coursework' ? 'syllabus' : 'artifact_supporting_file');
 
         const uploadResponse = await fetch('/api/student/artifacts/files', {
           method: 'POST',
@@ -906,6 +1255,11 @@ export const StudentArtifactRepository = () => {
         | null;
 
       if (!response.ok || !payload || !payload.ok) {
+        const errorCode = payload && !payload.ok ? payload.error : null;
+        if (errorCode === 'coursework_syllabus_required') {
+          setStatusMessage('Manual coursework artifacts require a syllabus file for verification.');
+          return;
+        }
         setStatusMessage(isEditingExistingArtifact ? 'Unable to update artifact right now. Please try again.' : 'Unable to save artifact right now. Please try again.');
         return;
       }
@@ -922,7 +1276,6 @@ export const StudentArtifactRepository = () => {
         await loadArtifacts();
       }
 
-      setShowMobileDetailSheet(false);
       closeArtifactDialog();
       setStatusMessage(`${isEditingExistingArtifact ? 'Updated' : 'Added'} artifact: ${normalizedTitle}.`);
     } finally {
@@ -934,10 +1287,51 @@ export const StudentArtifactRepository = () => {
     void addArtifact();
   };
 
+  const deleteEditingArtifact = async () => {
+    const artifactIdToDelete = editingArtifactId;
+    if (!artifactIdToDelete || isSubmittingArtifact || isDeletingArtifact) return;
+    if (!window.confirm('Delete this artifact? This action cannot be undone.')) return;
+
+    setIsDeletingArtifact(true);
+    try {
+      const response = await fetch('/api/student/artifacts', {
+        method: 'DELETE',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          artifact_id: artifactIdToDelete
+        })
+      });
+
+      const payload = (await response.json().catch(() => null)) as { ok: boolean } | null;
+      if (!response.ok || !payload || !payload.ok) {
+        setStatusMessage('Unable to delete artifact right now. Please try again.');
+        return;
+      }
+
+      setArtifacts((current) => current.filter((artifact) => artifact.id !== artifactIdToDelete));
+      setSelectedArtifactId((current) => (current === artifactIdToDelete ? null : current));
+      closeArtifactDialog();
+      setStatusMessage('Artifact deleted.');
+    } finally {
+      setIsDeletingArtifact(false);
+    }
+  };
+
   const isEditingInDialog = Boolean(editingArtifactId);
+  const editingArtifactInDialog = editingArtifactId ? artifacts.find((artifact) => artifact.id === editingArtifactId) ?? null : null;
+  const isEditingTranscriptBackedCoursework =
+    editingArtifactInDialog?.type === 'coursework' ? isTranscriptBackedCoursework(editingArtifactInDialog.artifactData) : false;
+  const courseworkSyllabusFieldLabel = isEditingTranscriptBackedCoursework
+    ? 'Syllabus file (optional for transcript-sourced coursework)'
+    : 'Syllabus file (required for manual coursework)';
 
   return (
-    <section aria-labelledby="student-artifact-repository-title" className="w-full overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+    <section
+      aria-labelledby="student-artifact-repository-title"
+      className="w-full overflow-x-hidden px-4 pt-8 pb-8 sm:px-6 lg:px-8 lg:pt-12 lg:pb-12 xl:pb-10"
+    >
       <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-slate-700 dark:bg-slate-900/75">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
@@ -947,9 +1341,6 @@ export const StudentArtifactRepository = () => {
             >
               Artifact Repository
             </h2>
-            <p className="mt-2 text-sm text-[#4f6a62] dark:text-slate-300">
-              Click Add New Artifact to add evidence that strengthens your profile.
-            </p>
           </div>
         </div>
 
@@ -967,6 +1358,12 @@ export const StudentArtifactRepository = () => {
                   <span>Create first artifact</span>
                 </span>
               </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <UploadIcon />
+                  <span>Extract from source</span>
+                </span>
+              </Button>
               <Button type="button" size="sm" variant="secondary" onClick={() => dismissArtifactIntroTour()}>
                 Skip for now
               </Button>
@@ -979,13 +1376,19 @@ export const StudentArtifactRepository = () => {
             <p className="text-sm font-semibold text-[#2a5044] dark:text-slate-200">Quick start tour</p>
             <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
               1) Click Add New Artifact. 2) Choose evidence type and add title, source, and a short description.
-              3) Repeat for projects, internships, certifications, leadership, competition, and test evidence.
+              3) Repeat for projects, internships, clubs, leadership, certifications, competition, and test evidence.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" size="sm" onClick={() => openAddArtifactDialog()}>
                 <span className="inline-flex items-center gap-2">
                   <PlusIcon />
                   <span>Add New Artifact</span>
+                </span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <UploadIcon />
+                  <span>Extract from source</span>
                 </span>
               </Button>
             </div>
@@ -1040,23 +1443,36 @@ export const StudentArtifactRepository = () => {
         {!isLoadingArtifacts && artifacts.length > 0 ? (
           <div className="-mx-4 mt-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
             <div className="flex gap-2 pb-1" style={{ minWidth: 'max-content' }}>
-              {signalCoverage.map((signal) => (
-                <div
-                  key={`mobile-cov-${signal.tag}`}
-                  className="w-28 shrink-0 rounded-xl border border-[#d4e1db] bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <p className="truncate text-[9px] font-semibold leading-tight text-[#4f6a62] dark:text-slate-400">{signal.tag}</p>
-                    <span className="shrink-0 text-[10px] font-bold text-[#0f2b23] dark:text-slate-100">{signal.count}</span>
+              {signalCoverage.map((signal, idx) => {
+                const barColors = [
+                  '#12f987', // green
+                  '#38bdf8', // sky blue
+                  '#a78bfa', // violet
+                  '#fb923c', // orange
+                  '#f472b6', // pink
+                  '#34d399', // emerald
+                  '#facc15', // yellow
+                  '#60a5fa', // blue
+                ];
+                const color = barColors[idx % barColors.length];
+                return (
+                  <div
+                    key={`mobile-cov-${signal.tag}`}
+                    className="w-28 shrink-0 rounded-xl border border-[#d4e1db] bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="truncate text-[9px] font-semibold leading-tight text-[#4f6a62] dark:text-slate-400">{signal.tag}</p>
+                      <span className="shrink-0 text-[10px] font-bold text-[#0f2b23] dark:text-slate-100">{signal.count}</span>
+                    </div>
+                    <div className="mt-1.5 h-1 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: signal.count === 0 ? '0%' : `${Math.max((signal.count / maxTagCount) * 100, 14)}%`, backgroundColor: color }}
+                      />
+                    </div>
                   </div>
-                  <div className="mt-1.5 h-1 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                    <div
-                      className="h-full rounded-full bg-[#12f987]"
-                      style={{ width: signal.count === 0 ? '0%' : `${Math.max((signal.count / maxTagCount) * 100, 14)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -1078,48 +1494,60 @@ export const StudentArtifactRepository = () => {
               </p>
             </div>
           ) : (
-            filteredArtifacts.map((artifact) => (
-              <article key={artifact.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedArtifactId(artifact.id);
-                    setShowMobileDetailSheet(true);
-                  }}
-                  className="w-full rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 text-left transition-colors active:bg-[#f0faf5] dark:border-slate-700 dark:bg-slate-900 dark:active:bg-slate-800"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <Badge className={`shrink-0 ${artifactTypeToneClass[artifact.type]}`}>{artifactTypeLabelMap[artifact.type]}</Badge>
-                    {artifact.link || artifact.attachmentName ? (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#2a6b5c] dark:text-emerald-400">
-                        {artifact.link ? 'Linked ↗' : 'Doc attached'}
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-2 text-base font-semibold leading-snug text-[#0f2b23] dark:text-slate-100">{artifact.title}</p>
-                  <p className="mt-0.5 text-xs text-[#4c6860] dark:text-slate-400">
-                    {artifact.source} · {artifact.updatedAt}
-                  </p>
-                  <p className="mt-2 text-sm leading-5 text-[#48635b] dark:text-slate-300"
-                     style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {artifact.description}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {artifact.tags.slice(0, 3).map((tag) => (
-                      <span key={`${artifact.id}-${tag}`} className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${tagToneClass[tag]}`}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </button>
-              </article>
-            ))
+            filteredArtifacts.map((artifact) => {
+              const isSelected = selectedArtifactId === artifact.id;
+              const verificationStatus = getArtifactVerificationStatus(artifact);
+              return (
+                <article key={artifact.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedArtifactId(artifact.id)}
+                    className={`w-full rounded-2xl border px-4 py-4 text-left transition-colors active:bg-[#f0faf5] dark:active:bg-slate-800 ${
+                      isSelected
+                        ? 'border-[#0fd978] bg-[#ecfff5] dark:border-emerald-500 dark:bg-emerald-500/10'
+                        : 'border-[#d5e1db] bg-white dark:border-slate-700 dark:bg-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge className={`shrink-0 ${artifactTypeToneClass[artifact.type]}`}>{artifactTypeLabelMap[artifact.type]}</Badge>
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass[verificationStatus]}`}>
+                          {verificationStatus === 'verified' ? 'Verified' : 'Unverified'}
+                        </span>
+                      </div>
+                      {artifact.link || artifact.attachmentName ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[#2a6b5c] dark:text-emerald-400">
+                          {artifact.link ? 'Linked ↗' : 'Doc attached'}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-base font-semibold leading-snug text-[#0f2b23] dark:text-slate-100">{artifact.title}</p>
+                    <p className="mt-0.5 text-xs text-[#4c6860] dark:text-slate-400">
+                      {artifact.source} · {artifact.updatedAt}
+                    </p>
+                    <p
+                      className="mt-2 text-sm leading-5 text-[#48635b] dark:text-slate-300"
+                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                    >
+                      {artifact.description}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {artifact.tags.slice(0, 3).map((tag) => (
+                        <span key={`${artifact.id}-${tag}`} className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${tagToneClass[tag]}`}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                </article>
+              );
+            })
           )}
         </div>
 
-        <div className="mt-7 hidden gap-4 xl:grid xl:grid-cols-[1.08fr_0.92fr]">
+        <div className="mt-7 hidden gap-4 xl:grid xl:grid-cols-[1.08fr_0.92fr] xl:pb-6">
           <Card
-            className="bg-white/95 p-5 dark:bg-slate-900/80 xl:h-full xl:flex xl:flex-col xl:[&>div:last-child]:min-h-0 xl:[&>div:last-child]:flex-1 xl:[&>div:last-child]:overflow-hidden"
+            className="bg-white/95 p-5 dark:bg-slate-900/80"
             header={
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1145,18 +1573,28 @@ export const StudentArtifactRepository = () => {
                 No artifacts found for your account yet. Use Add New Artifact to create one.
               </p>
             ) : (
-              <div className="max-h-[56rem] min-h-0 space-y-3 overflow-y-auto pr-1 xl:h-full xl:max-h-none">
+              <div className="max-h-[56rem] space-y-3 overflow-y-auto pr-1 xl:max-h-none">
                 {filteredArtifacts.map((artifact) => {
-                  const isSelected = selectedArtifact?.id === artifact.id;
+                  const isSelected = selectedArtifactId === artifact.id;
+                  const verificationStatus = getArtifactVerificationStatus(artifact);
 
                   return (
                     <article
                       key={artifact.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedArtifactId(artifact.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedArtifactId(artifact.id);
+                        }
+                      }}
                       className={`rounded-2xl border px-4 py-3 transition-colors ${
                         isSelected
                           ? 'border-[#0fd978] bg-[#ecfff5] dark:border-emerald-500 dark:bg-emerald-500/10'
                           : 'border-[#d5e1db] bg-[#f9fdfb] dark:border-slate-700 dark:bg-slate-900'
-                      }`}
+                      } cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16d989] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8fcfa] dark:focus-visible:ring-emerald-400 dark:focus-visible:ring-offset-slate-900`}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
@@ -1165,7 +1603,12 @@ export const StudentArtifactRepository = () => {
                             {artifact.source} · Updated {artifact.updatedAt}
                           </p>
                         </div>
-                        <Badge className={artifactTypeToneClass[artifact.type]}>{artifactTypeLabelMap[artifact.type]}</Badge>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge className={artifactTypeToneClass[artifact.type]}>{artifactTypeLabelMap[artifact.type]}</Badge>
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass[verificationStatus]}`}>
+                            {verificationStatus === 'verified' ? 'Verified' : 'Unverified'}
+                          </span>
+                        </div>
                       </div>
 
                       <p className="mt-2 text-xs leading-5 text-[#48635b] dark:text-slate-300">{artifact.description}</p>
@@ -1203,14 +1646,23 @@ export const StudentArtifactRepository = () => {
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedArtifactId(artifact.id)}>
-                          {isSelected ? 'Viewing details' : 'View details'}
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openEditArtifactDialog(artifact);
+                          }}
+                        >
+                          Edit artifact
                         </Button>
                         {artifact.link ? (
                           <a
                             href={artifact.link}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
                             className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                           >
                             Open link
@@ -1224,70 +1676,7 @@ export const StudentArtifactRepository = () => {
             )}
           </Card>
 
-          <div className="space-y-4">
-            <Card
-              className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Artifact detail</h3>
-                  {selectedArtifact && !isLoadingArtifacts ? (
-                    <Button type="button" variant="secondary" size="sm" onClick={openEditArtifactDialog}>
-                      Edit artifact
-                    </Button>
-                  ) : null}
-                </div>
-              }
-            >
-              {isLoadingArtifacts ? (
-                <ArtifactDetailSkeleton />
-              ) : selectedArtifact ? (
-                <>
-                  <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-[#15382f] dark:text-slate-100">{selectedArtifact.title}</p>
-                      <Badge className={artifactTypeToneClass[selectedArtifact.type]}>{artifactTypeLabelMap[selectedArtifact.type]}</Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-[#4a665e] dark:text-slate-300">
-                      {selectedArtifact.source} · Updated {selectedArtifact.updatedAt}
-                    </p>
-                  </div>
-
-                  <p className="mt-3 text-xs leading-5 text-[#48635b] dark:text-slate-300">{selectedArtifact.description}</p>
-
-                  {selectedArtifact.attachmentName ? (
-                    <p className="mt-2 text-xs font-medium text-[#3f5d54] dark:text-slate-300">
-                      Document attached: {selectedArtifact.attachmentName}
-                    </p>
-                  ) : null}
-
-                  {selectedArtifact.referenceQuote ? (
-                    <div className="mt-3 rounded-xl border border-[#d3e0da] bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                        Reference signal
-                      </p>
-                      <p className="mt-1 text-xs italic leading-5 text-[#48635b] dark:text-slate-300">
-                        &ldquo;{selectedArtifact.referenceQuote}&rdquo;
-                      </p>
-                      <p className="mt-1 text-[11px] text-[#4f6a62] dark:text-slate-400">
-                        {selectedArtifact.referenceContactName}
-                        {selectedArtifact.referenceContactRole ? ` · ${selectedArtifact.referenceContactRole}` : ''}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {selectedArtifact.tags.map((tag) => (
-                      <span key={`detail-${tag}`} className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${tagToneClass[tag]}`}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-[#4a655d] dark:text-slate-300">Select an artifact card to inspect details.</p>
-              )}
-            </Card>
-
+          <div className="space-y-4 xl:space-y-4">
             <Card
               className="bg-white/95 p-5 dark:bg-slate-900/80"
               header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Signal coverage summary</h3>}
@@ -1296,7 +1685,18 @@ export const StudentArtifactRepository = () => {
                 Coming Soon
               </div>
               <div className="space-y-2">
-                {signalCoverage.map((signal) => {
+                {signalCoverage.map((signal, idx) => {
+                  const barColors = [
+                    '#12f987', // green
+                    '#38bdf8', // sky blue
+                    '#a78bfa', // violet
+                    '#fb923c', // orange
+                    '#f472b6', // pink
+                    '#34d399', // emerald
+                    '#facc15', // yellow
+                    '#60a5fa', // blue
+                  ];
+                  const color = barColors[idx % barColors.length];
                   const width = Math.max((signal.count / maxTagCount) * 100, signal.count === 0 ? 0 : 14);
 
                   return (
@@ -1306,8 +1706,113 @@ export const StudentArtifactRepository = () => {
                         <span>{signal.count}</span>
                       </div>
                       <div className="h-2 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                        <div className="h-full rounded-full bg-[#12f987]" style={{ width: `${width}%` }} />
+                        <div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: color }} />
                       </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Sources</h3>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <UploadIcon className="h-3.5 w-3.5" />
+                      <span>Extract</span>
+                    </span>
+                  </Button>
+                </div>
+              }
+            >
+              <p className="text-xs text-[#4f6a62] dark:text-slate-400">
+                Upload a resume or transcript, connect your GitHub, or link your LinkedIn profile to generate artifacts automatically.
+              </p>
+              <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                Extraction can take some time. You can keep using this page while it runs.
+              </p>
+              <div className="mt-3 space-y-2">
+                {([
+                  { type: 'resume' as ImportSourceType, label: 'Resume', hint: '.pdf or .docx' },
+                  { type: 'transcript' as ImportSourceType, label: 'Transcript', hint: '.pdf or .docx' },
+                  { type: 'github' as ImportSourceType, label: 'GitHub', hint: 'Username' },
+                  { type: 'linkedin' as ImportSourceType, label: 'LinkedIn', hint: 'Profile URL' },
+                ] as const).map(({ type, label, hint }) => {
+                  const entry = sourceExtractionLog[type];
+                  const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null;
+                  const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null;
+
+                  // Detect staleness for URL-based sources
+                  let isStale = false;
+                  if (type === 'github' && entry?.extracted_from && savedGithub) {
+                    const savedUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
+                    const extractedUsername = entry.extracted_from.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
+                    isStale = savedUsername !== extractedUsername;
+                  }
+                  if (type === 'linkedin' && entry?.extracted_from && savedLinkedin) {
+                    isStale = entry.extracted_from !== savedLinkedin;
+                  }
+
+                  const lastSyncedLabel = entry?.last_extracted_at
+                    ? new Date(entry.last_extracted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : null;
+                  const isExtracting = entry?.status === 'extracting';
+                  const isFailed = entry?.status === 'failed';
+                  const failureMessage = typeof entry?.error_message === 'string' ? entry.error_message : null;
+
+                  return (
+                    <div
+                      key={type}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => { setImportSourceType(type); openImportSourceDialog(type); }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setImportSourceType(type);
+                          openImportSourceDialog(type);
+                        }
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2.5 text-left transition-colors hover:border-[#a8c8bc] hover:bg-[#eef7f2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16d989] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8fcfa] dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:focus-visible:ring-emerald-400 dark:focus-visible:ring-offset-slate-900"
+                    >
+                      <span className="text-xs font-semibold text-[#1b3d35] dark:text-slate-200">{label}</span>
+                      <span className="flex items-center gap-1.5">
+                        {(type === 'resume' || type === 'transcript') && hasSourceDocumentFile(entry) ? (
+                          <button
+                            type="button"
+                            onClick={(event) => void openSourceDocument(event, type)}
+                            className="inline-flex items-center rounded-full border border-[#98bdaf] bg-white px-2 py-0.5 text-[10px] font-semibold text-[#1f4f42] transition-colors hover:bg-[#eef7f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                          >
+                            {openingSourceDocument === type ? 'Opening…' : 'View file'}
+                          </button>
+                        ) : null}
+                        {isExtracting ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-500/20 dark:text-sky-200">
+                            <SpinnerIcon className="h-3 w-3" />
+                            Extracting
+                          </span>
+                        ) : isFailed ? (
+                          <span
+                            title={failureMessage ?? undefined}
+                            className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-500/20 dark:text-rose-200"
+                          >
+                            Failed
+                          </span>
+                        ) : isStale ? (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                            Re-extract
+                          </span>
+                        ) : lastSyncedLabel ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+                            Extracted {lastSyncedLabel}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-[#5a7a70] dark:text-slate-400">{hint} ↗</span>
+                        )}
+                      </span>
                     </div>
                   );
                 })}
@@ -1319,7 +1824,7 @@ export const StudentArtifactRepository = () => {
         <button
           type="button"
           onClick={() => openAddArtifactDialog()}
-          className="fixed bottom-24 right-4 z-40 inline-flex h-12 items-center rounded-full border border-[#0fd978]/40 bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] sm:bottom-6 sm:right-6"
+          className="fixed bottom-24 right-6 z-40 inline-flex h-12 items-center rounded-full border border-[#0fd978]/40 bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] lg:bottom-8 lg:right-8"
         >
           <span className="inline-flex items-center gap-2">
             <PlusIcon className="h-4 w-4" />
@@ -1327,81 +1832,164 @@ export const StudentArtifactRepository = () => {
           </span>
         </button>
 
-        {showMobileDetailSheet && selectedArtifact ? (
-          <div className="fixed inset-0 z-[1200] lg:hidden">
+        {showImportSourceDialog ? (
+          <div className="fixed inset-0 z-[1200]">
             <button
               type="button"
-              aria-label="Close artifact details"
-              onClick={() => setShowMobileDetailSheet(false)}
+              aria-label="Close extract dialog"
+              onClick={closeImportSourceDialog}
               className="absolute inset-0 bg-[#0a1f1a]/45"
             />
-            <div className="absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] pb-10 dark:border-slate-700 dark:bg-slate-900">
-              <div className="sticky top-0 z-10 rounded-t-3xl bg-[#f8fcfa] px-5 pt-4 dark:bg-slate-900">
-                <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
-                <div className="mt-4 flex items-start justify-between gap-3">
-                  <Badge className={artifactTypeToneClass[selectedArtifact.type]}>{artifactTypeLabelMap[selectedArtifact.type]}</Badge>
+            <div className="absolute inset-x-0 bottom-0 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] p-4 pb-24 dark:border-slate-700 dark:bg-slate-900 lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:max-h-[90vh] lg:w-[min(38rem,calc(100vw-3rem))] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:p-6 lg:pb-6">
+              <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
+              <div className="mt-4 flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">Extract Artifacts from Source</p>
+                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">
+                    Upload a document or connect a profile to auto-generate artifact drafts.
+                  </p>
+                  <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                    Extraction may take some time. You can close this dialog after starting.
+                  </p>
+                </div>
+                <button type="button" onClick={closeImportSourceDialog} className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400">Close</button>
+              </div>
+
+              {/* Source type tabs */}
+              <div className="mt-4 flex gap-1.5 rounded-xl border border-[#d4e1db] bg-[#f0f7f3] p-1 dark:border-slate-700 dark:bg-slate-800">
+                {(['resume', 'transcript', 'github', 'linkedin'] as ImportSourceType[]).map((type) => (
                   <button
+                    key={type}
                     type="button"
-                    onClick={() => setShowMobileDetailSheet(false)}
-                    className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400"
+                    onClick={() => { setImportSourceType(type); setImportStatusMessage(null); }}
+                    className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition-colors ${
+                      importSourceType === type
+                        ? 'bg-white text-[#0a1f1a] shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                        : 'text-[#4f6a62] hover:text-[#1b3d35] dark:text-slate-400 dark:hover:text-slate-200'
+                    }`}
                   >
-                    Done
+                    {type === 'linkedin' ? 'LinkedIn' : type.charAt(0).toUpperCase() + type.slice(1)}
                   </button>
-                </div>
-                <h3 className="mt-3 break-words text-xl font-semibold leading-tight text-[#0f2b23] dark:text-slate-100">
-                  {selectedArtifact.title}
-                </h3>
-                <p className="mt-1 text-xs text-[#4a665e] dark:text-slate-400">
-                  {selectedArtifact.source} · Updated {selectedArtifact.updatedAt}
-                </p>
-                <div className="mt-4 border-b border-[#dde8e3] dark:border-slate-700" />
+                ))}
               </div>
 
-              <div className="px-5 pt-4">
-                <p className="text-sm leading-6 text-[#3a5a52] dark:text-slate-300">{selectedArtifact.description}</p>
-
-                {selectedArtifact.attachmentName ? (
-                  <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#d4e1db] bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-[#4f6a62] dark:text-slate-400">
-                      <path fillRule="evenodd" d="M15.621 4.379a3 3 0 00-4.242 0l-7 7a3 3 0 004.241 4.243h.001l.497-.5a.75.75 0 011.064 1.057l-.498.501-.002.002a4.5 4.5 0 01-6.364-6.364l7-7a4.5 4.5 0 016.368 6.36l-3.455 3.553A2.625 2.625 0 119.52 9.52l3.45-3.451a.75.75 0 111.061 1.06l-3.45 3.451a1.125 1.125 0 001.587 1.595l3.454-3.553a3 3 0 000-4.242z" clipRule="evenodd" />
-                    </svg>
-                    <p className="text-xs font-medium text-[#3f5d54] dark:text-slate-300">{selectedArtifact.attachmentName}</p>
-                  </div>
-                ) : null}
-
-                {selectedArtifact.referenceQuote ? (
-                  <div className="mt-4 rounded-xl border border-[#d3e0da] bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#4f6a62] dark:text-slate-400">Reference signal</p>
-                    <p className="mt-2 text-sm italic leading-6 text-[#2d4f47] dark:text-slate-200">&ldquo;{selectedArtifact.referenceQuote}&rdquo;</p>
-                    <p className="mt-2 text-xs font-medium text-[#4f6a62] dark:text-slate-400">
-                      {selectedArtifact.referenceContactName}
-                      {selectedArtifact.referenceContactRole ? ` · ${selectedArtifact.referenceContactRole}` : ''}
+              <div className="mt-4">
+                {(importSourceType === 'resume' || importSourceType === 'transcript') && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Upload your {importSourceType} as a <strong>.pdf</strong> or <strong>.docx</strong>.
+                      Our AI will extract relevant artifacts automatically.
                     </p>
-                  </div>
-                ) : null}
+                    {hasExistingActiveDocument ? (
+                      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100">
+                        Uploading a new {importSourceType} will replace your previously uploaded {activeDocumentLabel.toLowerCase()} file.
+                      </p>
+                    ) : null}
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => importFileInputRef.current?.click()}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#c4d5ce] bg-white px-4 py-6 text-sm font-semibold text-[#3a574e] transition-colors hover:border-[#8fbfb0] hover:bg-[#eef7f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500"
+                      >
+                        <UploadIcon className="h-5 w-5" />
+                        {importFileName ? importFileName : 'Click to select file'}
+                      </button>
+                      <input
+                        ref={importFileInputRef}
+                        type="file"
+                        accept=".pdf,.docx"
+                        className="sr-only"
+                        onChange={(e) => setImportFileName(e.target.files?.[0]?.name ?? '')}
+                      />
+                    </div>
+                  </>
+                )}
 
-                <div className="mt-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#4f6a62] dark:text-slate-400">Capability signals</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {selectedArtifact.tags.map((tag) => (
-                      <span key={`detail-mobile-${tag}`} className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tagToneClass[tag]}`}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                {importSourceType === 'github' && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Enter your GitHub username. We&apos;ll scan your public repositories and generate <strong>Project</strong> artifacts for your strongest repos.
+                    </p>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      GitHub extraction requires your LinkedIn profile to be on file, and your GitHub profile should include that LinkedIn URL as a social link.
+                    </p>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      GitHub username
+                      <input
+                        value={importGithubUsername}
+                        onChange={(e) => setImportGithubUsername(e.target.value)}
+                        placeholder="octocat"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      Only public repos are scanned. Repos that appear to be tutorials, forks with no commits, or have no README are skipped.
+                    </p>
+                  </>
+                )}
 
-                {selectedArtifact.link ? (
-                  <a
-                    href={selectedArtifact.link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-5 flex h-11 w-full items-center justify-center rounded-xl bg-[#12f987] text-sm font-semibold text-[#0a1f1a] shadow-[0_8px_20px_-12px_rgba(10,31,26,0.5)]"
-                  >
-                    Open linked resource ↗
-                  </a>
-                ) : null}
+                {importSourceType === 'linkedin' && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Enter your public LinkedIn profile URL. We&apos;ll extract your experience and generate relevant artifacts.
+                    </p>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      Profile URL
+                      <input
+                        value={importLinkedinUrl}
+                        onChange={(e) => setImportLinkedinUrl(e.target.value)}
+                        placeholder="https://www.linkedin.com/in/yourname"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      Your profile must be publicly visible for this to work.
+                    </p>
+                  </>
+                )}
               </div>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void submitImport()}
+                  disabled={isImporting}
+                  className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isImporting ? 'Extracting...' : 'Extract artifacts'}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeImportSourceDialog}
+                  className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {importStatusMessage && (
+                <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  {importStatusMessage}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {snackbar ? (
+          <div className="pointer-events-none fixed bottom-4 left-1/2 z-[1300] w-[min(34rem,calc(100vw-1.5rem))] -translate-x-1/2">
+            <div
+              className={`rounded-xl border px-3 py-2 text-xs font-semibold shadow-[0_18px_30px_-24px_rgba(10,31,26,0.7)] ${
+                snackbar.kind === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100'
+                  : snackbar.kind === 'error'
+                    ? 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-100'
+                    : 'border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-100'
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              {snackbar.message}
             </div>
           </div>
         ) : null}
@@ -1423,13 +2011,6 @@ export const StudentArtifactRepository = () => {
                     {isEditingInDialog ? 'Update this artifact using the same field set as create.' : 'Capture evidence quickly. You can edit details later.'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeArtifactDialog}
-                  className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400"
-                >
-                  Close
-                </button>
               </div>
 
               <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
@@ -1488,9 +2069,7 @@ export const StudentArtifactRepository = () => {
                       />
                     </label>
                     <div className="mt-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                        Syllabus file (optional)
-                      </p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">{courseworkSyllabusFieldLabel}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Button type="button" variant="secondary" size="sm" onClick={() => documentInputRef.current?.click()}>
                           Upload syllabus
@@ -1505,7 +2084,7 @@ export const StudentArtifactRepository = () => {
                         ref={documentInputRef}
                         type="file"
                         className="sr-only"
-                        accept=".pdf,.doc,.docx,.txt,.rtf,.md"
+                        accept=".pdf,.doc,.docx"
                         onChange={handleDocumentSelect}
                       />
                     </div>
@@ -1635,32 +2214,36 @@ export const StudentArtifactRepository = () => {
                   </>
                 ) : null}
 
-                {draftType === 'leadership' ? (
+                {draftType === 'leadership' || draftType === 'club' ? (
                   <>
                     <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Organization
+                      {draftType === 'club' ? 'Club or organization' : 'Organization'}
                       <input
                         value={draftData.leadershipOrganization}
                         onChange={(event) => updateDraftField('leadershipOrganization', event.target.value)}
-                        placeholder="Data Club"
+                        placeholder={draftType === 'club' ? 'Data Club' : 'Data Club'}
                         className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
                     </label>
                     <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Position
+                      {draftType === 'club' ? 'Role or title' : 'Position'}
                       <input
                         value={draftData.leadershipPosition}
                         onChange={(event) => updateDraftField('leadershipPosition', event.target.value)}
-                        placeholder="President / Team Lead"
+                        placeholder={draftType === 'club' ? 'Member / Treasurer / Committee Lead' : 'President / Team Lead'}
                         className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
                     </label>
                     <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Statement of impact
+                      {draftType === 'club' ? 'Club impact statement' : 'Statement of impact'}
                       <textarea
                         value={draftData.leadershipImpact}
                         onChange={(event) => updateDraftField('leadershipImpact', event.target.value)}
-                        placeholder="What did you do in this role and how did you go above and beyond?"
+                        placeholder={
+                          draftType === 'club'
+                            ? 'What did you contribute in this organization and what outcomes came from it?'
+                            : 'What did you do in this role and how did you go above and beyond?'
+                        }
                         className="mt-2 min-h-20 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
                     </label>
@@ -1852,14 +2435,25 @@ export const StudentArtifactRepository = () => {
                 <button
                   type="button"
                   onClick={submitAddArtifactDialog}
-                  disabled={isSubmittingArtifact}
+                  disabled={isSubmittingArtifact || isDeletingArtifact}
                   className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSubmittingArtifact ? 'Saving...' : isEditingInDialog ? 'Save changes' : 'Save artifact'}
                 </button>
+                {isEditingInDialog ? (
+                  <button
+                    type="button"
+                    onClick={() => void deleteEditingArtifact()}
+                    disabled={isDeletingArtifact || isSubmittingArtifact}
+                    className="inline-flex h-10 items-center rounded-xl border border-rose-300 bg-rose-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500 dark:hover:bg-rose-400"
+                  >
+                    {isDeletingArtifact ? 'Deleting...' : 'Delete'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={closeArtifactDialog}
+                  disabled={isSubmittingArtifact || isDeletingArtifact}
                   className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Cancel

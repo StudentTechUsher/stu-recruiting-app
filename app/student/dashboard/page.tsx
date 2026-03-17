@@ -13,15 +13,45 @@ type DashboardSnapshot = {
   companyCount: number;
 };
 
+type CtaTone = "default" | "artifact_primary" | "artifact_secondary";
+
+type MetricCard = {
+  label: string;
+  value: string;
+  statusLabel: string;
+  statusClass: string;
+  body: string;
+  href: string | null;
+  cta: string | null;
+  ctaTone?: CtaTone;
+};
+
 type CoachRecommendation = {
   id: string;
   title: string;
   detail: string;
   href: string | null;
   cta: string | null;
+  ctaTone?: CtaTone;
 };
 
 const skeletonBlockClassName = "animate-pulse rounded-lg bg-[#e4efe9] dark:bg-slate-700/70";
+
+const getDashboardCtaClassName = ({ tone = "default", compact = false, fullWidth = false }: { tone?: CtaTone; compact?: boolean; fullWidth?: boolean }) => {
+  const layoutClass = compact ? "h-8 px-3 text-[11px]" : "h-9 px-3 text-xs";
+  const widthClass = fullWidth ? "w-full justify-center" : "";
+  const baseClass = `inline-flex items-center rounded-xl border ${layoutClass} ${widthClass} font-semibold uppercase tracking-[0.08em] transition-colors`;
+
+  if (tone === "artifact_primary") {
+    return `${baseClass} border-[#0f6a4b] bg-[#117b56] text-white hover:bg-[#0f6a4b] dark:border-emerald-300 dark:bg-emerald-400 dark:text-[#05291d] dark:hover:bg-emerald-300`;
+  }
+
+  if (tone === "artifact_secondary") {
+    return `${baseClass} border-[#9fc3ef] bg-[#eaf3ff] text-[#1f4f7a] hover:bg-[#dcecff] dark:border-sky-400/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:bg-sky-500/30`;
+  }
+
+  return `${baseClass} border-[#bfd2ca] bg-white text-[#21453a] hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800`;
+};
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
@@ -127,7 +157,7 @@ export default function StudentDashboardPage() {
     };
   }, []);
 
-  const metricCards = useMemo(() => {
+  const metricCards = useMemo<MetricCard[]>(() => {
     const focusedCoachingMessage =
       "Maintaining 3 or less will help you get better targeted capability coaching, great work!";
     const broadCoachingMessage =
@@ -152,7 +182,8 @@ export default function StudentDashboardPage() {
             ? "Build your recruiter signal by adding your first artifact."
             : "Keep adding fresh evidence so employers can track your growth over time.",
         href: "/student/artifacts?openAddArtifact=true",
-        cta: "Add New Artifact"
+        cta: "Add New Artifact",
+        ctaTone: "artifact_primary"
       },
       {
         label: "Artifact Types",
@@ -164,7 +195,8 @@ export default function StudentDashboardPage() {
             : "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100",
         body: "A variety of artifact types helps employers know the range of your skills",
         href: "/student/artifacts",
-        cta: "Open Artifact Repository"
+        cta: "Open Artifact Repository",
+        ctaTone: "artifact_secondary"
       },
       {
         label: "Target Roles",
@@ -181,7 +213,8 @@ export default function StudentDashboardPage() {
             ? focusedCoachingMessage
             : broadCoachingMessage,
         href: hasNoRoles ? "/student/targets" : hasFocusedRoles ? null : "/student/capability-coach",
-        cta: hasNoRoles ? "Open My Positions & Employers" : hasFocusedRoles ? null : "Open Capability Coach"
+        cta: hasNoRoles ? "Open My Positions & Employers" : hasFocusedRoles ? null : "Open Capability Coach",
+        ctaTone: "default"
       },
       {
         label: "Target Companies",
@@ -198,7 +231,8 @@ export default function StudentDashboardPage() {
             ? focusedCoachingMessage
             : broadCoachingMessage,
         href: hasNoCompanies ? "/student/targets" : hasFocusedCompanies ? null : "/student/capability-coach",
-        cta: hasNoCompanies ? "Open My Positions & Employers" : hasFocusedCompanies ? null : "Open Capability Coach"
+        cta: hasNoCompanies ? "Open My Positions & Employers" : hasFocusedCompanies ? null : "Open Capability Coach",
+        ctaTone: "default"
       }
     ];
   }, [snapshot.artifactCount, snapshot.artifactTypeCount, snapshot.companyCount, snapshot.roleCount]);
@@ -211,7 +245,8 @@ export default function StudentDashboardPage() {
             title: "Start your evidence signal",
             detail: "Add your first artifact so Personal Career Coach can calibrate recommendations to your real work.",
             href: "/student/artifacts?openAddArtifact=true",
-            cta: "Add New Artifact"
+            cta: "Add New Artifact",
+            ctaTone: "artifact_primary"
           }
         : snapshot.artifactTypeCount < 3
           ? {
@@ -219,14 +254,16 @@ export default function StudentDashboardPage() {
               title: "Diversify your evidence types",
               detail: "A broader mix of artifact types will help your coach identify a wider range of strengths.",
               href: "/student/artifacts",
-              cta: "Open Artifact Repository"
+              cta: "Open Artifact Repository",
+              ctaTone: "artifact_secondary"
             }
           : {
               id: "coach-evidence-refresh",
               title: "Keep evidence current",
               detail: "You have a strong evidence base. Add one new artifact this week to keep momentum visible.",
               href: "/student/artifacts?openAddArtifact=true",
-              cta: "Add New Artifact"
+              cta: "Add New Artifact",
+              ctaTone: "artifact_primary"
             };
 
     const targetingRecommendation: CoachRecommendation =
@@ -236,7 +273,8 @@ export default function StudentDashboardPage() {
             title: "Set your role and employer targets",
             detail: "Choose a few positions and employers so your coach can personalize advice to your hiring goals.",
             href: "/student/targets",
-            cta: "Open My Positions & Employers"
+            cta: "Open My Positions & Employers",
+            ctaTone: "default"
           }
         : snapshot.roleCount > 3 || snapshot.companyCount > 3
           ? {
@@ -244,14 +282,16 @@ export default function StudentDashboardPage() {
               title: "Narrow your target scope",
               detail: "Your coaching context is broad right now. Tightening to three or fewer targets improves precision.",
               href: "/student/capability-coach",
-              cta: "Open Capability Coach"
+              cta: "Open Capability Coach",
+              ctaTone: "default"
             }
           : {
               id: "coach-targets-healthy",
               title: "Target scope looks healthy",
               detail: "Your roles and employers are focused enough for high-quality coaching recommendations.",
               href: null,
-              cta: null
+              cta: null,
+              ctaTone: "default"
             };
 
     const planningRecommendation: CoachRecommendation = {
@@ -260,7 +300,8 @@ export default function StudentDashboardPage() {
       detail:
         "Capability Coach will soon deliver ranked weekly actions based on your artifacts, target scope, and skill progression.",
       href: "/student/capability-coach",
-      cta: "View Capability Coach Preview"
+      cta: "View Capability Coach Preview",
+      ctaTone: "default"
     };
 
     return [evidenceRecommendation, targetingRecommendation, planningRecommendation];
@@ -324,7 +365,7 @@ export default function StudentDashboardPage() {
                       <div className="mt-3">
                         <Link
                           href={metric.href}
-                          className="inline-flex h-9 w-full items-center justify-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className={getDashboardCtaClassName({ tone: metric.ctaTone, fullWidth: true })}
                         >
                           {metric.cta}
                         </Link>
@@ -372,7 +413,7 @@ export default function StudentDashboardPage() {
                         <div className="mt-3">
                           <Link
                             href={recommendation.href}
-                            className="inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                            className={getDashboardCtaClassName({ tone: recommendation.ctaTone, compact: true })}
                           >
                             {recommendation.cta}
                           </Link>
