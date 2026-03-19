@@ -12,7 +12,7 @@ import {
 } from "@/lib/feature-flags";
 import { ChartIcon, LayersIcon, LoopIcon, ModelIcon } from "@/components/mock/ui/Icons";
 
-type Audience = "recruiter" | "student" | "admin";
+type Audience = "recruiter" | "student" | "admin" | "referrer";
 
 type NavItem = {
   key: string;
@@ -131,6 +131,14 @@ const recruiterNavItems: NavItem[] = [
     description: "Apply outcome feedback to scoring",
     icon: LoopIcon,
     href: "/recruiter/outcomes"
+  },
+  {
+    key: "recruiter-crm",
+    label: "Candidate Relationship Manager",
+    shortLabel: "CRM",
+    description: "Track follow-ups and candidate communication timeline",
+    icon: GuidanceIcon,
+    href: "/recruiter/candidate-relationship-manager"
   }
 ];
 
@@ -171,6 +179,14 @@ const studentNavItems: NavItem[] = [
     href: "/student/capability-coach"
   },
   {
+    key: "student-networking-coach",
+    label: "Networking Coach",
+    shortLabel: "Networking",
+    description: "Discover people to contact at your target employers",
+    icon: CandidateIcon,
+    href: "/student/networking-coach"
+  },
+  {
     key: "student-targets",
     label: "My Positions & Employers",
     shortLabel: "Targets",
@@ -209,9 +225,21 @@ const adminNavItems: NavItem[] = [
   }
 ];
 
+const referrerNavItems: NavItem[] = [
+  {
+    key: "referrer-endorsements",
+    label: "Student Endorsements",
+    shortLabel: "Endorsements",
+    description: "Look up student profiles and submit endorsements",
+    icon: CandidateIcon,
+    href: "/referrer/endorsements"
+  }
+];
+
 const getNavItems = (audience: Audience) => {
   if (audience === "recruiter") return recruiterNavItems;
   if (audience === "student") return studentNavItems;
+  if (audience === "referrer") return referrerNavItems;
   return adminNavItems;
 };
 
@@ -323,7 +351,9 @@ export function AppNavigationShell({
             ) : null}
 
             <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-[#446258] dark:text-slate-400">
-              {audience === "admin" ? "Admin Navigation" : `${audience === "recruiter" ? "Recruiter" : "Student"} Navigation`}
+              {audience === "admin"
+                ? "Admin Navigation"
+                : `${audience === "recruiter" ? "Recruiter" : audience === "referrer" ? "Referrer" : "Student"} Navigation`}
             </p>
 
             <nav className="mt-2 space-y-2">

@@ -77,6 +77,10 @@ export async function POST(req: Request) {
     await safeSignOut(supabase);
     return NextResponse.json({ ok: false, error: "use_recruiter_magic_link" }, { status: 403 });
   }
+  if (persona === "referrer") {
+    await safeSignOut(supabase);
+    return NextResponse.json({ ok: false, error: "use_referrer_magic_link" }, { status: 403 });
+  }
 
   const response = NextResponse.json({ ok: true, redirectPath: getHomeRouteForPersona(persona) });
   cookieAccumulator.apply(response);

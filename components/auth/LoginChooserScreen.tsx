@@ -10,9 +10,9 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
       <section className="w-full max-w-2xl rounded-[28px] border border-emerald-200 bg-white p-7 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.5)]">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">Stu Recruiting Platform</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a]">Choose sign-in path</h1>
-        <p className="mt-2 text-sm text-[#3c5f52]">Students and recruiters use magic links.</p>
+        <p className="mt-2 text-sm text-[#3c5f52]">Students, recruiters, and referrers use magic links.</p>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
           <Link
             href="/login/student"
             className="rounded-2xl border border-[#bfd2ca] bg-[#f5faf7] p-4 transition-colors hover:bg-[#edf5f1]"
@@ -29,6 +29,15 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">Recruiter</p>
             <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">Recruiter magic link</p>
             <p className="mt-1 text-xs text-[#476a5d]">Use your work email to request recruiter access.</p>
+          </Link>
+
+          <Link
+            href="/login/referrer"
+            className="rounded-2xl border border-[#bfd2ca] bg-[#f5faf7] p-4 transition-colors hover:bg-[#edf5f1]"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">Referrer</p>
+            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">Referrer magic link</p>
+            <p className="mt-1 text-xs text-[#476a5d]">Use your email to submit endorsements for student candidates.</p>
           </Link>
         </div>
 
@@ -48,6 +57,12 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
                 className="rounded-lg border border-[#bfd2ca] bg-white px-2.5 py-1 font-semibold text-[#0a1f1a] hover:bg-[#eff6f2]"
               >
                 Continue as Dev Recruiter
+              </a>
+              <a
+                href="/api/auth/dev-login?persona=referrer"
+                className="rounded-lg border border-[#bfd2ca] bg-white px-2.5 py-1 font-semibold text-[#0a1f1a] hover:bg-[#eff6f2]"
+              >
+                Continue as Dev Referrer
               </a>
             </div>
           </div>

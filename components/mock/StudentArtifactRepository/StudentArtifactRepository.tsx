@@ -67,6 +67,7 @@ type SourceExtractionEntry = {
 
 type SourceExtractionLog = {
   github?: SourceExtractionEntry;
+  kaggle?: SourceExtractionEntry;
   linkedin?: SourceExtractionEntry;
   resume?: SourceExtractionEntry;
   transcript?: SourceExtractionEntry;
@@ -457,6 +458,16 @@ const getArtifactDataString = (data: Record<string, unknown>, key: string, fallb
   return value ?? fallback;
 };
 
+const getExtractionArtifactCount = (payload: unknown): number => {
+  const payloadRecord = toRecord(payload);
+  const dataRecord = toRecord(payloadRecord.data);
+  const nestedDataRecord = toRecord(dataRecord.data);
+
+  if (Array.isArray(dataRecord.artifacts)) return dataRecord.artifacts.length;
+  if (Array.isArray(nestedDataRecord.artifacts)) return nestedDataRecord.artifacts.length;
+  return 0;
+};
+
 const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm => {
   const data = artifact.artifactData;
   const draft = { ...initialDraftArtifactForm };
@@ -531,7 +542,7 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
   return draft;
 };
 
-type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin';
+type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin' | 'kaggle';
 
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
@@ -552,6 +563,7 @@ export const StudentArtifactRepository = () => {
   const [importSourceType, setImportSourceType] = useState<ImportSourceType>('resume');
   const [importGithubUsername, setImportGithubUsername] = useState('');
   const [importLinkedinUrl, setImportLinkedinUrl] = useState('');
+  const [importKaggleUrl, setImportKaggleUrl] = useState('');
   const [importFileName, setImportFileName] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
@@ -569,10 +581,12 @@ export const StudentArtifactRepository = () => {
     // Pre-fill from saved profile links
     const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : '';
     const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : '';
+    const savedKaggle = typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : '';
     // Extract username from full github URL if stored that way
     const githubUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0] ?? savedGithub;
     setImportGithubUsername(githubUsername);
     setImportLinkedinUrl(savedLinkedin);
+    setImportKaggleUrl(savedKaggle);
     setImportFileName('');
     setImportStatusMessage(null);
     setShowImportSourceDialog(true);
@@ -645,7 +659,12 @@ export const StudentArtifactRepository = () => {
     if (isImporting) return;
     setImportStatusMessage(null);
     const source = importSourceType;
-    const sourceLabel = source === 'linkedin' ? 'LinkedIn' : source.charAt(0).toUpperCase() + source.slice(1);
+    const sourceLabel =
+      source === 'linkedin'
+        ? 'LinkedIn'
+        : source === 'kaggle'
+          ? 'Kaggle'
+          : source.charAt(0).toUpperCase() + source.slice(1);
 
     try {
       let response: Response;
@@ -716,6 +735,26 @@ export const StudentArtifactRepository = () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ profile_url: profileUrl })
         });
+      } else if (source === 'kaggle') {
+        const profileUrl = importKaggleUrl.trim();
+        if (!profileUrl) {
+          setImportStatusMessage('Please enter your Kaggle profile URL.');
+          return;
+        }
+
+        setSourceExtractionEntry(source, {
+          status: 'extracting',
+          extracted_from: profileUrl,
+          error_message: null
+        });
+        closeImportSourceDialog();
+        setSnackbar({ kind: 'info', message: 'Kaggle extraction started. This may take up to a minute.' });
+
+        response = await fetch('/api/student/extract/kaggle', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ profile_url: profileUrl })
+        });
       } else {
         return;
       }
@@ -729,12 +768,7 @@ export const StudentArtifactRepository = () => {
         throw new Error(maybeError);
       }
 
-      const payloadRecord = typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
-      const payloadData =
-        typeof payloadRecord.data === 'object' && payloadRecord.data !== null && !Array.isArray(payloadRecord.data)
-          ? (payloadRecord.data as Record<string, unknown>)
-          : {};
-      const addedArtifacts = Array.isArray(payloadData.artifacts) ? payloadData.artifacts.length : 0;
+      const addedArtifacts = getExtractionArtifactCount(payload);
       const artifactLabel = addedArtifacts === 1 ? 'artifact' : 'artifacts';
 
       await loadArtifacts();
@@ -750,6 +784,8 @@ export const StudentArtifactRepository = () => {
               ? 'GitHub profile name does not appear to match your student profile. Update profile names and try again.'
               : errorCode === 'linkedin_profile_name_mismatch'
                 ? 'LinkedIn profile name does not appear to match your student profile. Verify the URL and try again.'
+                : errorCode === 'kaggle_extraction_failed'
+                  ? 'Kaggle extraction failed. Verify your profile URL and public visibility, then try again.'
                 : `${sourceLabel} extraction failed. Please try again.`;
 
       setSourceExtractionEntry(source, {
@@ -1729,7 +1765,7 @@ export const StudentArtifactRepository = () => {
               }
             >
               <p className="text-xs text-[#4f6a62] dark:text-slate-400">
-                Upload a resume or transcript, connect your GitHub, or link your LinkedIn profile to generate artifacts automatically.
+                Upload a resume or transcript, connect GitHub, or link LinkedIn/Kaggle profiles to generate artifacts automatically.
               </p>
               <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
                 Extraction can take some time. You can keep using this page while it runs.
@@ -1740,10 +1776,12 @@ export const StudentArtifactRepository = () => {
                   { type: 'transcript' as ImportSourceType, label: 'Transcript', hint: '.pdf or .docx' },
                   { type: 'github' as ImportSourceType, label: 'GitHub', hint: 'Username' },
                   { type: 'linkedin' as ImportSourceType, label: 'LinkedIn', hint: 'Profile URL' },
+                  { type: 'kaggle' as ImportSourceType, label: 'Kaggle', hint: 'Profile URL' },
                 ] as const).map(({ type, label, hint }) => {
                   const entry = sourceExtractionLog[type];
                   const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null;
                   const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null;
+                  const savedKaggle = typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : null;
 
                   // Detect staleness for URL-based sources
                   let isStale = false;
@@ -1754,6 +1792,9 @@ export const StudentArtifactRepository = () => {
                   }
                   if (type === 'linkedin' && entry?.extracted_from && savedLinkedin) {
                     isStale = entry.extracted_from !== savedLinkedin;
+                  }
+                  if (type === 'kaggle' && entry?.extracted_from && savedKaggle) {
+                    isStale = entry.extracted_from !== savedKaggle;
                   }
 
                   const lastSyncedLabel = entry?.last_extracted_at
@@ -1857,7 +1898,7 @@ export const StudentArtifactRepository = () => {
 
               {/* Source type tabs */}
               <div className="mt-4 flex gap-1.5 rounded-xl border border-[#d4e1db] bg-[#f0f7f3] p-1 dark:border-slate-700 dark:bg-slate-800">
-                {(['resume', 'transcript', 'github', 'linkedin'] as ImportSourceType[]).map((type) => (
+                {(['resume', 'transcript', 'github', 'linkedin', 'kaggle'] as ImportSourceType[]).map((type) => (
                   <button
                     key={type}
                     type="button"
@@ -1868,7 +1909,7 @@ export const StudentArtifactRepository = () => {
                         : 'text-[#4f6a62] hover:text-[#1b3d35] dark:text-slate-400 dark:hover:text-slate-200'
                     }`}
                   >
-                    {type === 'linkedin' ? 'LinkedIn' : type.charAt(0).toUpperCase() + type.slice(1)}
+                    {type === 'linkedin' ? 'LinkedIn' : type === 'kaggle' ? 'Kaggle' : type.charAt(0).toUpperCase() + type.slice(1)}
                   </button>
                 ))}
               </div>
@@ -1944,6 +1985,26 @@ export const StudentArtifactRepository = () => {
                     </label>
                     <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
                       Your profile must be publicly visible for this to work.
+                    </p>
+                  </>
+                )}
+
+                {importSourceType === 'kaggle' && (
+                  <>
+                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
+                      Enter your public Kaggle profile URL. We&apos;ll extract project and competition evidence into artifact drafts.
+                    </p>
+                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      Profile URL
+                      <input
+                        value={importKaggleUrl}
+                        onChange={(e) => setImportKaggleUrl(e.target.value)}
+                        placeholder="https://www.kaggle.com/yourname"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
+                      Your Kaggle profile must be publicly accessible for extraction.
                     </p>
                   </>
                 )}

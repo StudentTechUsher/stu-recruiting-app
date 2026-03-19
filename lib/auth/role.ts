@@ -11,6 +11,7 @@ function normalizeRole(value: RoleLike): Persona | null {
   if (value === "student") return "student";
   if (value === "recruiter") return "recruiter";
   if (value === "org_admin" || value === "admin") return "org_admin";
+  if (value === "referrer") return "referrer";
   return null;
 }
 

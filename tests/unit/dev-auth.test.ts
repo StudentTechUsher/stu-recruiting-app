@@ -36,11 +36,24 @@ describe("dev auth identities", () => {
     expect(resolveDevPersonaFromCookieValue("unknown")).toBeNull();
   });
 
+  it("parses referrer persona", () => {
+    process.env.ENABLE_DEV_IDENTITIES = "true";
+    expect(resolveDevPersonaFromCookieValue("referrer")).toBe("referrer");
+  });
+
   it("builds an authenticated context for dev student persona", () => {
     const context = buildDevAuthContext("student");
     expect(context.authenticated).toBe(true);
     expect(context.persona).toBe("student");
     expect(context.user_id).toBe("dev-student-user");
+    expect(context.profile?.onboarding_completed_at).toBeTruthy();
+  });
+
+  it("builds an authenticated context for dev referrer persona", () => {
+    const context = buildDevAuthContext("referrer");
+    expect(context.authenticated).toBe(true);
+    expect(context.persona).toBe("referrer");
+    expect(context.user_id).toBe("dev-referrer-user");
     expect(context.profile?.onboarding_completed_at).toBeTruthy();
   });
 });

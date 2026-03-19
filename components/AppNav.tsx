@@ -8,8 +8,13 @@ const navGroups = [
       ["Pipeline", "/recruiter/pipeline"],
       ["Off-Platform Scoring", "/recruiter/off-platform-scoring"],
       ["Candidates", "/recruiter/candidates"],
-      ["Outcomes", "/recruiter/outcomes"]
+      ["Outcomes", "/recruiter/outcomes"],
+      ["Candidate Relationship Manager", "/recruiter/candidate-relationship-manager"]
     ]
+  },
+  {
+    label: "Referrer",
+    items: [["Endorsements", "/referrer/endorsements"]]
   },
   {
     label: "Student",
@@ -22,6 +27,7 @@ const navGroups = [
       ["Artifacts", "/student/artifacts"],
       ["Pathway", "/student/pathway"],
       ["Capability Coach", "/student/capability-coach"],
+      ["Networking Coach", "/student/networking-coach"],
       ["Guidance", "/student/guidance"]
     ]
   },
@@ -35,7 +41,7 @@ export function AppNav() {
   return (
     <nav className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">App Navigation</p>
-      <div className="mt-3 grid gap-4 md:grid-cols-3">
+      <div className="mt-3 grid gap-4 md:grid-cols-4">
         {navGroups.map((group) => (
           <section key={group.label}>
             <h2 className="text-sm font-semibold text-emerald-900">{group.label}</h2>

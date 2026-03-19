@@ -1,4 +1,4 @@
-export type Persona = "student" | "recruiter" | "org_admin";
+export type Persona = "student" | "recruiter" | "org_admin" | "referrer";
 
 export type SessionUserSnapshot = {
   id: string;
@@ -37,6 +37,9 @@ export const routePersonaPolicy: Record<string, Persona[]> = {
   "/recruiter/off-platform-scoring": ["recruiter", "org_admin"],
   "/recruiter/candidates": ["recruiter", "org_admin"],
   "/recruiter/outcomes": ["recruiter", "org_admin"],
+  "/recruiter/candidate-relationship-manager": ["recruiter", "org_admin"],
+  "/referrer/onboarding": ["referrer"],
+  "/referrer/endorsements": ["referrer"],
   "/student/onboarding": ["student"],
   "/student/profile": ["student"],
   "/student/targets": ["student"],
@@ -44,6 +47,7 @@ export const routePersonaPolicy: Record<string, Persona[]> = {
   "/student/artifacts": ["student"],
   "/student/pathway": ["student"],
   "/student/capability-coach": ["student"],
+  "/student/networking-coach": ["student"],
   "/student/guidance": ["student"],
   "/student/interview-prep": ["student"]
 };

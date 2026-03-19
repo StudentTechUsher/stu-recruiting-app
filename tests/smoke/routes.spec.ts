@@ -3,9 +3,10 @@ import { expect, test } from "@playwright/test";
 test("login route renders chooser", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByText("Choose sign-in path")).toBeVisible();
-  await expect(page.getByText("Students and recruiters use magic links.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Students, recruiters, and referrers use magic links.", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: /Student magic link/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /Recruiter magic link/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Referrer magic link/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /Org admin password/i })).toHaveCount(0);
 });
 
@@ -16,6 +17,10 @@ test("student, recruiter, and staff login routes render", async ({ page }) => {
   await page.goto("/login/recruiter");
   await expect(page.getByText("Get magic link")).toBeVisible();
   await expect(page.getByText("Use your work email to request recruiter access.", { exact: false })).toBeVisible();
+
+  await page.goto("/login/referrer");
+  await expect(page.getByText("Get magic link")).toBeVisible();
+  await expect(page.getByText("submit endorsements", { exact: false })).toBeVisible();
 
   await page.goto("/login/staff");
   await expect(page.getByText("Password login")).toBeVisible();
@@ -32,7 +37,8 @@ test("recruiter routes render with Storybook nav", async ({ page }) => {
     "/recruiter/pipeline",
     "/recruiter/off-platform-scoring",
     "/recruiter/candidates",
-    "/recruiter/outcomes"
+    "/recruiter/outcomes",
+    "/recruiter/candidate-relationship-manager"
   ];
 
   for (const route of recruiterRoutes) {
@@ -49,18 +55,32 @@ test("student routes render with Storybook nav", async ({ page }) => {
   await page.goto("/student/onboarding");
   await expect(page).toHaveURL(/\/student\/onboarding$/);
   await expect(page.getByText("Student onboarding")).toBeVisible();
-  await expect(page.getByText("stu.").first()).toHaveCount(0);
+  await expect(page.getByText("Student Navigation")).toHaveCount(0);
 
   await page.goto("/student/artifacts");
   await expect(page).toHaveURL(/\/student\/artifacts$/);
   await expect(page.getByText("stu.").first()).toBeVisible();
 
   await page.goto("/student/dashboard");
-  await expect(page).toHaveURL(/\/student\/artifacts$/);
+  await expect(page).toHaveURL(/\/student\/dashboard$/);
+
+  await page.goto("/student/networking-coach");
+  await expect(page).toHaveURL(/\/student\/networking-coach$/);
+  await expect(page.getByText("Networking Coach (Design Preview)")).toBeVisible();
 });
 
 test("admin route renders with Storybook nav", async ({ page }) => {
   await page.goto("/admin/recruiter-assignments");
   await expect(page).toHaveURL(/\/admin\/recruiter-assignments$/);
   await expect(page.getByText("Recruiter Assignment Governance")).toBeVisible();
+});
+
+test("referrer routes render", async ({ page }) => {
+  await page.goto("/referrer/onboarding");
+  await expect(page).toHaveURL(/\/referrer\/onboarding$/);
+  await expect(page.getByText("Set up your endorsement profile")).toBeVisible();
+
+  await page.goto("/referrer/endorsements");
+  await expect(page).toHaveURL(/\/referrer\/endorsements$/);
+  await expect(page.getByText("Submit student endorsement")).toBeVisible();
 });

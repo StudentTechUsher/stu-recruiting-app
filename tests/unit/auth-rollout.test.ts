@@ -40,6 +40,15 @@ describe("persona precedence", () => {
 
     expect(resolvePersonaFromProfileOrUser(null, user)).toBe("org_admin");
   });
+
+  it("resolves referrer role from metadata", () => {
+    const user = {
+      app_metadata: { role: "referrer" },
+      user_metadata: {}
+    };
+
+    expect(resolvePersonaFromProfileOrUser(null, user)).toBe("referrer");
+  });
 });
 
 describe("post-auth redirect routing", () => {
@@ -90,5 +99,25 @@ describe("post-auth redirect routing", () => {
         studentViewReleaseFlags: studentFlags
       })
     ).toBe("/recruiter/pipeline");
+  });
+
+  it("sends referrers without onboarding to referrer onboarding route", () => {
+    expect(
+      resolvePostAuthRedirect({
+        persona: "referrer",
+        onboardingCompletedAt: null,
+        studentViewReleaseFlags: studentFlags
+      })
+    ).toBe("/referrer/onboarding");
+  });
+
+  it("sends onboarded referrers to referrer home route", () => {
+    expect(
+      resolvePostAuthRedirect({
+        persona: "referrer",
+        onboardingCompletedAt: "2026-03-10T00:00:00.000Z",
+        studentViewReleaseFlags: studentFlags
+      })
+    ).toBe("/referrer/endorsements");
   });
 });

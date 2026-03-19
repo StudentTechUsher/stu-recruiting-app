@@ -70,6 +70,37 @@ describe("staff password auth route", () => {
     expect(payload).toEqual({ ok: false, error: "use_recruiter_magic_link" });
   });
 
+  it("blocks referrer password login and instructs referrer magic link", async () => {
+    createServerClientMock.mockReturnValue({
+      auth: {
+        signInWithPassword: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "user-referrer",
+              app_metadata: { role: "referrer", stu_persona: "referrer" },
+              user_metadata: {}
+            }
+          },
+          error: null
+        }),
+        signOut: vi.fn().mockResolvedValue({ error: null })
+      }
+    });
+    getProfileByUserIdMock.mockResolvedValue({
+      id: "user-referrer",
+      role: "referrer",
+      personal_info: {},
+      auth_preferences: {},
+      onboarding_completed_at: null
+    });
+
+    const response = await POST(makeRequest({ email: "referrer@company.com", password: "hunter2!" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ ok: false, error: "use_referrer_magic_link" });
+  });
+
   it("allows org-admin password login", async () => {
     createServerClientMock.mockReturnValue({
       auth: {

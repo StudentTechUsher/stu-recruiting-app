@@ -211,7 +211,19 @@ export async function GET() {
 
   const studentData = toRecord((studentRows ?? [])[0]?.student_data);
   const sourceExtractionLog = toRecord(studentData.source_extraction_log);
-  const profileLinks = toRecord(studentData.profile_links);
+  const artifactProfileLinks = toRecord(studentData.artifact_profile_links);
+  const profileLinksFromExtraction = toRecord(studentData.profile_links);
+  const profileLinks: Record<string, unknown> = { ...artifactProfileLinks };
+  for (const [key, value] of Object.entries(profileLinksFromExtraction)) {
+    const normalized = toTrimmedString(value);
+    if (normalized !== null) {
+      profileLinks[key] = normalized;
+      continue;
+    }
+    if (typeof value !== "string") {
+      profileLinks[key] = value;
+    }
+  }
 
   return ok({
     resource: "artifacts",

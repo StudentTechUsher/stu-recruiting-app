@@ -12,6 +12,7 @@ const parsePersonaFromHeader = (value: string | null): Persona => {
   const normalized = value.trim().toLowerCase();
   if (normalized === "recruiter") return "recruiter";
   if (normalized === "org_admin" || normalized === "admin") return "org_admin";
+  if (normalized === "referrer") return "referrer";
   return "student";
 };
 
@@ -103,7 +104,8 @@ const createMockSessionData = (h: Headers): { sessionUser: SessionUserSnapshot; 
   const userId = h.get("x-stu-user-id") ?? `dev-${persona}-user`;
   const orgId = h.get("x-stu-org-id") ?? "dev-org";
   const requestedAssignments = parseAssignmentIds(h.get("x-stu-assignment-ids"));
-  const assignmentIds = requestedAssignments.length > 0 ? requestedAssignments : persona === "recruiter" ? ["pos-1"] : [];
+  const assignmentIds =
+    requestedAssignments.length > 0 ? requestedAssignments : persona === "recruiter" ? ["pos-1"] : [];
   const roleClaim = persona === "org_admin" ? "org_admin" : persona;
   const requestedFirstName = h.get("x-stu-first-name")?.trim() ?? "";
   const requestedFullName = h.get("x-stu-full-name")?.trim() ?? "";

@@ -5,7 +5,7 @@ import { getHomeRouteForPersona } from "@/lib/session-routing";
 import type { Persona } from "@/lib/route-policy";
 
 const devLoginQuerySchema = z.object({
-  persona: z.enum(["student", "recruiter", "org_admin"]).default("student")
+  persona: z.enum(["student", "recruiter", "org_admin", "referrer"]).default("student")
 });
 
 const resolveSafeRedirectPath = (value: string | null, fallback: string) => {

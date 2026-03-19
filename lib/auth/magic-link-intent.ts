@@ -1,6 +1,6 @@
 import type { NextResponse } from "next/server";
 
-export type MagicLinkIntentPersona = "student" | "recruiter";
+export type MagicLinkIntentPersona = "student" | "recruiter" | "referrer";
 
 export const magicLinkIntentCookieName = "stu-magic-link-intent";
 
@@ -9,6 +9,7 @@ const normalizeIntent = (value: string | null | undefined): MagicLinkIntentPerso
   const normalized = value.trim().toLowerCase();
   if (normalized === "student") return "student";
   if (normalized === "recruiter") return "recruiter";
+  if (normalized === "referrer") return "referrer";
   return null;
 };
 
@@ -31,6 +32,7 @@ export const resolveMagicLinkIntentFromCookieHeader = (cookieHeader: string | nu
 };
 
 export const getMagicLinkLoginPathForPersona = (persona: MagicLinkIntentPersona) => {
+  if (persona === "referrer") return "/login/referrer";
   if (persona === "recruiter") return "/login/recruiter";
   return "/login/student";
 };

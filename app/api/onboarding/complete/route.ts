@@ -27,6 +27,11 @@ const toUnauthenticatedContext = (): AuthContext => ({
   session_user: null
 });
 
+const toRecord = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+};
+
 const resolveRequestAuthContext = async (req: Request): Promise<{
   context: AuthContext;
   supabase: ReturnType<typeof createServerClient> | null;
@@ -130,12 +135,14 @@ export async function POST(req: Request) {
   }
 
   const payload = await req.json().catch(() => ({}));
+  const payloadRecord = toRecord(payload);
   const now = new Date().toISOString();
   const { profilePersonalInfo, studentData } = splitOnboardingPersistenceData({
     payload,
     existingProfilePersonalInfo: context.profile?.personal_info,
     sessionEmail: context.session_user?.email
   });
+  const referrerDataInput = toRecord(payloadRecord.referrer_data);
 
   if (supabase) {
     await supabase
@@ -171,6 +178,17 @@ export async function POST(req: Request) {
         {
           profile_id: context.user_id,
           student_data: studentData
+        },
+        { onConflict: "profile_id" }
+      );
+    }
+
+    if (context.persona === "referrer") {
+      await supabase.from("referrers").upsert(
+        {
+          profile_id: context.user_id,
+          referrer_data: referrerDataInput,
+          onboarded_at: now
         },
         { onConflict: "profile_id" }
       );

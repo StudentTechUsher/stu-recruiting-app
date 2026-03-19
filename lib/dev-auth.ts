@@ -22,6 +22,7 @@ const parseDevPersona = (value: string | null | undefined): Persona | null => {
   if (normalized === "student") return "student";
   if (normalized === "recruiter") return "recruiter";
   if (normalized === "org_admin" || normalized === "admin") return "org_admin";
+  if (normalized === "referrer") return "referrer";
   return null;
 };
 
@@ -48,7 +49,14 @@ export const buildDevAuthContext = (persona: Persona): AuthContext => {
   const orgId = "dev-org";
   const assignmentIds = persona === "recruiter" ? ["dev-assignment-1"] : [];
   const roleClaim = persona === "org_admin" ? "org_admin" : persona;
-  const fullName = persona === "student" ? "Dev Student" : persona === "recruiter" ? "Dev Recruiter" : "Dev Admin";
+  const fullName =
+    persona === "student"
+      ? "Dev Student"
+      : persona === "recruiter"
+        ? "Dev Recruiter"
+        : persona === "referrer"
+          ? "Dev Referrer"
+          : "Dev Admin";
   const firstName = fullName.split(/\s+/)[0] ?? "Dev";
 
   const profile: ProfileSnapshot = {

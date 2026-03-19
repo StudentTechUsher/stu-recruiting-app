@@ -17,9 +17,22 @@ type StudentProfileApiData = {
   student_data?: Record<string, unknown>;
   role_options?: string[];
   company_options?: string[];
+  referral_profile?: {
+    share_slug?: string | null;
+    share_path?: string | null;
+  };
+  endorsements?: Array<{
+    endorsement_id: string;
+    referrer_full_name: string;
+    referrer_company?: string | null;
+    referrer_position?: string | null;
+    referrer_linkedin_url?: string | null;
+    endorsement_text: string;
+    updated_at?: string | null;
+  }>;
 };
 
-type ProfileLinkKey = "linkedin" | "handshake" | "github" | "otherRepo" | "portfolio";
+type ProfileLinkKey = "linkedin" | "handshake" | "github" | "kaggle" | "otherRepo" | "portfolio";
 type StudentManageRolesView = "all" | "profile" | "targets";
 
 const asTrimmedString = (value: unknown): string => {
@@ -104,6 +117,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     linkedin: "",
     handshake: "",
     github: "",
+    kaggle: "",
     otherRepo: "",
     portfolio: ""
   });
@@ -115,8 +129,17 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const [isSavingExternalSignals, setIsSavingExternalSignals] = useState(false);
   const [isVisibleToTargetEmployers, setIsVisibleToTargetEmployers] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [studentSharePath, setStudentSharePath] = useState("");
+  const [endorsements, setEndorsements] = useState<StudentProfileApiData["endorsements"]>([]);
+  const [isCopyingShareUrl, setIsCopyingShareUrl] = useState(false);
+  const [appOrigin, setAppOrigin] = useState("");
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setAppOrigin(window.location.origin);
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -144,15 +167,30 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
           studentData.employer_visibility_opt_in ?? studentData.target_employer_visibility_opt_in,
           false
         );
-        const savedLinks = toRecord(studentData.artifact_profile_links);
+        const artifactProfileLinks = toRecord(studentData.artifact_profile_links);
+        const extractionProfileLinks = toRecord(studentData.profile_links);
+        const savedLinks: Record<string, unknown> = { ...artifactProfileLinks };
+        for (const [key, value] of Object.entries(extractionProfileLinks)) {
+          const normalizedValue = asTrimmedString(value);
+          if (normalizedValue.length > 0) {
+            savedLinks[key] = normalizedValue;
+            continue;
+          }
+          if (typeof value !== "string") {
+            savedLinks[key] = value;
+          }
+        }
         const savedVideoLinks = toRecord(studentData.video_links);
         const availableRoles = mergeOptionList(toStringArray(payload.data.role_options ?? []), loadedRoles);
         const availableEmployers = mergeOptionList(toStringArray(payload.data.company_options ?? []), loadedEmployers);
+        const referralProfile = toRecord(payload.data.referral_profile);
 
         setFirstName(asTrimmedString(personalInfo.first_name));
         setLastName(asTrimmedString(personalInfo.last_name));
         setEmail(asTrimmedString(personalInfo.email));
         setAvatarUrl(asTrimmedString(personalInfo.avatar_url) || asTrimmedString(personalInfo.avatarUrl));
+        setStudentSharePath(asTrimmedString(referralProfile.share_path));
+        setEndorsements(payload.data.endorsements ?? []);
         setSelectedRoles(loadedRoles);
         setSelectedEmployers(loadedEmployers);
         setIsVisibleToTargetEmployers(loadedEmployerVisibility);
@@ -162,6 +200,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
           linkedin: asTrimmedString(savedLinks.linkedin),
           handshake: asTrimmedString(savedLinks.handshake),
           github: asTrimmedString(savedLinks.github),
+          kaggle: asTrimmedString(savedLinks.kaggle),
           otherRepo: asTrimmedString(savedLinks.other_repo) || asTrimmedString(savedLinks.otherRepo),
           portfolio:
             asTrimmedString(savedLinks.portfolio_url) ||
@@ -225,10 +264,28 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     const fallback = `${first}${second}`.toUpperCase();
     return fallback.length > 0 ? fallback : "ST";
   }, [email, firstName, lastName]);
+  const canCopyShareUrl = useMemo(() => studentSharePath.trim().length > 0 && !isLoading && !isCopyingShareUrl, [isCopyingShareUrl, isLoading, studentSharePath]);
+  const studentShareUrl = useMemo(() => {
+    if (!studentSharePath) return "";
+    return appOrigin ? `${appOrigin}${studentSharePath}` : studentSharePath;
+  }, [appOrigin, studentSharePath]);
 
   const notifyStudentProfileUpdated = () => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("student-profile-updated"));
+  };
+
+  const copyShareUrl = async () => {
+    if (!canCopyShareUrl) return;
+    setIsCopyingShareUrl(true);
+    try {
+      await navigator.clipboard.writeText(studentShareUrl);
+      setStatusMessage("Copied your shareable profile URL.");
+    } catch {
+      setStatusMessage("Unable to copy URL automatically. You can still copy it manually from the field.");
+    } finally {
+      setIsCopyingShareUrl(false);
+    }
   };
 
   const toggleRole = (role: string) => {
@@ -413,8 +470,14 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
               linkedin: profileLinks.linkedin.trim(),
               handshake: profileLinks.handshake.trim(),
               github: profileLinks.github.trim(),
+              kaggle: profileLinks.kaggle.trim(),
               other_repo: profileLinks.otherRepo.trim(),
               portfolio_url: profileLinks.portfolio.trim()
+            },
+            profile_links: {
+              linkedin: profileLinks.linkedin.trim(),
+              github: profileLinks.github.trim(),
+              kaggle: profileLinks.kaggle.trim()
             },
             video_links: {
               intro_video_url: introVideoUrl.trim()
@@ -594,7 +657,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const renderProfileLinksSkeleton = () => (
     <>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {Array.from({ length: 5 }).map((_, index) => (
+        {Array.from({ length: 6 }).map((_, index) => (
           <div key={`profile-link-skeleton-${index}`} className={`${skeletonBlockClassName} h-11 w-full`} />
         ))}
       </div>
@@ -766,6 +829,16 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                     </label>
 
                     <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                      Kaggle URL
+                      <input
+                        value={profileLinks.kaggle}
+                        onChange={(event) => handleProfileLinkChange("kaggle", event.target.value)}
+                        placeholder="https://www.kaggle.com/username"
+                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </label>
+
+                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
                       Other repo URL
                       <input
                         value={profileLinks.otherRepo}
@@ -809,6 +882,67 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       {isSavingExternalSignals ? "Saving links..." : "Save profile and video links"}
                     </button>
                   </div>
+                </>
+              )}
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Referrals and endorsements</h3>
+              <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
+                Share this profile URL with referrers so they can submit endorsements on your behalf.
+              </p>
+
+              {isLoading ? (
+                <>
+                  <div className={`${skeletonBlockClassName} mt-3 h-11 w-full`} />
+                  <div className={`${skeletonBlockClassName} mt-3 h-9 w-36`} />
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2" aria-hidden="true">
+                    {Array.from({ length: 2 }).map((_, index) => (
+                      <div key={`endorsement-skeleton-${index}`} className="rounded-xl border border-[#d7e3dd] bg-[#f7fbf9] p-3">
+                        <div className={`${skeletonBlockClassName} h-4 w-32`} />
+                        <div className={`${skeletonBlockClassName} mt-2 h-3 w-44`} />
+                        <div className={`${skeletonBlockClassName} mt-3 h-3 w-full`} />
+                        <div className={`${skeletonBlockClassName} mt-2 h-3 w-5/6`} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input
+                      value={studentShareUrl}
+                      readOnly
+                      className="h-11 min-w-[260px] flex-1 rounded-xl border border-[#bfd2ca] bg-[#f3f7f5] px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void copyShareUrl()}
+                      disabled={!canCopyShareUrl}
+                      className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {isCopyingShareUrl ? "Copying..." : "Copy URL"}
+                    </button>
+                  </div>
+
+                  {endorsements && endorsements.length > 0 ? (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {endorsements.map((endorsement) => (
+                        <article
+                          key={endorsement.endorsement_id}
+                          className="rounded-xl border border-[#d7e3dd] bg-[#f7fbf9] p-3 text-xs leading-6 text-[#48635b] dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300"
+                        >
+                          <p className="text-sm font-semibold text-[#0a1f1a] dark:text-slate-100">{endorsement.referrer_full_name}</p>
+                          <p className="text-[11px] text-[#557168] dark:text-slate-400">
+                            {[endorsement.referrer_position, endorsement.referrer_company].filter(Boolean).join(" · ") || "Referrer"}
+                          </p>
+                          <p className="mt-2">{endorsement.endorsement_text}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-[#557168] dark:text-slate-400">No endorsements yet. Share your URL to start collecting referrals.</p>
+                  )}
                 </>
               )}
             </div>
@@ -1053,6 +1187,12 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                   className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Open Capability Coach
+                </Link>
+                <Link
+                  href="/student/networking-coach"
+                  className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Open Networking Coach
                 </Link>
                 <Link
                   href="/student/pathway"

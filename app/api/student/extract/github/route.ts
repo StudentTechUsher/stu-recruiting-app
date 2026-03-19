@@ -48,7 +48,8 @@ export async function POST(req: Request) {
     .limit(1);
   const studentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
   const profileLinks = toRecord(studentData.profile_links);
-  const linkedInProfileUrl = toTrimmedString(profileLinks.linkedin);
+  const artifactProfileLinks = toRecord(studentData.artifact_profile_links);
+  const linkedInProfileUrl = toTrimmedString(profileLinks.linkedin) ?? toTrimmedString(artifactProfileLinks.linkedin);
   if (!linkedInProfileUrl) return badRequest("github_linkedin_profile_required");
 
   try {

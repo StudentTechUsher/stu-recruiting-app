@@ -80,4 +80,53 @@ describe("auth callback route", () => {
     expect(signOutMock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=");
   });
+
+  it("rejects referrer-intended callbacks that resolve to a recruiter profile", async () => {
+    const signOutMock = vi.fn().mockResolvedValue({ error: null });
+    createServerClientMock.mockReturnValue({
+      auth: {
+        exchangeCodeForSession: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "user-2",
+              app_metadata: { role: "recruiter", stu_persona: "recruiter" },
+              user_metadata: {}
+            }
+          },
+          error: null
+        }),
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "user-2",
+              app_metadata: { role: "recruiter", stu_persona: "recruiter" },
+              user_metadata: {}
+            }
+          },
+          error: null
+        }),
+        signOut: signOutMock
+      }
+    });
+    getProfileByUserIdMock.mockResolvedValue({
+      id: "user-2",
+      role: "recruiter",
+      personal_info: {},
+      auth_preferences: {},
+      onboarding_completed_at: "2026-03-10T00:00:00.000Z"
+    });
+
+    const response = await GET(
+      new Request("https://app.example.com/auth/callback?code=test-code", {
+        headers: {
+          cookie: "stu-magic-link-intent=referrer"
+        }
+      })
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://app.example.com/login/referrer?error=wrong_account_type");
+    expect(signOutMock).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=");
+  });
 });

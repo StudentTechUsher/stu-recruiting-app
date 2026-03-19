@@ -19,6 +19,7 @@ export function resolvePersonaFromProfileRole(role: unknown): Persona | null {
   if (role === "student") return "student";
   if (role === "recruiter") return "recruiter";
   if (role === "org_admin" || role === "admin") return "org_admin";
+  if (role === "referrer") return "referrer";
   return null;
 }
 

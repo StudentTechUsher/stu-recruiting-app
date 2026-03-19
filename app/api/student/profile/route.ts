@@ -10,6 +10,17 @@ import { resolveOptionSelections } from "@/lib/text/fuzzy-option-match";
 type StudentRow = { student_data: unknown };
 type CompanyRow = { company_name: string | null };
 type RoleRow = { role_name: string | null };
+type ShareLinkRow = { share_slug: string | null };
+type EndorsementRow = {
+  endorsement_id: string;
+  referrer_full_name: string;
+  referrer_company: string | null;
+  referrer_position: string | null;
+  referrer_linkedin_url: string | null;
+  endorsement_text: string;
+  updated_at: string | null;
+  created_at: string | null;
+};
 type AvatarFileRef = { bucket: string; path: string };
 
 type SupabaseStorageClient = {
@@ -60,6 +71,8 @@ const parseAvatarFileRef = (value: unknown): AvatarFileRef | null => {
   return { bucket, path };
 };
 
+const deriveShareSlug = (profileId: string): string => profileId.toLowerCase().replace(/-/g, "");
+
 const resolveAvatarUrl = async (supabase: unknown, personalInfo: Record<string, unknown>): Promise<string | null> => {
   const fallbackAvatarUrl = asTrimmedString(personalInfo.avatar_url) ?? asTrimmedString(personalInfo.avatarUrl);
   const avatarFileRef = parseAvatarFileRef(personalInfo.avatar_file_ref ?? personalInfo.avatarFileRef);
@@ -90,13 +103,30 @@ export async function GET() {
   let studentData: Record<string, unknown> = {};
   let roleOptions: string[] = [...defaultFocusRoleOptions];
   let companyOptions: string[] = [...defaultFocusCompanyOptions];
+  let shareSlug = "";
+  let endorsements: EndorsementRow[] = [];
 
   if (supabase) {
-    const [{ data: studentRows }, { data: roleRows }, { data: companyRows }] = (await Promise.all([
+    const [{ data: studentRows }, { data: roleRows }, { data: companyRows }, { data: shareRows }, { data: endorsementRows }] =
+      (await Promise.all([
       supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
       supabase.from("job_roles").select("role_name").order("role_name", { ascending: true }),
-      supabase.from("companies").select("company_name").order("company_name", { ascending: true })
-    ])) as [{ data: StudentRow[] | null }, { data: RoleRow[] | null }, { data: CompanyRow[] | null }];
+      supabase.from("companies").select("company_name").order("company_name", { ascending: true }),
+      supabase.from("student_share_links").select("share_slug").eq("profile_id", context.user_id).limit(1),
+      supabase
+        .from("endorsements")
+        .select(
+          "endorsement_id, referrer_full_name, referrer_company, referrer_position, referrer_linkedin_url, endorsement_text, updated_at, created_at"
+        )
+        .eq("student_profile_id", context.user_id)
+        .order("updated_at", { ascending: false })
+    ])) as [
+      { data: StudentRow[] | null },
+      { data: RoleRow[] | null },
+      { data: CompanyRow[] | null },
+      { data: ShareLinkRow[] | null },
+      { data: EndorsementRow[] | null }
+    ];
 
     studentData = toRecord(studentRows?.[0]?.student_data);
     roleOptions = buildOptionList(
@@ -107,6 +137,14 @@ export async function GET() {
       (companyRows ?? []).map((row) => row.company_name ?? ""),
       defaultFocusCompanyOptions
     );
+    shareSlug = asTrimmedString(shareRows?.[0]?.share_slug) ?? deriveShareSlug(context.user_id);
+    endorsements = endorsementRows ?? [];
+
+    if ((shareRows?.length ?? 0) === 0) {
+      await supabase
+        .from("student_share_links")
+        .upsert({ profile_id: context.user_id, share_slug: shareSlug }, { onConflict: "profile_id" });
+    }
   } else {
     studentData = {};
   }
@@ -122,6 +160,19 @@ export async function GET() {
     student_data: studentData,
     role_options: roleOptions,
     company_options: companyOptions,
+    referral_profile: {
+      share_slug: shareSlug,
+      share_path: shareSlug.length > 0 ? `/profile/${shareSlug}` : null
+    },
+    endorsements: endorsements.map((endorsement) => ({
+      endorsement_id: endorsement.endorsement_id,
+      referrer_full_name: endorsement.referrer_full_name,
+      referrer_company: endorsement.referrer_company,
+      referrer_position: endorsement.referrer_position,
+      referrer_linkedin_url: endorsement.referrer_linkedin_url,
+      endorsement_text: endorsement.endorsement_text,
+      updated_at: endorsement.updated_at ?? endorsement.created_at
+    })),
     session_source: context.session_source ?? "none"
   });
 }

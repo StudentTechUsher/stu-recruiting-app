@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as studentMagicLinkPost } from "@/app/api/auth/login/student/route";
 import { POST as recruiterMagicLinkPost } from "@/app/api/auth/login/recruiter/route";
+import { POST as referrerMagicLinkPost } from "@/app/api/auth/login/referrer/route";
 import { isExpectedUnauthenticatedAuthError, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 import { resetMagicLinkThrottleStateForTests } from "@/lib/auth/magic-link-throttle";
 
@@ -202,6 +203,72 @@ describe("recruiter magic-link auth route", () => {
     expect(response.headers.get("x-stu-login-email")).toBe("recruiter@company.com");
     expect(response.headers.get("x-stu-persona")).toBe("recruiter");
     expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=recruiter");
+  });
+});
+
+describe("referrer magic-link auth route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    resetMagicLinkThrottleStateForTests();
+    getSupabaseConfigMock.mockReturnValue({
+      url: "https://supabase.example.com",
+      anonKey: "anon-key"
+    });
+    getAuthAppUrlMock.mockReturnValue("https://app.example.com");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends a referrer magic link with referrer metadata", async () => {
+    const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
+    createServerClientMock.mockReturnValue({
+      auth: { signInWithOtp: signInWithOtpMock }
+    });
+
+    const response = await referrerMagicLinkPost(makeRequest("/api/auth/login/referrer", { email: "referrer@company.com" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true });
+    expect(response.headers.get("x-stu-login-email")).toBe("referrer@company.com");
+    expect(response.headers.get("x-stu-persona")).toBe("referrer");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=referrer");
+    expect(signInWithOtpMock).toHaveBeenCalledWith({
+      email: "referrer@company.com",
+      options: {
+        emailRedirectTo: "https://app.example.com/auth/callback",
+        shouldCreateUser: true,
+        data: {
+          role: "referrer",
+          stu_persona: "referrer"
+        }
+      }
+    });
+  });
+
+  it("handles referrer OTP throttling as guided success with retry metadata", async () => {
+    const signInWithOtpMock = vi.fn().mockResolvedValue({
+      error: {
+        status: 429,
+        message: "Too many requests"
+      }
+    });
+    createServerClientMock.mockReturnValue({
+      auth: { signInWithOtp: signInWithOtpMock }
+    });
+
+    const response = await referrerMagicLinkPost(makeRequest("/api/auth/login/referrer", { email: "referrer@company.com" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, throttled: true, retryAfterSeconds: 60 });
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(response.headers.get("x-stu-login-email")).toBe("referrer@company.com");
+    expect(response.headers.get("x-stu-persona")).toBe("referrer");
+    expect(response.headers.get("set-cookie")).toContain("stu-magic-link-intent=referrer");
   });
 });
 

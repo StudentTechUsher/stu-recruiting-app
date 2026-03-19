@@ -55,7 +55,13 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    if (pathname.startsWith("/recruiter") && devPersona === "student") {
+    if (pathname.startsWith("/recruiter") && devPersona !== "recruiter" && devPersona !== "org_admin") {
+      const url = request.nextUrl.clone();
+      url.pathname = homeRoute;
+      return NextResponse.redirect(url);
+    }
+
+    if (pathname.startsWith("/referrer") && devPersona !== "referrer") {
       const url = request.nextUrl.clone();
       url.pathname = homeRoute;
       return NextResponse.redirect(url);
@@ -171,7 +177,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (pathname.startsWith("/recruiter") && persona === "student") {
+  if (pathname.startsWith("/recruiter") && persona !== "recruiter" && persona !== "org_admin") {
+    const url = request.nextUrl.clone();
+    url.pathname = getHomeRouteForPersona(persona);
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/referrer") && persona !== "referrer") {
     const url = request.nextUrl.clone();
     url.pathname = getHomeRouteForPersona(persona);
     return NextResponse.redirect(url);

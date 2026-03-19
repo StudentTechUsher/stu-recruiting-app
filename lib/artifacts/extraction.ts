@@ -1,5 +1,6 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { createHash } from "node:crypto";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 
 type ArtifactType =
@@ -14,14 +15,14 @@ type ArtifactType =
   | "employment"
   | "test";
 
-type ExtractionSource = "resume" | "transcript" | "linkedin" | "github";
+type ExtractionSource = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
 
 type ArtifactDraft = {
   artifact_type: ArtifactType;
   artifact_data: Record<string, unknown>;
 };
 
-type SourceLogKey = "resume" | "transcript" | "linkedin" | "github";
+type SourceLogKey = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
 type StorageFileRef = { bucket: string; path: string; kind?: string };
 type SourceExtractionStatus = "extracting" | "succeeded" | "failed";
 
@@ -40,6 +41,9 @@ type SupabaseFromLike = {
     payload: { profile_id: string; student_data: Record<string, unknown> },
     options: { onConflict: string }
   ) => QueryResult<unknown>;
+  update: (payload: unknown) => {
+    eq: (column: string, value: string) => QueryResult<unknown>;
+  };
 };
 
 export type SupabaseClientLike = {
@@ -64,6 +68,28 @@ const allowedArtifactTypes: ArtifactType[] = [
 ];
 
 const allowedArtifactTypeSet = new Set<string>(allowedArtifactTypes);
+const duplicateKeyErrorCode = "23505";
+
+const artifactFingerprintKeys = [
+  "title",
+  "source",
+  "organization",
+  "company",
+  "position",
+  "job_title",
+  "course_code",
+  "course_title",
+  "project_title",
+  "certification_name",
+  "assessment_name",
+  "competition_name",
+  "research_title",
+  "term",
+  "start_date",
+  "end_date",
+  "awarded_date",
+  "provider"
+] as const;
 
 const artifactTypeFallbackLabel: Record<ArtifactType, string> = {
   coursework: "Coursework",
@@ -189,6 +215,69 @@ const toStringArray = (value: unknown): string[] => {
     .filter((item) => typeof item === "string")
     .map((item) => (item as string).trim())
     .filter(Boolean);
+};
+
+const normalizeFingerprintToken = (value: unknown): string => {
+  const normalized = toTrimmedString(value)?.toLowerCase() ?? "";
+  if (!normalized) return "";
+  return normalized
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+};
+
+const buildArtifactFingerprint = (artifact: ArtifactDraft): string => {
+  const artifactData = toRecord(artifact.artifact_data);
+  const tokens = [
+    normalizeFingerprintToken(artifact.artifact_type),
+    ...artifactFingerprintKeys.map((key) => normalizeFingerprintToken(artifactData[key]))
+  ].filter((token) => token.length > 0);
+
+  const joined = tokens.join("|");
+  return createHash("md5").update(joined).digest("hex");
+};
+
+const normalizeFileRef = (value: unknown): Record<string, unknown> | null => {
+  const row = toRecord(value);
+  const bucket = toTrimmedString(row.bucket);
+  const path = toTrimmedString(row.path);
+  if (!bucket || !path) return null;
+
+  const normalized: Record<string, unknown> = {
+    bucket,
+    path
+  };
+  const kind = toTrimmedString(row.kind);
+  if (kind) normalized.kind = kind;
+  return normalized;
+};
+
+const isRecord = (value: Record<string, unknown> | null): value is Record<string, unknown> => value !== null;
+
+const mergeFileRefs = ({
+  existingFileRefs,
+  nextFileRef
+}: {
+  existingFileRefs: unknown;
+  nextFileRef: Record<string, unknown>;
+}): Array<Record<string, unknown>> => {
+  const merged = Array.isArray(existingFileRefs) ? existingFileRefs.map((entry) => normalizeFileRef(entry)).filter(isRecord) : [];
+  const normalizedNext = normalizeFileRef(nextFileRef);
+  if (!normalizedNext) return merged;
+
+  const nextBucket = toTrimmedString(normalizedNext.bucket) ?? "";
+  const nextPath = toTrimmedString(normalizedNext.path) ?? "";
+  const nextKind = toTrimmedString(normalizedNext.kind) ?? "";
+
+  const alreadyLinked = merged.some((entry) => {
+    const bucket = toTrimmedString(entry.bucket) ?? "";
+    const path = toTrimmedString(entry.path) ?? "";
+    const kind = toTrimmedString(entry.kind) ?? "";
+    return bucket === nextBucket && path === nextPath && kind === nextKind;
+  });
+
+  if (alreadyLinked) return merged;
+  return [...merged, normalizedNext];
 };
 
 const nicknameCanonicalMap: Record<string, string> = {
@@ -459,11 +548,39 @@ const fetchLinkedinPage = async (profileUrl: string): Promise<{ status: number; 
   }
 };
 
+const fetchKagglePage = async (profileUrl: string): Promise<{ status: number; html: string }> => {
+  const headers: Record<string, string> = {
+    "user-agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9",
+    "accept-encoding": "identity"
+  };
+
+  try {
+    const response = await fetch(profileUrl, {
+      headers,
+      redirect: "follow",
+      cache: "no-store"
+    });
+    return {
+      status: response.status,
+      html: await response.text().catch(() => "")
+    };
+  } catch {
+    return fetchPageWithNodeHttp({
+      pageUrl: profileUrl,
+      headers
+    });
+  }
+};
+
 const sourceLabelFromKind = (source: ExtractionSource) => {
   if (source === "resume") return "Resume extraction";
   if (source === "transcript") return "Transcript extraction";
   if (source === "linkedin") return "LinkedIn profile";
-  return "GitHub profile";
+  if (source === "github") return "GitHub profile";
+  return "Kaggle profile";
 };
 
 const firstNonEmptyString = (...values: unknown[]): string | null => {
@@ -536,9 +653,14 @@ const sanitizeArtifactDraft = ({
     artifactData.position = position;
   }
 
-  if (sourceKind === "transcript" || sourceKind === "github") {
+  if (sourceKind === "transcript" || sourceKind === "github" || sourceKind === "kaggle") {
     artifactData.verification_status = "verified";
-    artifactData.verification_method = sourceKind === "transcript" ? "transcript_extraction" : "github_extraction";
+    artifactData.verification_method =
+      sourceKind === "transcript"
+        ? "transcript_extraction"
+        : sourceKind === "github"
+          ? "github_extraction"
+          : "kaggle_extraction";
   } else {
     artifactData.verification_status = "unverified";
     artifactData.verification_method = sourceKind === "linkedin" ? "linkedin_extraction" : "resume_extraction";
@@ -864,6 +986,35 @@ export async function extractArtifactsFromLinkedin({
   });
 }
 
+export async function extractArtifactsFromKaggle({
+  profileUrl
+}: {
+  profileUrl: string;
+}): Promise<ArtifactDraft[]> {
+  const { status, html } = await fetchKagglePage(profileUrl);
+  if (!html.trim()) {
+    throw new Error(`kaggle_fetch_failed:status_${status || "unknown"}:empty_response`);
+  }
+
+  const scrapedText = stripHtmlToText(html).slice(0, 100_000);
+  return callOpenAIExtraction({
+    sourceKind: "kaggle",
+    systemPrompt:
+      "Extract student artifacts from a Kaggle profile capture. " +
+      "Prioritize project, competition, research, and certification artifacts grounded in visible profile evidence. " +
+      "Use artifact type 'club' for memberships without leadership role. " +
+      "Use artifact type 'leadership' only for leadership roles. " +
+      "For club and leadership artifacts, always include organization and position fields. " +
+      "Do not invent rankings, medals, scores, or outcomes not present in the profile text. " +
+      "If evidence is weak, return an empty artifacts array.",
+    userContent: [
+      { type: "input_text", text: `Kaggle URL: ${profileUrl}` },
+      { type: "input_text", text: `HTTP status: ${status}` },
+      { type: "input_text", text: `Scraped page text:\n${scrapedText}` }
+    ]
+  });
+}
+
 export async function extractArtifactsFromGithub({
   githubUsername,
   expectedStudentName,
@@ -960,34 +1111,77 @@ export async function persistExtractedArtifacts({
 }): Promise<ArtifactDraft[]> {
   if (artifacts.length === 0) return [];
 
-  const rows = artifacts.map((artifact) => ({
-    profile_id: profileId,
-    artifact_type: artifact.artifact_type,
-    artifact_data: artifact.artifact_data,
-    file_refs: fileRef ? [fileRef] : []
-  }));
+  const insertedArtifacts: ArtifactDraft[] = [];
+  for (const artifact of artifacts) {
+    const artifactFingerprint = buildArtifactFingerprint(artifact);
+    const rowToInsert = {
+      profile_id: profileId,
+      artifact_type: artifact.artifact_type,
+      artifact_data: artifact.artifact_data,
+      artifact_fingerprint: artifactFingerprint,
+      file_refs: fileRef ? [fileRef] : []
+    };
 
-  const { data, error } = await supabase
-    .from("artifacts")
-    .insert(rows)
-    .select("artifact_type, artifact_data");
+    const { data, error } = await supabase
+      .from("artifacts")
+      .insert([rowToInsert])
+      .select("artifact_type, artifact_data");
 
-  if (error) {
-    throw new Error(`artifact_persist_failed:${JSON.stringify(error).slice(0, 260)}`);
-  }
+    if (!error) {
+      const insertedRow = Array.isArray(data) ? toRecord(data[0]) : {};
+      const type = toTrimmedString(insertedRow.artifact_type);
+      if (type && allowedArtifactTypeSet.has(type)) {
+        insertedArtifacts.push({
+          artifact_type: type as ArtifactType,
+          artifact_data: toRecord(insertedRow.artifact_data)
+        });
+      }
+      continue;
+    }
 
-  const persistedRows = Array.isArray(data) ? data : [];
-  return persistedRows
-    .map((row) => toRecord(row))
-    .map((row) => {
-      const type = toTrimmedString(row.artifact_type);
-      if (!type || !allowedArtifactTypeSet.has(type)) return null;
-      return {
-        artifact_type: type as ArtifactType,
-        artifact_data: toRecord(row.artifact_data)
+    const errorCode = toTrimmedString(toRecord(error).code);
+    if (errorCode !== duplicateKeyErrorCode) {
+      throw new Error(`artifact_persist_failed:${JSON.stringify(error).slice(0, 260)}`);
+    }
+
+    if (!fileRef) continue;
+
+    const existingArtifactQuery = await (supabase
+      .from("artifacts")
+      .select("artifact_id, file_refs") as unknown as {
+      eq: (column: string, value: string) => {
+        eq: (column: string, value: string) => {
+          limit: (count: number) => QueryResult<unknown>;
+        };
       };
     })
-    .filter((row): row is ArtifactDraft => Boolean(row));
+      .eq("profile_id", profileId)
+      .eq("artifact_fingerprint", artifactFingerprint)
+      .limit(1);
+
+    const existingRows = Array.isArray(existingArtifactQuery.data) ? existingArtifactQuery.data : [];
+    const existingArtifact = toRecord(existingRows[0]);
+    const existingArtifactId = toTrimmedString(existingArtifact.artifact_id);
+    if (!existingArtifactId) continue;
+
+    const mergedFileRefs = mergeFileRefs({
+      existingFileRefs: existingArtifact.file_refs,
+      nextFileRef: fileRef
+    });
+
+    const updateResult = await (supabase
+      .from("artifacts")
+      .update({ file_refs: mergedFileRefs }) as unknown as {
+      eq: (column: string, value: string) => QueryResult<unknown>;
+    })
+      .eq("artifact_id", existingArtifactId);
+
+    if (updateResult.error) {
+      throw new Error(`artifact_link_existing_source_failed:${JSON.stringify(updateResult.error).slice(0, 260)}`);
+    }
+  }
+
+  return insertedArtifacts;
 }
 
 export async function upsertStudentExtractionMetadata({
