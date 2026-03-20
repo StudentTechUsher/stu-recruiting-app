@@ -1,7 +1,7 @@
 "use client";
 
 import { AppNavigationShell } from "@/components/AppNavigationShell";
-import { CandidateExplorer } from "@/components/mock/CandidateExplorer/CandidateExplorer";
+import { RecruiterCandidateExplorer } from "@/components/recruiter/RecruiterCandidateExplorer";
 import { RecruiterEndorsementFeed } from "@/components/recruiter/RecruiterEndorsementFeed";
 
 export default function RecruiterCandidatesPage() {
@@ -11,7 +11,7 @@ export default function RecruiterCandidatesPage() {
         <div className="px-6 pt-6 lg:px-8">
           <RecruiterEndorsementFeed />
         </div>
-        <CandidateExplorer />
+        <RecruiterCandidateExplorer />
       </main>
     </AppNavigationShell>
   );

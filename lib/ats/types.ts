@@ -1,4 +1,26 @@
-export type ATSSource = "greenhouse" | "lever";
+export type ATSProvider = "greenhouse" | "lever" | "bamboohr";
+
+export type ATSSource = ATSProvider;
+
+export type RecommendationState = "recommended" | "hold" | "manual_review";
+
+export type RecommendationReasonCode =
+  | "RANKED_NORMAL"
+  | "UNSCORED_SCANNED_RESUME"
+  | "UNSCORED_BROKEN_ATTACHMENT"
+  | "UNSCORED_DUPLICATE_RECORD"
+  | "UNSCORED_MISSING_ROLE_REQUIREMENTS"
+  | "UNSCORED_CONFLICTING_ARTIFACTS"
+  | "UNSCORED_LOW_EXTRACTION_CONFIDENCE"
+  | "MANUAL_OVERRIDE_UNSCORED"
+  | "ATS_REJECTED"
+  | "ATS_HIRED"
+  | "ATS_WITHOUT_SCORECARD"
+  | "ATS_SCORECARD_MIXED"
+  | "ATS_SCORECARD_NEGATIVE"
+  | "NO_STUDENT_MATCH";
+
+export type CandidateMatchStatus = "MATCHED_STUDENT" | "NO_STUDENT_MATCH";
 
 export type NormalizedATSCandidate = {
   ats_id: string;

@@ -3,52 +3,55 @@ import { getAuthContext } from "@/lib/auth-context";
 import { forbidden, ok, badRequest } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
 import {
-  createCapabilityModel,
-  listCapabilityModels,
+  createCapabilityModelVersion,
+  getCapabilityModel,
 } from "@/lib/recruiter/capability-models";
 
 const numericRecordSchema = z.record(z.string(), z.number());
 
-const createModelSchema = z.object({
-  model_name: z.string().min(2),
-  description: z.string().optional(),
+const createVersionSchema = z.object({
   weights: numericRecordSchema,
   thresholds: numericRecordSchema,
   required_evidence: z.array(z.string()).default([]),
   notes: z.string().optional(),
-  publish: z.boolean().optional(),
 });
 
-export async function GET() {
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ modelId: string }> }
+) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["recruiter", "org_admin"])) return forbidden();
 
-  const models = await listCapabilityModels(context.org_id);
-  return ok({ models });
+  const { modelId } = await params;
+  const result = await getCapabilityModel(context.org_id, modelId);
+  if (!result.model) return badRequest("capability_model_not_found");
+
+  return ok({ versions: result.versions });
 }
 
-export async function POST(req: Request) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ modelId: string }> }
+) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["recruiter", "org_admin"])) return forbidden();
 
   const payload = await req.json().catch(() => null);
-  const parsed = createModelSchema.safeParse(payload);
-  if (!parsed.success) return badRequest("invalid_capability_model_payload");
+  const parsed = createVersionSchema.safeParse(payload);
+  if (!parsed.success) return badRequest("invalid_capability_model_version_payload");
 
-  const created = await createCapabilityModel({
+  const { modelId } = await params;
+
+  const version = await createCapabilityModelVersion({
     orgId: context.org_id,
     userId: context.user_id,
-    modelName: parsed.data.model_name,
-    description: parsed.data.description,
+    modelId,
     weights: parsed.data.weights,
     thresholds: parsed.data.thresholds,
     requiredEvidence: parsed.data.required_evidence,
     notes: parsed.data.notes,
-    publish: parsed.data.publish,
   });
 
-  return ok({
-    model: created.model,
-    version: created.version,
-  });
+  return ok({ version });
 }

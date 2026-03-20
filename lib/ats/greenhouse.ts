@@ -20,6 +20,7 @@ import {
   fetchGreenhouseCurrentOfferFromApi,
   fetchGreenhouseDepartmentsFromApi,
 } from "./greenhouse-client";
+import { ATSProviderResolutionError, resolveATSProviderForOrg } from "./provider-config";
 
 // ---------------------------------------------------------------------------
 // Config lookup
@@ -32,38 +33,41 @@ const normalizeEnvValue = (value: string | undefined) => {
 
 type GreenhouseConfig = { apiKey: string; baseUrl: string };
 
+function getGreenhouseEnvConfig(): GreenhouseConfig | null {
+  const apiKey = normalizeEnvValue(process.env.GREENHOUSE_API_KEY);
+  if (!apiKey) return null;
+  return { apiKey, baseUrl: "https://harvest.greenhouse.io/v1" };
+}
+
 export async function getGreenhouseConfig(orgId: string): Promise<GreenhouseConfig | null> {
-  // Try DB first (org-specific key)
-  if (orgId) {
+  const normalizedOrgId = orgId.trim();
+  if (normalizedOrgId.length > 0) {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const resolved = await resolveATSProviderForOrg(normalizedOrgId);
+      if (resolved.provider === "greenhouse") {
+        const apiKeyFromSettings =
+          typeof resolved.provider_settings.api_key === "string"
+            ? normalizeEnvValue(resolved.provider_settings.api_key)
+            : null;
+        const apiKey = normalizeEnvValue(resolved.api_key ?? undefined) ?? apiKeyFromSettings;
+        if (!apiKey) return null;
 
-      if (url && serviceKey) {
-        const supabase = createClient(url, serviceKey);
-        const { data } = await supabase
-          .from("org_ats_configs")
-          .select("api_key")
-          .eq("org_id", orgId)
-          .eq("provider", "greenhouse")
-          .eq("enabled", true)
-          .maybeSingle();
+        const configuredBaseUrl =
+          typeof resolved.provider_settings.base_url === "string"
+            ? normalizeEnvValue(resolved.provider_settings.base_url)
+            : null;
 
-        if (data?.api_key) {
-          return { apiKey: data.api_key, baseUrl: "https://harvest.greenhouse.io/v1" };
-        }
+        return {
+          apiKey,
+          baseUrl: configuredBaseUrl ?? "https://harvest.greenhouse.io/v1",
+        };
       }
-    } catch {
-      // Fall through to env var check
+    } catch (error) {
+      if (error instanceof ATSProviderResolutionError && error.code === "provider_conflict") throw error;
     }
   }
 
-  // Fallback: env var (dev convenience)
-  const apiKey = normalizeEnvValue(process.env.GREENHOUSE_API_KEY);
-  if (apiKey) return { apiKey, baseUrl: "https://harvest.greenhouse.io/v1" };
-
-  return null;
+  return getGreenhouseEnvConfig();
 }
 
 // ---------------------------------------------------------------------------
