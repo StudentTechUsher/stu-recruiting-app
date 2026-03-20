@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useRouter } from "next/navigation";
 import { StudentOnboardingSignup } from "@/components/mock/StudentOnboardingSignup/StudentOnboardingSignup";
 
@@ -13,14 +14,26 @@ export function StudentOnboardingClient({
   focusRoleOptions: string[];
 }) {
   const router = useRouter();
+  const onboardingStartedAtRef = useRef<Date>(new Date());
 
   const completeOnboarding = async (payload: Record<string, unknown>) => {
+    const submittedAt = new Date();
+    const startedAt = onboardingStartedAtRef.current;
+    const durationMs = Math.max(0, submittedAt.getTime() - startedAt.getTime());
+
     const response = await fetch("/api/onboarding/complete", {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        ...payload,
+        client_metrics: {
+          onboarding_started_at: startedAt.toISOString(),
+          onboarding_submitted_at: submittedAt.toISOString(),
+          onboarding_duration_ms: durationMs
+        }
+      })
     });
 
     const data = (await response.json()) as { ok: boolean; redirectPath?: string; error?: string };

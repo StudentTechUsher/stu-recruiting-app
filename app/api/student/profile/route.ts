@@ -47,6 +47,103 @@ const asTrimmedString = (value: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
+const normalizeGithubProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  const normalizedInput = trimmed.replace(/^@+/, "");
+  if (!normalizedInput.includes("://") && !normalizedInput.includes("/")) {
+    const username = normalizedInput.replace(/^\/+|\/+$/g, "");
+    return username.length > 0 ? `https://github.com/${username}` : "";
+  }
+
+  try {
+    const parsed = new URL(normalizedInput.includes("://") ? normalizedInput : `https://${normalizedInput}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "github.com" || host === "www.github.com") {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://github.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeLinkedinProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("linkedin.com")) {
+      const cleanedPath = parsed.pathname.replace(/\/+$/, "");
+      if (cleanedPath.length > 0) return `https://www.linkedin.com${cleanedPath}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeKaggleProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("kaggle.com")) {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://www.kaggle.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeProfileLinkValue = (key: string, value: string): string => {
+  const normalizedKey = key.trim().toLowerCase();
+  if (normalizedKey === "github") return normalizeGithubProfileUrl(value);
+  if (normalizedKey === "linkedin") return normalizeLinkedinProfileUrl(value);
+  if (normalizedKey === "kaggle") return normalizeKaggleProfileUrl(value);
+  return value.trim();
+};
+
+const mergeProfileLinks = ({
+  existingLinks,
+  incomingLinks
+}: {
+  existingLinks: Record<string, unknown>;
+  incomingLinks: Record<string, unknown>;
+}): Record<string, unknown> => {
+  const merged: Record<string, unknown> = { ...existingLinks };
+
+  for (const [key, value] of Object.entries(incomingLinks)) {
+    if (value === undefined) continue;
+    if (typeof value !== "string") {
+      merged[key] = value;
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      // Explicit empty string is interpreted as an intentional clear for this key.
+      merged[key] = "";
+      continue;
+    }
+
+    merged[key] = normalizeProfileLinkValue(key, trimmed);
+  }
+
+  return merged;
+};
+
 const buildOptionList = (values: string[], fallback: readonly string[]): string[] => {
   const source = values.length > 0 ? values : [...fallback];
   const deduped = new Map<string, string>();
@@ -286,6 +383,18 @@ export async function POST(req: Request) {
   const studentData: Record<string, unknown> = {
     ...existingStudentData,
     ...studentDataInput,
+    profile_links: hasOwn(studentDataInput, "profile_links")
+      ? mergeProfileLinks({
+          existingLinks: toRecord(existingStudentData.profile_links),
+          incomingLinks: toRecord(studentDataInput.profile_links)
+        })
+      : toRecord(existingStudentData.profile_links),
+    artifact_profile_links: hasOwn(studentDataInput, "artifact_profile_links")
+      ? mergeProfileLinks({
+          existingLinks: toRecord(existingStudentData.artifact_profile_links),
+          incomingLinks: toRecord(studentDataInput.artifact_profile_links)
+        })
+      : toRecord(existingStudentData.artifact_profile_links),
     target_roles: targetRoles,
     target_companies: targetCompanies
   };

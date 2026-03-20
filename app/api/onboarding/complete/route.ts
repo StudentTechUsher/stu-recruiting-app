@@ -5,6 +5,7 @@ import {
   extractTargetRoleNames,
   splitOnboardingPersistenceData
 } from "@/lib/auth/onboarding-persistence";
+import { parseOnboardingClientMetrics } from "@/lib/auth/onboarding-metrics";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { getProfileByUserId } from "@/lib/auth/profile";
 import { resolveAssignmentsFromUser, resolveOrgIdFromUser, resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
@@ -137,6 +138,7 @@ export async function POST(req: Request) {
   const payload = await req.json().catch(() => ({}));
   const payloadRecord = toRecord(payload);
   const now = new Date().toISOString();
+  const onboardingClientMetrics = parseOnboardingClientMetrics(payloadRecord.client_metrics);
   const { profilePersonalInfo, studentData } = splitOnboardingPersistenceData({
     payload,
     existingProfilePersonalInfo: context.profile?.personal_info,
@@ -154,6 +156,14 @@ export async function POST(req: Request) {
       .eq("id", context.user_id);
 
     if (context.persona === "student") {
+      const studentDataWithMetrics: Record<string, unknown> = { ...studentData };
+      if (onboardingClientMetrics) {
+        studentDataWithMetrics.onboarding_metrics = {
+          ...onboardingClientMetrics,
+          completed_at: now
+        };
+      }
+
       const companyNames = extractTargetCompanyNames(studentData);
       if (companyNames.length > 0) {
         await supabase.from("companies").upsert(
@@ -177,7 +187,7 @@ export async function POST(req: Request) {
       await supabase.from("students").upsert(
         {
           profile_id: context.user_id,
-          student_data: studentData
+          student_data: studentDataWithMetrics
         },
         { onConflict: "profile_id" }
       );
