@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type ResolvedStudent = {
@@ -13,6 +13,14 @@ type ResolvedStudent = {
 const skeletonBlockClassName = "animate-pulse rounded-lg bg-[#e4efe9]";
 
 export default function ReferrerEndorsementsPage() {
+  return (
+    <Suspense fallback={<ReferrerEndorsementsPageFallback />}>
+      <ReferrerEndorsementsPageContent />
+    </Suspense>
+  );
+}
+
+function ReferrerEndorsementsPageContent() {
   const searchParams = useSearchParams();
   const [profileInput, setProfileInput] = useState("");
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -222,6 +230,20 @@ export default function ReferrerEndorsementsPage() {
         {saveNotice ? (
           <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-sm font-medium text-[#44645b]">{saveNotice}</p>
         ) : null}
+      </section>
+    </main>
+  );
+}
+
+function ReferrerEndorsementsPageFallback() {
+  return (
+    <main className="w-full px-6 py-12 lg:px-8">
+      <section className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)]">
+        <div className={`${skeletonBlockClassName} h-4 w-28`} />
+        <div className={`${skeletonBlockClassName} mt-3 h-10 w-80`} />
+        <div className={`${skeletonBlockClassName} mt-3 h-6 w-full`} />
+        <div className={`${skeletonBlockClassName} mt-6 h-32 w-full`} />
+        <div className={`${skeletonBlockClassName} mt-5 h-72 w-full`} />
       </section>
     </main>
   );
