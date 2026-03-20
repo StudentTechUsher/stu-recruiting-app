@@ -1,13 +1,13 @@
 "use client";
 
 import { AppNavigationShell } from "@/components/AppNavigationShell";
-import { ProfileBuilder } from "@/components/mock/ProfileBuilder/ProfileBuilder";
+import { RecruiterCapabilityModelsWorkspace } from "@/components/recruiter/RecruiterCapabilityModelsWorkspace";
 
 export default function RecruiterCapabilityModelsPage() {
   return (
     <AppNavigationShell audience="recruiter">
       <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
-        <ProfileBuilder defaultMode="guided" defaultAgentOpen />
+        <RecruiterCapabilityModelsWorkspace />
       </main>
     </AppNavigationShell>
   );
