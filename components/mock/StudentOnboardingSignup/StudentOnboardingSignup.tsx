@@ -41,9 +41,9 @@ type StudentOnboardingCompletePayload = {
     last_name: string;
     full_name: string;
     email: string;
-    major_track: string;
-    student_year: string;
-    student_archetype: StudentArchetype;
+    major_track?: string;
+    student_year?: string;
+    student_archetype?: StudentArchetype;
     target_companies: string[];
     target_roles: string[];
   };
@@ -404,15 +404,12 @@ export const StudentOnboardingSignup = ({
   const campusEmailValid = emailRegex.test(campusEmail.trim());
 
   const baselineFieldCount = useMemo(() => {
-    return [
-      campusEmailValid,
-      firstName.trim().length > 1,
-      lastName.trim().length > 1,
-      studentYear !== '',
-      majorTrack.trim().length > 1,
-      studentArchetype !== ''
-    ].filter(Boolean).length;
-  }, [campusEmailValid, firstName, lastName, majorTrack, studentArchetype, studentYear]);
+    return [campusEmailValid, firstName.trim().length > 1, lastName.trim().length > 1].filter(Boolean).length;
+  }, [campusEmailValid, firstName, lastName]);
+
+  const profileEnrichmentFieldCount = useMemo(() => {
+    return [studentYear !== '', majorTrack.trim().length > 1, studentArchetype !== ''].filter(Boolean).length;
+  }, [majorTrack, studentArchetype, studentYear]);
 
   const artifactSignalCount = useMemo(() => {
     let count = 0;
@@ -426,7 +423,7 @@ export const StudentOnboardingSignup = ({
     return count;
   }, [certificationCount, courseworkSource, leadershipEvidence, projectSignal, testEvidence]);
 
-  const baselineReady = baselineFieldCount === 6;
+  const baselineReady = baselineFieldCount === 3;
   const artifactsReady = artifactSignalCount >= 2;
   const goalsUnlocked = baselineReady;
 
@@ -439,11 +436,12 @@ export const StudentOnboardingSignup = ({
   const showBroadCoachingWarning = selectedCompanies.length > 3 || selectedRoles.length > 3;
 
   const completionScore = useMemo(() => {
-    const baselineScore = (baselineFieldCount / 6) * 60;
+    const baselineScore = (baselineFieldCount / 3) * 50;
     const goalScore = goalsUnlocked ? (goalsFieldCount / 2) * 40 : 0;
+    const enrichmentScore = (profileEnrichmentFieldCount / 3) * 10;
 
-    return Math.round(clamp(baselineScore + goalScore, 0, 100));
-  }, [baselineFieldCount, goalsFieldCount, goalsUnlocked]);
+    return Math.round(clamp(baselineScore + goalScore + enrichmentScore, 0, 100));
+  }, [baselineFieldCount, goalsFieldCount, goalsUnlocked, profileEnrichmentFieldCount]);
 
   const personalizationReadiness = clamp(completionScore + (selectedRoles.length >= 2 ? 5 : 0), 0, 100);
 
@@ -671,18 +669,20 @@ export const StudentOnboardingSignup = ({
 
     setIsCompleting(true);
     try {
+      const personalInfoPayload: StudentOnboardingCompletePayload["personal_info"] = {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        full_name: fullName,
+        email: campusEmail.trim(),
+        target_companies: selectedCompanies,
+        target_roles: selectedRoles
+      };
+      if (majorTrack.trim().length > 0) personalInfoPayload.major_track = majorTrack.trim();
+      if (studentYear !== '') personalInfoPayload.student_year = studentYear;
+      if (studentArchetype !== '') personalInfoPayload.student_archetype = studentArchetype;
+
       await onComplete({
-        personal_info: {
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          full_name: fullName,
-          email: campusEmail.trim(),
-          major_track: majorTrack.trim(),
-          student_year: studentYear,
-          student_archetype: studentArchetype as StudentArchetype,
-          target_companies: selectedCompanies,
-          target_roles: selectedRoles
-        }
+        personal_info: personalInfoPayload
       });
     } catch {
       setStatusMessage("We couldn't finish onboarding right now. Please try again.");
@@ -708,7 +708,11 @@ export const StudentOnboardingSignup = ({
               Set up your profile and capture your career intent
             </h2>
             <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
-              Sequence matters. Capture learner signals first, then unlock role and employer targeting so
+              Start fast with required identity and targeting fields, then optionally complete deeper profile details.
+              This keeps setup quick while still allowing richer context for coaching.
+            </p>
+            <p className="mt-2 text-sm leading-7 text-[#436059] dark:text-slate-300">
+              Capture learner signals first, then unlock role and employer targeting so
               <strong className="font-bold"> stu.</strong> can generate stronger agentic guidance.
             </p>
           </div>
@@ -721,7 +725,7 @@ export const StudentOnboardingSignup = ({
           >
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                Step 1 · Student baseline
+                Step 1 · Required to continue
               </p>
               <label className="mt-2 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
                 Campus email
@@ -778,150 +782,159 @@ export const StudentOnboardingSignup = ({
                 </label>
               </div>
 
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                  Student year
-                  <select
-                    value={studentYear}
-                    onChange={(event) => setStudentYear(event.target.value as StudentYear)}
-                    className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                  >
-                    <option value="">Select year</option>
-                    {studentYearOptions.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <details className="mt-4 rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-3 dark:border-slate-700 dark:bg-slate-900">
+                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-300">
+                  Complete later (optional today)
+                </summary>
+                <p className="mt-2 text-xs text-[#48635b] dark:text-slate-400">
+                  These details improve personalization, but they are not required to finish onboarding.
+                </p>
 
-                <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                  Major / focus area
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                    Student year
+                    <select
+                      value={studentYear}
+                      onChange={(event) => setStudentYear(event.target.value as StudentYear)}
+                      className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                    >
+                      <option value="">Select year</option>
+                      {studentYearOptions.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                    Major / focus area
+                    <input
+                      value={majorTrack}
+                      onChange={(event) => setMajorTrack(event.target.value)}
+                      placeholder="Ex: Information Systems"
+                      className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Student archetype</p>
+                  <div className="mt-2 hidden justify-center">
+                    <Button type="button" size="sm" className="gap-1.5" onClick={runArchetypeAssistant}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
+                        <path d="M12 3l1.8 3.8L18 8.2l-3 2.8.7 4-3.7-2-3.7 2 .7-4-3-2.8 4.2-1.4L12 3z" />
+                      </svg>
+                      Need help choosing?
+                    </Button>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {studentArchetypes.map((archetype) => {
+                      const isActive = studentArchetype === archetype.id;
+                      return (
+                        <button
+                          key={archetype.id}
+                          type="button"
+                          onClick={() => setStudentArchetype(archetype.id)}
+                          className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                            isActive
+                              ? 'border-[#0fd978] bg-[#e9fef3] ring-1 ring-[#0fd978]/35 dark:border-emerald-500 dark:bg-emerald-500/10'
+                              : archetypeToneClass[archetype.id]
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <span
+                              className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+                                isActive ? 'bg-[#12f987] text-[#0a1f1a]' : archetypeIconToneClass[archetype.id]
+                              }`}
+                            >
+                              <ArchetypeIcon archetypeId={archetype.id} />
+                            </span>
+                            <span>
+                              <span className="block text-sm font-semibold text-[#11352b] dark:text-slate-100">{archetype.label}</span>
+                              <span className="mt-1 block text-[11px] leading-4 text-[#48635b] dark:text-slate-300">{archetype.detail}</span>
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {showArchetypeAgent ? (
+                    <div className="mt-3 rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-[#133a30] dark:text-slate-100">Archetype assistant recommendation</p>
+                        <Badge className="bg-[#eef6f1] text-[#325148] dark:bg-slate-700 dark:text-slate-200">
+                          {archetypeAgentResult ? `${archetypeAgentResult.confidence} confidence` : 'No recommendation'}
+                        </Badge>
+                      </div>
+
+                      {recommendedArchetype && archetypeAgentResult ? (
+                        <>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ${archetypeIconToneClass[recommendedArchetype.id]}`}>
+                              <ArchetypeIcon archetypeId={recommendedArchetype.id} />
+                            </span>
+                            <p className="text-sm font-semibold text-[#11352b] dark:text-slate-100">{recommendedArchetype.label}</p>
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-[#48635b] dark:text-slate-300">{recommendedArchetype.detail}</p>
+                          <p className="mt-1 text-xs leading-5 text-[#48635b] dark:text-slate-300">
+                            Why this fit: {archetypeAgentResult.reason}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-2 text-xs text-[#48635b] dark:text-slate-300">
+                          Run the assistant after adding your major, learning mode, or weekly commitment for better precision.
+                        </p>
+                      )}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button type="button" size="sm" onClick={applyArchetypeRecommendation} disabled={!archetypeAgentResult}>
+                          Use this archetype
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={runArchetypeAssistant}>
+                          Refresh recommendation
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 hidden">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Learning mode</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {learningModes.map((mode) => {
+                      const isActive = learningMode === mode.id;
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setLearningMode(mode.id)}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                            isActive
+                              ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
+                              : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="mt-3 hidden text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Weekly commitment ({weeklyCommitment} hrs)
                   <input
-                    value={majorTrack}
-                    onChange={(event) => setMajorTrack(event.target.value)}
-                    placeholder="Ex: Information Systems"
-                    className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                    type="range"
+                    min={2}
+                    max={18}
+                    value={weeklyCommitment}
+                    onChange={(event) => setWeeklyCommitment(Number(event.target.value))}
+                    className="mt-2 w-full accent-[#12f987]"
                   />
                 </label>
-              </div>
-
-              <div className="mt-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Student archetype</p>
-                <div className="mt-2 hidden justify-center">
-                  <Button type="button" size="sm" className="gap-1.5" onClick={runArchetypeAssistant}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
-                      <path d="M12 3l1.8 3.8L18 8.2l-3 2.8.7 4-3.7-2-3.7 2 .7-4-3-2.8 4.2-1.4L12 3z" />
-                    </svg>
-                    Need help choosing?
-                  </Button>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {studentArchetypes.map((archetype) => {
-                    const isActive = studentArchetype === archetype.id;
-                    return (
-                      <button
-                        key={archetype.id}
-                        type="button"
-                        onClick={() => setStudentArchetype(archetype.id)}
-                        className={`rounded-xl border px-3 py-2 text-left transition-colors ${
-                          isActive
-                            ? 'border-[#0fd978] bg-[#e9fef3] ring-1 ring-[#0fd978]/35 dark:border-emerald-500 dark:bg-emerald-500/10'
-                            : archetypeToneClass[archetype.id]
-                        }`}
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <span
-                            className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
-                              isActive ? 'bg-[#12f987] text-[#0a1f1a]' : archetypeIconToneClass[archetype.id]
-                            }`}
-                          >
-                            <ArchetypeIcon archetypeId={archetype.id} />
-                          </span>
-                          <span>
-                            <span className="block text-sm font-semibold text-[#11352b] dark:text-slate-100">{archetype.label}</span>
-                            <span className="mt-1 block text-[11px] leading-4 text-[#48635b] dark:text-slate-300">{archetype.detail}</span>
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {showArchetypeAgent ? (
-                  <div className="mt-3 rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-[#133a30] dark:text-slate-100">Archetype assistant recommendation</p>
-                      <Badge className="bg-[#eef6f1] text-[#325148] dark:bg-slate-700 dark:text-slate-200">
-                        {archetypeAgentResult ? `${archetypeAgentResult.confidence} confidence` : 'No recommendation'}
-                      </Badge>
-                    </div>
-
-                    {recommendedArchetype && archetypeAgentResult ? (
-                      <>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ${archetypeIconToneClass[recommendedArchetype.id]}`}>
-                            <ArchetypeIcon archetypeId={recommendedArchetype.id} />
-                          </span>
-                          <p className="text-sm font-semibold text-[#11352b] dark:text-slate-100">{recommendedArchetype.label}</p>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-[#48635b] dark:text-slate-300">{recommendedArchetype.detail}</p>
-                        <p className="mt-1 text-xs leading-5 text-[#48635b] dark:text-slate-300">
-                          Why this fit: {archetypeAgentResult.reason}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-2 text-xs text-[#48635b] dark:text-slate-300">
-                        Run the assistant after adding your major, learning mode, or weekly commitment for better precision.
-                      </p>
-                    )}
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button type="button" size="sm" onClick={applyArchetypeRecommendation} disabled={!archetypeAgentResult}>
-                        Use this archetype
-                      </Button>
-                      <Button type="button" variant="ghost" size="sm" onClick={runArchetypeAssistant}>
-                        Refresh recommendation
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-3 hidden">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Learning mode</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {learningModes.map((mode) => {
-                    const isActive = learningMode === mode.id;
-                    return (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => setLearningMode(mode.id)}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                          isActive
-                            ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
-                            : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        {mode.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <label className="mt-3 hidden text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                Weekly commitment ({weeklyCommitment} hrs)
-                <input
-                  type="range"
-                  min={2}
-                  max={18}
-                  value={weeklyCommitment}
-                  onChange={(event) => setWeeklyCommitment(Number(event.target.value))}
-                  className="mt-2 w-full accent-[#12f987]"
-                />
-              </label>
+              </details>
             </div>
 
             <div className="mt-5 hidden border-t border-[#dfe8e3] pt-4 dark:border-slate-700">

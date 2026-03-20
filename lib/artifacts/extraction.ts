@@ -209,6 +209,87 @@ const toTrimmedString = (value: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
+const normalizeGithubProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  const normalizedInput = trimmed.replace(/^@+/, "");
+  if (!normalizedInput.includes("://") && !normalizedInput.includes("/")) {
+    const username = normalizedInput.replace(/^\/+|\/+$/g, "");
+    return username.length > 0 ? `https://github.com/${username}` : "";
+  }
+
+  try {
+    const parsed = new URL(normalizedInput.includes("://") ? normalizedInput : `https://${normalizedInput}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "github.com" || host === "www.github.com") {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://github.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeLinkedinProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("linkedin.com")) {
+      const cleanedPath = parsed.pathname.replace(/\/+$/, "");
+      if (cleanedPath.length > 0) return `https://www.linkedin.com${cleanedPath}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeKaggleProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("kaggle.com")) {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://www.kaggle.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeExtractionProfileLinkValue = (key: string, value: string): string => {
+  const normalizedKey = key.trim().toLowerCase();
+  if (normalizedKey === "github") return normalizeGithubProfileUrl(value);
+  if (normalizedKey === "linkedin") return normalizeLinkedinProfileUrl(value);
+  if (normalizedKey === "kaggle") return normalizeKaggleProfileUrl(value);
+  return value.trim();
+};
+
+const sanitizeExtractionProfileLinks = (profileLinks: Record<string, string | null> | undefined): Record<string, string> => {
+  if (!profileLinks) return {};
+
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(profileLinks)) {
+    if (typeof value !== "string") continue;
+    const normalized = normalizeExtractionProfileLinkValue(key, value);
+    if (normalized.length === 0) continue;
+    sanitized[key] = normalized;
+  }
+  return sanitized;
+};
+
 const toStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value
@@ -1216,6 +1297,7 @@ export async function upsertStudentExtractionMetadata({
   const existingStudentData = toRecord((Array.isArray(rows) ? (rows[0] as Record<string, unknown>) : {}).student_data);
   const existingLog = toRecord(existingStudentData.source_extraction_log);
   const existingProfileLinks = toRecord(existingStudentData.profile_links);
+  const sanitizedProfileLinks = sanitizeExtractionProfileLinks(profileLinks);
 
   const nextLogEntry: Record<string, unknown> = {
     last_extracted_at: new Date().toISOString(),
@@ -1245,10 +1327,10 @@ export async function upsertStudentExtractionMetadata({
     }
   };
 
-  if (profileLinks) {
+  if (Object.keys(sanitizedProfileLinks).length > 0) {
     nextStudentData.profile_links = {
       ...existingProfileLinks,
-      ...profileLinks
+      ...sanitizedProfileLinks
     };
   }
 

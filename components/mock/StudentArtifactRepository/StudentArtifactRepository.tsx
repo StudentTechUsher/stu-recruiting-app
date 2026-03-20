@@ -218,15 +218,15 @@ const artifactTypeTagPreset: Record<ArtifactType, ArtifactTag[]> = {
 };
 
 const artifactTypeToneClass: Record<ArtifactType, string> = {
-  coursework: 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-100',
-  club: 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100',
-  project: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
-  internship: 'bg-lime-100 text-lime-800 dark:bg-lime-500/20 dark:text-lime-100',
-  certification: 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-100',
-  leadership: 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100',
-  competition: 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-500/20 dark:text-fuchsia-100',
-  research: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-100',
-  employment: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-100',
+  coursework: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  club: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  project: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  internship: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  certification: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  leadership: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  competition: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  research: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  employment: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
   test: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
 };
 
@@ -234,12 +234,21 @@ const minArtifactsSkeletonMs = 350;
 const artifactIntroTourStorageKey = 'stu_artifact_intro_seen_v1';
 
 const tagToneClass: Record<ArtifactTag, string> = {
-  'Technical depth': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
-  'Applied execution': 'bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-100',
-  'Collaboration signal': 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100',
-  'Systems thinking': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-100',
-  'Communication signal': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-100',
-  'Reliability signal': 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+  'Technical depth': 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-100',
+  'Applied execution': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100',
+  'Collaboration signal': 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  'Systems thinking': 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-100',
+  'Communication signal': 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  'Reliability signal': 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100'
+};
+
+const signalBarColorByTag: Record<ArtifactTag, string> = {
+  'Technical depth': '#0284c7',
+  'Applied execution': '#059669',
+  'Collaboration signal': '#64748b',
+  'Systems thinking': '#0ea5e9',
+  'Communication signal': '#475569',
+  'Reliability signal': '#d97706'
 };
 
 const formatDate = () =>
@@ -543,6 +552,9 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
 };
 
 type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin' | 'kaggle';
+const importSourceTypes: ImportSourceType[] = ['resume', 'transcript', 'github', 'linkedin', 'kaggle'];
+const isImportSourceType = (value: string | null): value is ImportSourceType =>
+  Boolean(value && importSourceTypes.includes(value as ImportSourceType));
 
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
@@ -557,6 +569,8 @@ export const StudentArtifactRepository = () => {
   const [isDeletingArtifact, setIsDeletingArtifact] = useState(false);
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
   const hasAutoOpenedFromQueryRef = useRef(false);
+  const hasAutoOpenedExtractFromQueryRef = useRef(false);
+  const hasAutoOpenedFirstVisitExtractRef = useRef(false);
 
   // Extract from source dialog
   const [showImportSourceDialog, setShowImportSourceDialog] = useState(false);
@@ -575,7 +589,7 @@ export const StudentArtifactRepository = () => {
   const [openingSourceDocument, setOpeningSourceDocument] = useState<SourceDocumentType | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>(null);
 
-  const openImportSourceDialog = (type?: ImportSourceType) => {
+  const openImportSourceDialog = useCallback((type?: ImportSourceType) => {
     const resolvedType = type ?? 'resume';
     setImportSourceType(resolvedType);
     // Pre-fill from saved profile links
@@ -590,7 +604,7 @@ export const StudentArtifactRepository = () => {
     setImportFileName('');
     setImportStatusMessage(null);
     setShowImportSourceDialog(true);
-  };
+  }, [savedProfileLinks.github, savedProfileLinks.kaggle, savedProfileLinks.linkedin]);
 
   const closeImportSourceDialog = () => {
     setShowImportSourceDialog(false);
@@ -684,7 +698,7 @@ export const StudentArtifactRepository = () => {
           error_message: null
         });
         closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: `${sourceLabel} extraction started. This may take up to a minute.` });
+        setSnackbar({ kind: 'info', message: `${sourceLabel} extraction started. You can keep browsing while we process it.` });
 
         const form = new FormData();
         form.set('file', file);
@@ -708,7 +722,7 @@ export const StudentArtifactRepository = () => {
           error_message: null
         });
         closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'GitHub extraction started. This may take up to a minute.' });
+        setSnackbar({ kind: 'info', message: 'GitHub extraction started. You can keep browsing while we process it.' });
 
         response = await fetch('/api/student/extract/github', {
           method: 'POST',
@@ -728,7 +742,7 @@ export const StudentArtifactRepository = () => {
           error_message: null
         });
         closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'LinkedIn extraction started. This may take up to a minute.' });
+        setSnackbar({ kind: 'info', message: 'LinkedIn extraction started. You can keep browsing while we process it.' });
 
         response = await fetch('/api/student/extract/linkedin', {
           method: 'POST',
@@ -748,7 +762,7 @@ export const StudentArtifactRepository = () => {
           error_message: null
         });
         closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'Kaggle extraction started. This may take up to a minute.' });
+        setSnackbar({ kind: 'info', message: 'Kaggle extraction started. You can keep browsing while we process it.' });
 
         response = await fetch('/api/student/extract/kaggle', {
           method: 'POST',
@@ -772,7 +786,10 @@ export const StudentArtifactRepository = () => {
       const artifactLabel = addedArtifacts === 1 ? 'artifact' : 'artifacts';
 
       await loadArtifacts();
-      setSnackbar({ kind: 'success', message: `${sourceLabel} extraction complete. Added ${addedArtifacts} ${artifactLabel}.` });
+      setSnackbar({
+        kind: 'success',
+        message: `${sourceLabel} extraction complete. Added ${addedArtifacts} ${artifactLabel}. Review and edit the new drafts as needed.`
+      });
     } catch (error) {
       const errorCode = error instanceof Error ? error.message : 'extraction_failed';
       const failureMessage =
@@ -792,7 +809,7 @@ export const StudentArtifactRepository = () => {
         status: 'failed',
         error_message: failureMessage
       });
-      setSnackbar({ kind: 'error', message: failureMessage });
+      setSnackbar({ kind: 'error', message: `${failureMessage} Update the source input and try again.` });
       if (source === 'resume' || source === 'transcript') {
         await loadArtifacts().catch(() => undefined);
       }
@@ -829,8 +846,13 @@ export const StudentArtifactRepository = () => {
   const activeDocumentSourceEntry = activeDocumentSource ? sourceExtractionLog[activeDocumentSource] : undefined;
   const hasExistingActiveDocument = activeDocumentSource ? hasSourceDocumentFile(activeDocumentSourceEntry) : false;
   const activeDocumentLabel = activeDocumentSource ? activeDocumentSource.charAt(0).toUpperCase() + activeDocumentSource.slice(1) : 'Document';
+  const hasAnySuccessfulExtraction = useMemo(
+    () => Object.values(sourceExtractionLog).some((entry) => entry?.status === 'succeeded'),
+    [sourceExtractionLog]
+  );
+  const isFirstTimeExtractionUser = !isLoadingArtifacts && artifacts.length === 0 && !hasAnySuccessfulExtraction;
 
-  const showFirstArtifactTour = !isLoadingArtifacts && artifacts.length === 0 && !showArtifactIntroTour;
+  const showFirstArtifactTour = isFirstTimeExtractionUser && !showArtifactIntroTour;
 
   const loadArtifacts = useCallback(async () => {
     const loadStartedAt = Date.now();
@@ -919,8 +941,10 @@ export const StudentArtifactRepository = () => {
     }
 
     const nextUrl = new URL(window.location.href);
-    if (nextUrl.searchParams.has('tour')) {
+    if (nextUrl.searchParams.has('tour') || nextUrl.searchParams.has('openExtractSource') || nextUrl.searchParams.has('extractSource')) {
       nextUrl.searchParams.delete('tour');
+      nextUrl.searchParams.delete('openExtractSource');
+      nextUrl.searchParams.delete('extractSource');
       const search = nextUrl.searchParams.toString();
       window.history.replaceState({}, '', `${nextUrl.pathname}${search.length > 0 ? `?${search}` : ''}${nextUrl.hash}`);
     }
@@ -928,7 +952,7 @@ export const StudentArtifactRepository = () => {
 
   const startFirstArtifactTour = () => {
     dismissArtifactIntroTour();
-    openAddArtifactDialog();
+    openImportSourceDialog('resume');
   };
 
   const openEditArtifactDialog = (artifact: ArtifactRecord) => {
@@ -959,6 +983,17 @@ export const StudentArtifactRepository = () => {
   }, [searchParams, showAddArtifactDialog]);
 
   useEffect(() => {
+    const openExtractSourceParam = searchParams.get('openExtractSource');
+    const shouldOpenFromQuery = openExtractSourceParam === 'true' || openExtractSourceParam === '1';
+    if (!shouldOpenFromQuery || hasAutoOpenedExtractFromQueryRef.current || showImportSourceDialog) return;
+
+    const requestedSource = searchParams.get('extractSource');
+    const resolvedSource = isImportSourceType(requestedSource) ? requestedSource : 'resume';
+    hasAutoOpenedExtractFromQueryRef.current = true;
+    openImportSourceDialog(resolvedSource);
+  }, [openImportSourceDialog, searchParams, showImportSourceDialog]);
+
+  useEffect(() => {
     if (isLoadingArtifacts) return;
 
     const introParam = searchParams.get('tour');
@@ -977,6 +1012,12 @@ export const StudentArtifactRepository = () => {
     if (hasSeenIntroTour && !forceShowFromQuery) return;
     setShowArtifactIntroTour(true);
   }, [artifacts.length, isLoadingArtifacts, searchParams]);
+
+  useEffect(() => {
+    if (!isFirstTimeExtractionUser || hasAutoOpenedFirstVisitExtractRef.current || showImportSourceDialog) return;
+    hasAutoOpenedFirstVisitExtractRef.current = true;
+    openImportSourceDialog('resume');
+  }, [isFirstTimeExtractionUser, openImportSourceDialog, showImportSourceDialog]);
 
   const updateDraftField = <K extends keyof DraftArtifactForm>(key: K, value: DraftArtifactForm[K]) => {
     setDraftData((current) => ({
@@ -1384,20 +1425,19 @@ export const StudentArtifactRepository = () => {
           <div className="mt-4 rounded-2xl border border-[#bfe0d1] bg-[#ecfaf3] p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
             <p className="text-sm font-semibold text-[#1b4a3a] dark:text-emerald-100">First-time tour</p>
             <p className="mt-1 text-xs text-[#3e6658] dark:text-slate-300">
-              Artifacts are proof of your work, like projects, coursework, internships, and certifications. Adding one artifact now helps
-              coaching personalize your next steps.
+              Fastest path: extract from a source first, then review generated drafts. You can still add artifacts manually at any time.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" size="sm" onClick={() => startFirstArtifactTour()}>
                 <span className="inline-flex items-center gap-2">
-                  <PlusIcon />
-                  <span>Create first artifact</span>
-                </span>
-              </Button>
-              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
-                <span className="inline-flex items-center gap-2">
                   <UploadIcon />
                   <span>Extract from source</span>
+                </span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openAddArtifactDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <PlusIcon />
+                  <span>Create first artifact manually</span>
                 </span>
               </Button>
               <Button type="button" size="sm" variant="secondary" onClick={() => dismissArtifactIntroTour()}>
@@ -1411,20 +1451,20 @@ export const StudentArtifactRepository = () => {
           <div className="mt-4 rounded-2xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] p-4 dark:border-slate-700 dark:bg-slate-900">
             <p className="text-sm font-semibold text-[#2a5044] dark:text-slate-200">Quick start tour</p>
             <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
-              1) Click Add New Artifact. 2) Choose evidence type and add title, source, and a short description.
-              3) Repeat for projects, internships, clubs, leadership, certifications, competition, and test evidence.
+              1) Extract from source to auto-generate drafts. 2) Review and edit generated artifacts.
+              3) Add manual artifacts for any missing evidence.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => openAddArtifactDialog()}>
-                <span className="inline-flex items-center gap-2">
-                  <PlusIcon />
-                  <span>Add New Artifact</span>
-                </span>
-              </Button>
-              <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
+              <Button type="button" size="sm" onClick={() => openImportSourceDialog()}>
                 <span className="inline-flex items-center gap-2">
                   <UploadIcon />
                   <span>Extract from source</span>
+                </span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openAddArtifactDialog()}>
+                <span className="inline-flex items-center gap-2">
+                  <PlusIcon />
+                  <span>Add New Artifact</span>
                 </span>
               </Button>
             </div>
@@ -1479,18 +1519,8 @@ export const StudentArtifactRepository = () => {
         {!isLoadingArtifacts && artifacts.length > 0 ? (
           <div className="-mx-4 mt-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
             <div className="flex gap-2 pb-1" style={{ minWidth: 'max-content' }}>
-              {signalCoverage.map((signal, idx) => {
-                const barColors = [
-                  '#12f987', // green
-                  '#38bdf8', // sky blue
-                  '#a78bfa', // violet
-                  '#fb923c', // orange
-                  '#f472b6', // pink
-                  '#34d399', // emerald
-                  '#facc15', // yellow
-                  '#60a5fa', // blue
-                ];
-                const color = barColors[idx % barColors.length];
+              {signalCoverage.map((signal) => {
+                const color = signalBarColorByTag[signal.tag];
                 return (
                   <div
                     key={`mobile-cov-${signal.tag}`}
@@ -1721,18 +1751,8 @@ export const StudentArtifactRepository = () => {
                 Coming Soon
               </div>
               <div className="space-y-2">
-                {signalCoverage.map((signal, idx) => {
-                  const barColors = [
-                    '#12f987', // green
-                    '#38bdf8', // sky blue
-                    '#a78bfa', // violet
-                    '#fb923c', // orange
-                    '#f472b6', // pink
-                    '#34d399', // emerald
-                    '#facc15', // yellow
-                    '#60a5fa', // blue
-                  ];
-                  const color = barColors[idx % barColors.length];
+                {signalCoverage.map((signal) => {
+                  const color = signalBarColorByTag[signal.tag];
                   const width = Math.max((signal.count / maxTagCount) * 100, signal.count === 0 ? 0 : 14);
 
                   return (
@@ -1770,14 +1790,29 @@ export const StudentArtifactRepository = () => {
               <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
                 Extraction can take some time. You can keep using this page while it runs.
               </p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+                  Success
+                </span>
+                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200">
+                  In progress
+                </span>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                  Needs action
+                </span>
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200">
+                  Error
+                </span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                  Neutral
+                </span>
+              </div>
               <div className="mt-3 space-y-2">
-                {([
-                  { type: 'resume' as ImportSourceType, label: 'Resume', hint: '.pdf or .docx' },
-                  { type: 'transcript' as ImportSourceType, label: 'Transcript', hint: '.pdf or .docx' },
-                  { type: 'github' as ImportSourceType, label: 'GitHub', hint: 'Username' },
-                  { type: 'linkedin' as ImportSourceType, label: 'LinkedIn', hint: 'Profile URL' },
-                  { type: 'kaggle' as ImportSourceType, label: 'Kaggle', hint: 'Profile URL' },
-                ] as const).map(({ type, label, hint }) => {
+                {importSourceTypes.map((type) => ({
+                  type,
+                  label: type === 'linkedin' ? 'LinkedIn' : type === 'kaggle' ? 'Kaggle' : type.charAt(0).toUpperCase() + type.slice(1),
+                  hint: type === 'resume' || type === 'transcript' ? '.pdf or .docx' : type === 'github' ? 'Username' : 'Profile URL'
+                })).map(({ type, label, hint }) => {
                   const entry = sourceExtractionLog[type];
                   const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null;
                   const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null;
@@ -1848,7 +1883,7 @@ export const StudentArtifactRepository = () => {
                           </span>
                         ) : lastSyncedLabel ? (
                           <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
-                            Extracted {lastSyncedLabel}
+                            Extracted on {lastSyncedLabel}
                           </span>
                         ) : (
                           <span className="text-[11px] text-[#5a7a70] dark:text-slate-400">{hint} ↗</span>
@@ -1898,7 +1933,7 @@ export const StudentArtifactRepository = () => {
 
               {/* Source type tabs */}
               <div className="mt-4 flex gap-1.5 rounded-xl border border-[#d4e1db] bg-[#f0f7f3] p-1 dark:border-slate-700 dark:bg-slate-800">
-                {(['resume', 'transcript', 'github', 'linkedin', 'kaggle'] as ImportSourceType[]).map((type) => (
+                {importSourceTypes.map((type) => (
                   <button
                     key={type}
                     type="button"
