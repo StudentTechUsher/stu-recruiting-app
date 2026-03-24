@@ -8,6 +8,7 @@ import { useFeatureFlags } from "@/components/FeatureFlagsProvider";
 import {
   getFirstReleasedStudentRoute,
   isStudentPathReleased,
+  type RecruiterViewReleaseKey,
   type StudentViewReleaseKey
 } from "@/lib/feature-flags";
 import { ChartIcon, LayersIcon, LoopIcon, ModelIcon } from "@/components/mock/ui/Icons";
@@ -22,6 +23,7 @@ type NavItem = {
   icon: ComponentType<{ className?: string }>;
   href: string;
   releaseKey?: StudentViewReleaseKey;
+  recruiterReleaseKey?: RecruiterViewReleaseKey;
 };
 
 type StudentIdentity = {
@@ -138,7 +140,8 @@ const recruiterNavItems: NavItem[] = [
     shortLabel: "CRM",
     description: "Track follow-ups and candidate communication timeline",
     icon: GuidanceIcon,
-    href: "/recruiter/candidate-relationship-manager"
+    href: "/recruiter/candidate-relationship-manager",
+    recruiterReleaseKey: "candidateRelationshipManager"
   }
 ];
 
@@ -254,13 +257,14 @@ export function AppNavigationShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { studentViewReleaseFlags } = useFeatureFlags();
+  const { recruiterViewReleaseFlags, studentViewReleaseFlags } = useFeatureFlags();
   const [studentIdentity, setStudentIdentity] = useState<StudentIdentity | null>(null);
   const baseNavItems = getNavItems(audience);
-  const navItems =
-    audience !== "student"
-      ? baseNavItems
-      : baseNavItems.filter((item) => (item.releaseKey ? studentViewReleaseFlags[item.releaseKey] : true));
+  const navItems = baseNavItems.filter((item) => {
+    if (audience === "student" && item.releaseKey) return studentViewReleaseFlags[item.releaseKey];
+    if (audience === "recruiter" && item.recruiterReleaseKey) return recruiterViewReleaseFlags[item.recruiterReleaseKey];
+    return true;
+  });
   const mobileBottomNavItems =
     audience === "student"
       ? navItems.filter(

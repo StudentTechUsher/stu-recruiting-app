@@ -2,6 +2,7 @@ import { getAuthContext } from "@/lib/auth-context";
 import { badRequest, forbidden, ok } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
 type ArtifactRow = {
   artifact_id: string;
@@ -98,6 +99,59 @@ const toFileRefs = (value: unknown): Record<string, unknown>[] => {
     .map((entry) => entry as Record<string, unknown>);
 };
 
+const getArtifactsClient = async (sessionSource: "mock" | "supabase" | "none" | undefined) => {
+  if (sessionSource === "mock") {
+    const serviceRoleClient = getSupabaseServiceRoleClient();
+    if (serviceRoleClient) return serviceRoleClient;
+  }
+  return getSupabaseServerClient();
+};
+
+const buildDevFallbackArtifacts = (profileId: string) => {
+  const now = Date.now();
+  const iso = (offsetHours: number) => new Date(now - offsetHours * 60 * 60 * 1000).toISOString();
+
+  return [
+    {
+      artifact_id: `dev-sample-verified-${profileId}`,
+      artifact_type: "coursework",
+      artifact_data: {
+        title: "CS 330 Algorithms Coursework",
+        source: "BYU Transcript",
+        description: "Completed an advanced algorithms course and documented runtime tradeoffs.",
+        type: "coursework",
+        tags: ["coursework", "algorithms", "verified"],
+        course_code: "CS 330",
+        course_title: "Algorithms",
+        verification_status: "verified",
+        verification_method: "transcript_parse",
+        verification_source: "transcript_pdf"
+      },
+      file_refs: [],
+      created_at: iso(72),
+      updated_at: iso(72)
+    },
+    {
+      artifact_id: `dev-sample-unverified-${profileId}`,
+      artifact_type: "project",
+      artifact_data: {
+        title: "Churn Prediction Side Project",
+        source: "LinkedIn",
+        description: "Built a churn model prototype and wrote a deployment-readiness summary.",
+        type: "project",
+        tags: ["ml", "product-analytics", "unverified"],
+        project_demo_link: "https://github.com/sample/churn-prediction",
+        verification_status: "unverified",
+        verification_method: "linkedin_extraction",
+        verification_source: "linkedin_profile"
+      },
+      file_refs: [],
+      created_at: iso(24),
+      updated_at: iso(24)
+    }
+  ];
+};
+
 const hasCourseworkVerificationFile = (fileRefs: Record<string, unknown>[]): boolean => {
   if (fileRefs.length === 0) return false;
   return fileRefs.some((fileRef) => {
@@ -171,7 +225,7 @@ export async function GET() {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
 
-  const supabase = await getSupabaseServerClient();
+  const supabase = await getArtifactsClient(context.session_source);
   if (!supabase) {
     return ok({
       resource: "artifacts",
@@ -208,6 +262,10 @@ export async function GET() {
     created_at: row.created_at,
     updated_at: row.updated_at
   }));
+  const artifactsWithFallback =
+    artifacts.length === 0 && context.session_source === "mock"
+      ? buildDevFallbackArtifacts(context.user_id)
+      : artifacts;
 
   const studentData = toRecord((studentRows ?? [])[0]?.student_data);
   const sourceExtractionLog = toRecord(studentData.source_extraction_log);
@@ -228,7 +286,7 @@ export async function GET() {
   return ok({
     resource: "artifacts",
     profile_id: context.user_id,
-    artifacts,
+    artifacts: artifactsWithFallback,
     latest_transcript_session: sessionRows?.[0] ?? null,
     source_extraction_log: sourceExtractionLog,
     profile_links: profileLinks,
@@ -240,7 +298,7 @@ export async function POST(req: Request) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
 
-  const supabase = await getSupabaseServerClient();
+  const supabase = await getArtifactsClient(context.session_source);
   if (!supabase) return badRequest("supabase_unavailable");
 
   const payload = await req.json().catch(() => null);
@@ -295,7 +353,7 @@ export async function PATCH(req: Request) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
 
-  const supabase = await getSupabaseServerClient();
+  const supabase = await getArtifactsClient(context.session_source);
   if (!supabase) return badRequest("supabase_unavailable");
 
   const payload = await req.json().catch(() => null);
@@ -373,7 +431,7 @@ export async function DELETE(req: Request) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
 
-  const supabase = await getSupabaseServerClient();
+  const supabase = await getArtifactsClient(context.session_source);
   if (!supabase) return badRequest("supabase_unavailable");
 
   const payload = await req.json().catch(() => null);

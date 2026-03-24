@@ -10,6 +10,8 @@ import { POST as publishVersionPOST } from "@/app/api/recruiter/capability-model
 const {
   getAuthContextMock,
   hasPersonaMock,
+  ensureRecruiterIdByUserIdMock,
+  getRecruiterIdByUserIdMock,
   listCapabilityModelsMock,
   createCapabilityModelMock,
   getCapabilityModelMock,
@@ -18,6 +20,8 @@ const {
 } = vi.hoisted(() => ({
   getAuthContextMock: vi.fn(),
   hasPersonaMock: vi.fn(),
+  ensureRecruiterIdByUserIdMock: vi.fn(),
+  getRecruiterIdByUserIdMock: vi.fn(),
   listCapabilityModelsMock: vi.fn(),
   createCapabilityModelMock: vi.fn(),
   getCapabilityModelMock: vi.fn(),
@@ -34,6 +38,8 @@ vi.mock("@/lib/authorization", () => ({
 }));
 
 vi.mock("@/lib/recruiter/capability-models", () => ({
+  ensureRecruiterIdByUserId: ensureRecruiterIdByUserIdMock,
+  getRecruiterIdByUserId: getRecruiterIdByUserIdMock,
   listCapabilityModels: listCapabilityModelsMock,
   createCapabilityModel: createCapabilityModelMock,
   getCapabilityModel: getCapabilityModelMock,
@@ -52,6 +58,8 @@ describe("recruiter capability model routes", () => {
       assignment_ids: [],
     });
     hasPersonaMock.mockReturnValue(true);
+    getRecruiterIdByUserIdMock.mockResolvedValue("recruiter-row-1");
+    ensureRecruiterIdByUserIdMock.mockResolvedValue("recruiter-row-1");
   });
 
   it("lists models", async () => {
@@ -73,7 +81,7 @@ describe("recruiter capability model routes", () => {
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
     expect(payload.data.models).toHaveLength(1);
-    expect(listCapabilityModelsMock).toHaveBeenCalledWith("org-1");
+    expect(listCapabilityModelsMock).toHaveBeenCalledWith("recruiter-row-1");
   });
 
   it("validates model payload", async () => {
@@ -181,5 +189,50 @@ describe("recruiter capability model routes", () => {
       modelId: "model-1",
       versionId: "version-2",
     });
+  });
+
+  it("accepts nullable notes on create model payload", async () => {
+    createCapabilityModelMock.mockResolvedValue({
+      model: {
+        capability_model_id: "model-2",
+        org_id: "org-1",
+        model_name: "Platform SWE",
+        description: null,
+        active_version_id: null,
+        created_at: "2026-03-19T00:00:00.000Z",
+        updated_at: "2026-03-19T00:00:00.000Z",
+      },
+      version: {
+        capability_model_version_id: "version-1",
+        capability_model_id: "model-2",
+        org_id: "org-1",
+        version_number: 1,
+        status: "draft",
+        weights: { execution: 40 },
+        thresholds: { ready_max: 80 },
+        required_evidence: [],
+        notes: null,
+        created_at: "2026-03-19T00:00:00.000Z",
+        published_at: null,
+      },
+    });
+
+    const response = await createModelPOST(
+      new Request("http://localhost/api/recruiter/capability-models", {
+        method: "POST",
+        body: JSON.stringify({
+          model_name: "Platform SWE",
+          weights: { execution: 40 },
+          thresholds: { ready_max: 80 },
+          required_evidence: [],
+          notes: null,
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(ensureRecruiterIdByUserIdMock).toHaveBeenCalledWith("recruiter-1");
   });
 });

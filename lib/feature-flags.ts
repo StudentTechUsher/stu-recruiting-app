@@ -17,6 +17,14 @@ export const defaultStudentViewReleaseFlags: StudentViewReleaseFlags = {
   manageRoles: true
 };
 
+export type RecruiterViewReleaseKey = "candidateRelationshipManager";
+
+export type RecruiterViewReleaseFlags = Record<RecruiterViewReleaseKey, boolean>;
+
+export const defaultRecruiterViewReleaseFlags: RecruiterViewReleaseFlags = {
+  candidateRelationshipManager: false
+};
+
 export type StudentOnboardingPreviewFlagKey =
   | "aiGuidancePanelPreview"
   | "personalizedPathwayPreview"

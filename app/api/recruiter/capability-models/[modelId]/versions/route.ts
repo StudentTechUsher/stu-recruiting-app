@@ -13,7 +13,7 @@ const createVersionSchema = z.object({
   weights: numericRecordSchema,
   thresholds: numericRecordSchema,
   required_evidence: z.array(z.string()).default([]),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 export async function GET(

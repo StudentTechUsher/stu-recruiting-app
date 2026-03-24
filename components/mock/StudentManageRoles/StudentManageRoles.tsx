@@ -127,6 +127,9 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingProfileDetails, setIsSavingProfileDetails] = useState(false);
   const [isSavingExternalSignals, setIsSavingExternalSignals] = useState(false);
+  const [hasSavedProfileDetails, setHasSavedProfileDetails] = useState(false);
+  const [hasSavedExternalSignals, setHasSavedExternalSignals] = useState(false);
+  const [hasSavedTargets, setHasSavedTargets] = useState(false);
   const [isVisibleToTargetEmployers, setIsVisibleToTargetEmployers] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [studentSharePath, setStudentSharePath] = useState("");
@@ -295,6 +298,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         ? current.filter((value) => normalizeOptionSearchKey(value) !== normalized)
         : [...current, role]
     );
+    setHasSavedTargets(false);
     setStatusMessage(null);
   };
 
@@ -305,6 +309,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         ? current.filter((value) => normalizeOptionSearchKey(value) !== normalized)
         : [...current, employer]
     );
+    setHasSavedTargets(false);
     setStatusMessage(null);
   };
 
@@ -328,6 +333,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       current.some((value) => normalizeOptionSearchKey(value) === resolvedKey) ? current : [...current, resolvedRole]
     );
     setCustomRoleName("");
+    setHasSavedTargets(false);
     if (matched) {
       setStatusMessage(`Matched your input to existing role: ${resolvedRole}.`);
       return;
@@ -355,6 +361,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       current.some((value) => normalizeOptionSearchKey(value) === resolvedKey) ? current : [...current, resolvedEmployer]
     );
     setCustomEmployerName("");
+    setHasSavedTargets(false);
     if (matched) {
       setStatusMessage(`Matched your input to existing employer: ${resolvedEmployer}.`);
       return;
@@ -366,6 +373,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     setSelectedRoles([]);
     setSelectedEmployers([]);
     setIsVisibleToTargetEmployers(false);
+    setHasSavedTargets(false);
     setStatusMessage(null);
   };
 
@@ -374,6 +382,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       ...current,
       [key]: value
     }));
+    setHasSavedExternalSignals(false);
   };
 
   const uploadAvatar = async (file: File) => {
@@ -497,6 +506,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       const sourceCount =
         Object.values(profileLinks).filter((value) => value.trim().length > 0).length +
         (hasIntroVideo ? 1 : 0);
+      setHasSavedExternalSignals(true);
       setStatusMessage(`Saved ${sourceCount} external signal source${sourceCount === 1 ? "" : "s"}.`);
     } catch {
       setStatusMessage("Unable to save profile/video links right now.");
@@ -555,6 +565,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       setIsVisibleToTargetEmployers(savedVisibility);
       setRoleOptions((current) => mergeOptionList(current, savedRoles));
       setEmployerOptions((current) => mergeOptionList(current, savedEmployers));
+      setHasSavedTargets(true);
       setStatusMessage(
         savedVisibility
           ? `You are now visible to ${savedEmployers.length} selected employer${savedEmployers.length === 1 ? "" : "s"}.`
@@ -603,6 +614,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       const savedPersonalInfo = toRecord(payload.data.profile?.personal_info);
       setFirstName(asTrimmedString(savedPersonalInfo.first_name) || firstName.trim());
       setLastName(asTrimmedString(savedPersonalInfo.last_name) || lastName.trim());
+      setHasSavedProfileDetails(true);
       setStatusMessage("Profile details updated.");
       notifyStudentProfileUpdated();
     } catch {
@@ -752,7 +764,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                         First name
                         <input
                           value={firstName}
-                          onChange={(event) => setFirstName(event.target.value)}
+                          onChange={(event) => {
+                            setFirstName(event.target.value);
+                            setHasSavedProfileDetails(false);
+                          }}
                           className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                         />
                       </label>
@@ -760,7 +775,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                         Last name
                         <input
                           value={lastName}
-                          onChange={(event) => setLastName(event.target.value)}
+                          onChange={(event) => {
+                            setLastName(event.target.value);
+                            setHasSavedProfileDetails(false);
+                          }}
                           className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                         />
                       </label>
@@ -781,7 +799,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       disabled={!canSaveProfileDetails}
                       className="rounded-xl bg-[#12f987] px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] transition-colors hover:bg-[#0ed978] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isSavingProfileDetails ? "Saving..." : "Save profile details"}
+                      {isSavingProfileDetails ? "Saving..." : hasSavedProfileDetails ? "Saved" : "Save profile details"}
                     </button>
                   </div>
                 </>
@@ -864,7 +882,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       Intro video link
                       <input
                         value={introVideoUrl}
-                        onChange={(event) => setIntroVideoUrl(event.target.value)}
+                        onChange={(event) => {
+                          setIntroVideoUrl(event.target.value);
+                          setHasSavedExternalSignals(false);
+                        }}
                         placeholder="https://www.youtube.com/... or https://www.loom.com/..."
                         className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -879,7 +900,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       disabled={isLoading || isSavingExternalSignals}
                       className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      {isSavingExternalSignals ? "Saving links..." : "Save profile and video links"}
+                      {isSavingExternalSignals ? "Saving links..." : hasSavedExternalSignals ? "Saved" : "Save profile and video links"}
                     </button>
                   </div>
                 </>
@@ -979,7 +1000,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <input
                         value={customRoleName}
-                        onChange={(event) => setCustomRoleName(event.target.value)}
+                        onChange={(event) => {
+                          setCustomRoleName(event.target.value);
+                          setHasSavedTargets(false);
+                        }}
                         placeholder="Add role title"
                         className="h-10 min-w-[220px] flex-1 rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -1027,6 +1051,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                           return;
                         }
                         setIsVisibleToTargetEmployers((current) => !current);
+                        setHasSavedTargets(false);
                         setStatusMessage(null);
                       }}
                       className="inline-flex items-center gap-2 rounded-full border border-[#bfd2ca] bg-[#f5faf7] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#ebf5f0] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -1119,7 +1144,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <input
                         value={customEmployerName}
-                        onChange={(event) => setCustomEmployerName(event.target.value)}
+                        onChange={(event) => {
+                          setCustomEmployerName(event.target.value);
+                          setHasSavedTargets(false);
+                        }}
                         placeholder="Add employer"
                         className="h-10 min-w-[220px] flex-1 rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -1165,7 +1193,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                     disabled={!canSaveTargets}
                     className="rounded-xl bg-[#12f987] px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] transition-colors hover:bg-[#0ed978] disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isSaving ? "Saving..." : "Save targets"}
+                    {isSaving ? "Saving..." : hasSavedTargets ? "Saved" : "Save targets"}
                   </button>
                 </div>
               </div>
