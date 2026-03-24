@@ -27,8 +27,7 @@ const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
   const studentsSelectMock = vi.fn().mockReturnValue({ eq: studentsEqMock });
   const studentsUpsertMock = vi.fn().mockResolvedValue({ data: null, error: null });
 
-  const profilesEqMock = vi.fn().mockResolvedValue({ data: null, error: null });
-  const profilesUpdateMock = vi.fn().mockReturnValue({ eq: profilesEqMock });
+  const profilesUpsertMock = vi.fn().mockResolvedValue({ data: null, error: null });
 
   const fromMock = vi.fn().mockImplementation((table: string) => {
     if (table === "students") {
@@ -39,7 +38,7 @@ const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
     }
     if (table === "profiles") {
       return {
-        update: profilesUpdateMock
+        upsert: profilesUpsertMock
       };
     }
     return {};
@@ -47,7 +46,8 @@ const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
 
   return {
     supabase: { from: fromMock },
-    studentsUpsertMock
+    studentsUpsertMock,
+    profilesUpsertMock
   };
 };
 
@@ -73,7 +73,7 @@ describe("student profile route nested link merge", () => {
   });
 
   it("preserves unrelated profile links when partial updates are posted", async () => {
-    const { supabase, studentsUpsertMock } = buildSupabaseMock({
+    const { supabase, studentsUpsertMock, profilesUpsertMock } = buildSupabaseMock({
       profile_links: {
         linkedin: "https://www.linkedin.com/in/existing",
         github: "https://github.com/existing-user"
@@ -103,6 +103,7 @@ describe("student profile route nested link merge", () => {
     const profileLinks = upsertPayload.student_data.profile_links as Record<string, unknown>;
     expect(profileLinks.github).toBe("https://github.com/existing-user");
     expect(profileLinks.linkedin).toBe("https://www.linkedin.com/in/new-user");
+    expect(profilesUpsertMock).toHaveBeenCalled();
   });
 
   it("only clears the targeted key when empty string is explicitly submitted", async () => {
@@ -147,5 +148,30 @@ describe("student profile route nested link merge", () => {
     expect(artifactProfileLinks.github).toBe("");
     expect(artifactProfileLinks.linkedin).toBe("https://www.linkedin.com/in/existing");
     expect(artifactProfileLinks.other_repo).toBe("https://gitlab.com/existing-user");
+  });
+
+  it("returns bad request when profile persistence fails", async () => {
+    const { supabase, profilesUpsertMock } = buildSupabaseMock({});
+    profilesUpsertMock.mockResolvedValue({ data: null, error: { message: "write failed" } });
+    getSupabaseServerClientMock.mockResolvedValue(supabase);
+
+    const response = await POST(
+      new Request("https://app.example.com/api/student/profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          personal_info: {
+            avatar_file_ref: {
+              bucket: "student-artifacts-private",
+              path: "student-1/artifacts/avatar.png"
+            }
+          }
+        })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload).toEqual({ ok: false, error: "profile_save_failed" });
   });
 });

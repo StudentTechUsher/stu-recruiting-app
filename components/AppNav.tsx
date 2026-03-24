@@ -4,12 +4,12 @@ const navGroups = [
   {
     label: "Recruiter",
     items: [
+      ["Review Candidates", "/recruiter/review-candidates"],
       ["Capability Models", "/recruiter/capability-models"],
-      ["Pipeline", "/recruiter/pipeline"],
-      ["Off-Platform Scoring", "/recruiter/off-platform-scoring"],
-      ["Candidates", "/recruiter/candidates"],
-      ["Outcomes", "/recruiter/outcomes"],
-      ["Candidate Relationship Manager", "/recruiter/candidate-relationship-manager"]
+      ["Pipeline (Redirect)", "/recruiter/pipeline"],
+      ["Candidates (Redirect)", "/recruiter/candidates"],
+      ["Off-Platform Scoring (Redirect)", "/recruiter/off-platform-scoring"],
+      ["Outcomes (Redirect)", "/recruiter/outcomes"]
     ]
   },
   {

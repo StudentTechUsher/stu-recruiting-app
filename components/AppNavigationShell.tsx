@@ -20,6 +20,7 @@ type NavItem = {
   label: string;
   shortLabel: string;
   description: string;
+  badge?: string;
   icon: ComponentType<{ className?: string }>;
   href: string;
   releaseKey?: StudentViewReleaseKey;
@@ -95,53 +96,21 @@ const CompassIcon = ({ className = "h-4 w-4" }: { className?: string }) => (
 
 const recruiterNavItems: NavItem[] = [
   {
+    key: "recruiter-review-candidates",
+    label: "Review Candidates",
+    shortLabel: "Review",
+    description: "Review ATS applicants with capability evidence",
+    icon: ChartIcon,
+    href: "/recruiter/review-candidates"
+  },
+  {
     key: "recruiter-model",
     label: "Capability Model",
     shortLabel: "Model",
-    description: "Define role-aligned scoring standards",
+    description: "Build and manage role-based capability models to improve hiring alignment over time",
+    badge: "Coming Soon",
     icon: ModelIcon,
     href: "/recruiter/capability-models"
-  },
-  {
-    key: "recruiter-pipeline",
-    label: "Pipeline Overview",
-    shortLabel: "Pipeline",
-    description: "Inspect readiness and signal density",
-    icon: ChartIcon,
-    href: "/recruiter/pipeline"
-  },
-  {
-    key: "recruiter-import",
-    label: "Off-Platform Scoring",
-    shortLabel: "Import",
-    description: "Import and score external candidates",
-    icon: LayersIcon,
-    href: "/recruiter/off-platform-scoring"
-  },
-  {
-    key: "recruiter-candidates",
-    label: "Candidate Explorer",
-    shortLabel: "Candidates",
-    description: "Review evidence, videos, and references",
-    icon: CandidateIcon,
-    href: "/recruiter/candidates"
-  },
-  {
-    key: "recruiter-calibration",
-    label: "Outcome Calibration",
-    shortLabel: "Calibration",
-    description: "Apply outcome feedback to scoring",
-    icon: LoopIcon,
-    href: "/recruiter/outcomes"
-  },
-  {
-    key: "recruiter-crm",
-    label: "Candidate Relationship Manager",
-    shortLabel: "CRM",
-    description: "Track follow-ups and candidate communication timeline",
-    icon: GuidanceIcon,
-    href: "/recruiter/candidate-relationship-manager",
-    recruiterReleaseKey: "candidateRelationshipManager"
   }
 ];
 
@@ -157,9 +126,9 @@ const studentNavItems: NavItem[] = [
   },
   {
     key: "student-artifacts",
-    label: "Artifact Repository",
+    label: "Evidence Profile",
     shortLabel: "Artifacts",
-    description: "Manage projects, work samples, and evidence",
+    description: "Manage your evidence profile",
     icon: LayersIcon,
     href: "/student/artifacts",
     releaseKey: "artifactRepository"
@@ -168,7 +137,7 @@ const studentNavItems: NavItem[] = [
     key: "student-pathway",
     label: "Pathway Planner",
     shortLabel: "Pathway",
-    description: "Plan milestones by impact and timeline",
+    description: "Plan new milestones",
     icon: LoopIcon,
     href: "/student/pathway",
     releaseKey: "pathwayPlanner"
@@ -177,7 +146,7 @@ const studentNavItems: NavItem[] = [
     key: "student-guidance",
     label: "Capability Coach",
     shortLabel: "Coach",
-    description: "Preview upcoming coaching and prepare your profile",
+    description: "Improve your hiring signal",
     icon: GuidanceIcon,
     href: "/student/capability-coach"
   },
@@ -185,7 +154,7 @@ const studentNavItems: NavItem[] = [
     key: "student-networking-coach",
     label: "Networking Coach",
     shortLabel: "Networking",
-    description: "Discover people to contact at your target employers",
+    description: "Expand your network",
     icon: CandidateIcon,
     href: "/student/networking-coach"
   },
@@ -193,7 +162,7 @@ const studentNavItems: NavItem[] = [
     key: "student-targets",
     label: "My Positions & Employers",
     shortLabel: "Targets",
-    description: "Set role and employer targets for coaching",
+    description: "Set role and employer targets",
     icon: CompassIcon,
     href: "/student/targets",
     releaseKey: "manageRoles"
@@ -202,7 +171,7 @@ const studentNavItems: NavItem[] = [
     key: "student-interview-prep",
     label: "Interview Prep",
     shortLabel: "Interview",
-    description: "Practice role-based interview responses and review prior sessions",
+    description: "Practice interview responses",
     icon: InterviewPrepIcon,
     href: "/student/interview-prep",
     releaseKey: "interviewPrep"
@@ -211,7 +180,7 @@ const studentNavItems: NavItem[] = [
     key: "student-profile",
     label: "Profile",
     shortLabel: "Profile",
-    description: "Manage profile details, links, and avatar",
+    description: "Manage profile details & visibility",
     icon: CandidateIcon,
     href: "/student/profile"
   }
@@ -386,7 +355,14 @@ export function AppNavigationShell({
                         <Icon className="h-4 w-4" />
                       </span>
                       <span>
-                        <span className="block text-sm font-semibold text-[#143a2f] dark:text-slate-100">{item.label}</span>
+                        <span className="block text-sm font-semibold text-[#143a2f] dark:text-slate-100">
+                          {item.label}
+                          {item.badge ? (
+                            <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                              {item.badge}
+                            </span>
+                          ) : null}
+                        </span>
                         <span className="mt-0.5 block text-xs text-[#4a665d] dark:text-slate-300">{item.description}</span>
                       </span>
                     </span>

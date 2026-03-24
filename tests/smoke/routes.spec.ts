@@ -32,23 +32,26 @@ test("root forwards to login when unauthenticated", async ({ page }) => {
 });
 
 test("recruiter routes render with Storybook nav", async ({ page }) => {
-  const recruiterRoutes = [
-    "/recruiter/capability-models",
-    "/recruiter/pipeline",
-    "/recruiter/off-platform-scoring",
-    "/recruiter/candidates",
-    "/recruiter/outcomes",
-    "/recruiter/candidate-relationship-manager"
-  ];
+  await page.goto("/recruiter/review-candidates");
+  await expect(page).toHaveURL(/\/recruiter\/review-candidates$/);
+  await expect(page.getByRole("heading", { name: "Review Candidates" })).toBeVisible();
 
-  for (const route of recruiterRoutes) {
-    await page.goto(route);
-    await expect(page).toHaveURL(new RegExp(`${route}$`));
-    await expect(page.getByText("stu.").first()).toBeVisible();
-  }
+  await page.goto("/recruiter/pipeline");
+  await expect(page).toHaveURL(/\/recruiter\/review-candidates$/);
+
+  await page.goto("/recruiter/candidates");
+  await expect(page).toHaveURL(/\/recruiter\/review-candidates$/);
 
   await page.goto("/recruiter/off-platform-scoring");
-  await expect(page.getByText("Import and score off-platform students", { exact: false })).toBeVisible();
+  await expect(page).toHaveURL(/\/recruiter\/review-candidates$/);
+
+  await page.goto("/recruiter/outcomes");
+  await expect(page).toHaveURL(/\/recruiter\/review-candidates$/);
+
+  await page.goto("/recruiter/capability-models");
+  await expect(page).toHaveURL(/\/recruiter\/capability-models$/);
+  await expect(page.getByRole("heading", { name: "Capability Model" })).toBeVisible();
+  await expect(page.getByText("model authoring and interactive controls are disabled", { exact: false })).toBeVisible();
 });
 
 test("student routes render with Storybook nav", async ({ page }) => {

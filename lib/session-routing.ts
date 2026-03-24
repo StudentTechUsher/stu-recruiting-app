@@ -3,7 +3,7 @@ import { defaultStudentViewReleaseFlags, getFirstReleasedStudentRoute } from "@/
 export type SessionPersona = "student" | "recruiter" | "org_admin" | "referrer";
 
 export function getHomeRouteForPersona(persona: SessionPersona | string | undefined): string {
-  if (persona === "recruiter") return "/recruiter/pipeline";
+  if (persona === "recruiter") return "/recruiter/review-candidates";
   if (persona === "org_admin") return "/admin/recruiter-assignments";
   if (persona === "referrer") return "/referrer/endorsements";
   return getFirstReleasedStudentRoute(defaultStudentViewReleaseFlags);

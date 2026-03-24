@@ -4,13 +4,11 @@ import { GET, POST } from "@/app/api/recruiter/candidates/route";
 const {
   getAuthContextMock,
   hasPersonaMock,
-  getRecruiterCandidateDiscoveryMock,
-  recordRecruiterCandidateActionMock,
+  listRecruiterReviewCandidatesMock,
 } = vi.hoisted(() => ({
   getAuthContextMock: vi.fn(),
   hasPersonaMock: vi.fn(),
-  getRecruiterCandidateDiscoveryMock: vi.fn(),
-  recordRecruiterCandidateActionMock: vi.fn(),
+  listRecruiterReviewCandidatesMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-context", () => ({
@@ -21,9 +19,8 @@ vi.mock("@/lib/authorization", () => ({
   hasPersona: hasPersonaMock,
 }));
 
-vi.mock("@/lib/recruiter/candidate-discovery", () => ({
-  getRecruiterCandidateDiscovery: getRecruiterCandidateDiscoveryMock,
-  recordRecruiterCandidateAction: recordRecruiterCandidateActionMock,
+vi.mock("@/lib/recruiter/review-candidates", () => ({
+  listRecruiterReviewCandidates: listRecruiterReviewCandidatesMock,
 }));
 
 describe("recruiter candidates route", () => {
@@ -40,26 +37,30 @@ describe("recruiter candidates route", () => {
   });
 
   it("returns candidate list payload", async () => {
-    getRecruiterCandidateDiscoveryMock.mockResolvedValue({
+    listRecruiterReviewCandidatesMock.mockResolvedValue({
       provider: "greenhouse",
-      summary: {
-        total_candidates: 1,
-        matched_students: 1,
-        unmatched_candidates: 0,
-        recommendation_buckets: { recommended: 1, hold: 0, manual_review: 0 },
-        top_reason_codes: [{ reason_code: "RANKED_NORMAL", count: 1 }],
-      },
       candidates: [
         {
-          candidate_key: "greenhouse:123",
+          candidate_key: "greenhouse:app-1",
+          candidate_id: "cand-1",
+          application_id: "app-1",
+          employer_id: "org-1",
+          job_role: "Data Analyst",
           full_name: "Student One",
+          identity_state: "resolved",
+          identity_source: "canonical_linked",
+          identity_reason: null,
+          capability_summary: [],
+          evidence_indicator: { verified: 0, pending: 0, unverified: 0 },
+          current_stage: "Phone Screen",
+          applied_at: "2026-03-20T00:00:00.000Z",
         },
       ],
       total: 1,
       page: 1,
       page_size: 25,
       has_more: false,
-      timeline_preview_by_candidate_key: {},
+      job_roles: ["Data Analyst"],
     });
 
     const response = await GET(new Request("http://localhost/api/recruiter/candidates?page=1&page_size=25"));
@@ -67,8 +68,9 @@ describe("recruiter candidates route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
+    expect(payload.data.resource).toBe("review_candidates");
     expect(payload.data.total).toBe(1);
-    expect(payload.data.candidates[0].candidate_key).toBe("greenhouse:123");
+    expect(payload.data.candidates[0].candidate_key).toBe("greenhouse:app-1");
   });
 
   it("validates candidate action payload", async () => {
@@ -86,15 +88,12 @@ describe("recruiter candidates route", () => {
   });
 
   it("records candidate action payload", async () => {
-    recordRecruiterCandidateActionMock.mockResolvedValue({ recorded: true });
-
     const response = await POST(
       new Request("http://localhost/api/recruiter/candidates", {
         method: "POST",
         body: JSON.stringify({
           candidate_key: "greenhouse:123",
           action_name: "flag_for_review",
-          details: { source: "test" },
         }),
       })
     );
@@ -103,12 +102,6 @@ describe("recruiter candidates route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
-    expect(payload.data.status).toBe("recorded");
-    expect(recordRecruiterCandidateActionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        candidateKey: "greenhouse:123",
-        actionName: "flag_for_review",
-      })
-    );
+    expect(payload.data.status).toBe("disabled_in_phase1");
   });
 });

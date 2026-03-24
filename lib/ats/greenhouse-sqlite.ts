@@ -201,7 +201,10 @@ function normalizeAppRow(r: AppRow): NormalizedATSCandidate {
     status: r.status === "active" ? "active" : r.status === "rejected" ? "rejected" : r.status === "hired" ? "hired" : "other",
     profile_url: `https://app.greenhouse.io/people/${r.candidate_id}`,
     tags: JSON.parse(r.tags) as string[],
-    raw: r as unknown as Record<string, unknown>,
+    raw: {
+      ...r,
+      source: "greenhouse_sqlite_dev",
+    } as unknown as Record<string, unknown>,
   };
 }
 

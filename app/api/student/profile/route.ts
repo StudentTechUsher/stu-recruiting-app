@@ -400,28 +400,39 @@ export async function POST(req: Request) {
   };
 
   if (supabase) {
-    await supabase.from("profiles").update({ personal_info: profilePersonalInfo }).eq("id", context.user_id);
+    const { error: profileUpsertError } = (await supabase.from("profiles").upsert(
+      {
+        id: context.user_id,
+        role: "student",
+        personal_info: profilePersonalInfo
+      },
+      { onConflict: "id" }
+    )) as { error: unknown };
+    if (profileUpsertError) return badRequest("profile_save_failed");
 
-    await supabase.from("students").upsert(
+    const { error: studentUpsertError } = (await supabase.from("students").upsert(
       {
         profile_id: context.user_id,
         student_data: studentData
       },
       { onConflict: "profile_id" }
-    );
+    )) as { error: unknown };
+    if (studentUpsertError) return badRequest("student_profile_save_failed");
 
     if (rolesToInsert.length > 0) {
-      await supabase.from("job_roles").upsert(
+      const { error: roleUpsertError } = (await supabase.from("job_roles").upsert(
         rolesToInsert.map((roleName) => ({ role_name: roleName })),
         { onConflict: "role_name_normalized" }
-      );
+      )) as { error: unknown };
+      if (roleUpsertError) return badRequest("role_option_save_failed");
     }
 
     if (companiesToInsert.length > 0) {
-      await supabase.from("companies").upsert(
+      const { error: companyUpsertError } = (await supabase.from("companies").upsert(
         companiesToInsert.map((companyName) => ({ company_name: companyName })),
         { onConflict: "company_name_normalized" }
-      );
+      )) as { error: unknown };
+      if (companyUpsertError) return badRequest("company_option_save_failed");
     }
   }
 

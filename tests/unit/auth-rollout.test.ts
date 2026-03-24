@@ -98,7 +98,7 @@ describe("post-auth redirect routing", () => {
         onboardingCompletedAt: "2026-03-10T00:00:00.000Z",
         studentViewReleaseFlags: studentFlags
       })
-    ).toBe("/recruiter/pipeline");
+    ).toBe("/recruiter/review-candidates");
   });
 
   it("sends referrers without onboarding to referrer onboarding route", () => {

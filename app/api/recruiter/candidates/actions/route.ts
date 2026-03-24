@@ -2,7 +2,6 @@ import { z } from "zod";
 import { getAuthContext } from "@/lib/auth-context";
 import { forbidden, ok, badRequest } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
-import { recordRecruiterCandidateAction } from "@/lib/recruiter/candidate-discovery";
 
 const payloadSchema = z.object({
   candidate_key: z.string().min(3),
@@ -18,15 +17,7 @@ export async function POST(req: Request) {
   const parsed = payloadSchema.safeParse(payload);
   if (!parsed.success) return badRequest("invalid_candidate_action_payload");
 
-  const result = await recordRecruiterCandidateAction({
-    orgId: context.org_id,
-    userId: context.user_id,
-    candidateKey: parsed.data.candidate_key,
-    actionName: parsed.data.action_name,
-    details: parsed.data.details,
-  });
-
   return ok({
-    status: result.recorded ? "recorded" : "not_recorded",
+    status: "disabled_in_phase1",
   });
 }
