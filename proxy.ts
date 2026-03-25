@@ -4,7 +4,11 @@ import type { NextRequest } from "next/server";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { getProfileByUserId } from "@/lib/auth/profile";
 import { resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
-import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
+import {
+  defaultStudentViewReleaseFlags,
+  getFirstReleasedStudentRoute,
+  isStudentPathReleased,
+} from "@/lib/feature-flags";
 import { getHomeRouteForPersona, getOnboardingRouteForPersona } from "@/lib/session-routing";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { clearSupabaseAuthCookies, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
@@ -192,6 +196,18 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/student") && persona !== "student") {
     const url = request.nextUrl.clone();
     url.pathname = getHomeRouteForPersona(persona);
+    return NextResponse.redirect(url);
+  }
+
+  if (
+    persona === "student" &&
+    pathname.startsWith("/student") &&
+    !pathname.startsWith("/student/onboarding") &&
+    !isApiPath &&
+    !isStudentPathReleased(pathname, defaultStudentViewReleaseFlags)
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = getFirstReleasedStudentRoute(defaultStudentViewReleaseFlags);
     return NextResponse.redirect(url);
   }
 

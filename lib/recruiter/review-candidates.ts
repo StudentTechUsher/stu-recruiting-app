@@ -62,7 +62,15 @@ export type ReviewEvidenceArtifact = {
   }>;
 };
 
-const CANDIDATE_CONTEXT_CACHE_TTL_MS = 20_000;
+const DEFAULT_CANDIDATE_CONTEXT_CACHE_TTL_MS = process.env.NODE_ENV === "production" ? 20_000 : 2_000;
+const configuredCacheTtlMs = Number.parseInt(
+  process.env.REVIEW_CANDIDATE_CONTEXT_CACHE_TTL_MS ?? "",
+  10
+);
+const CANDIDATE_CONTEXT_CACHE_TTL_MS =
+  Number.isFinite(configuredCacheTtlMs) && configuredCacheTtlMs >= 0
+    ? configuredCacheTtlMs
+    : DEFAULT_CANDIDATE_CONTEXT_CACHE_TTL_MS;
 const candidateContextCache = new Map<
   string,
   {
@@ -114,6 +122,11 @@ type StudentEmailRow = {
       }
     | Array<{ personal_info: Record<string, unknown> | null }>
     | null;
+};
+
+type ProfileEmailRow = {
+  id: string;
+  personal_info: Record<string, unknown> | null;
 };
 
 type CandidateContext = {
@@ -645,6 +658,11 @@ async function fetchStudentProfileLookup(): Promise<{
     .from("students")
     .select("profile_id, email, profiles:profiles!students_profile_id_fkey(personal_info)")
     .limit(5000)) as { data: StudentEmailRow[] | null };
+  const { data: profileRows } = (await supabase
+    .from("profiles")
+    .select("id, personal_info")
+    .eq("role", "student")
+    .limit(5000)) as { data: ProfileEmailRow[] | null };
 
   const profileIdByEmail = new Map<string, string>();
   const avatarMetaByProfileId = new Map<string, ProfileAvatarMeta>();
@@ -666,6 +684,25 @@ async function fetchStudentProfileLookup(): Promise<{
         null,
       avatarFileRef: parseAvatarFileRef(personalInfo.avatar_file_ref ?? personalInfo.avatarFileRef),
     });
+  }
+
+  for (const row of profileRows ?? []) {
+    const personalInfo = toRecord(row.personal_info);
+    const email = normalizeCandidateEmail(toTrimmedString(personalInfo.email));
+    if (!email) continue;
+    if (!profileIdByEmail.has(email)) {
+      profileIdByEmail.set(email, row.id);
+    }
+
+    if (!avatarMetaByProfileId.has(row.id)) {
+      avatarMetaByProfileId.set(row.id, {
+        avatarUrl:
+          toTrimmedString(personalInfo.avatar_url) ??
+          toTrimmedString(personalInfo.avatarUrl) ??
+          null,
+        avatarFileRef: parseAvatarFileRef(personalInfo.avatar_file_ref ?? personalInfo.avatarFileRef),
+      });
+    }
   }
 
   return {
@@ -823,6 +860,13 @@ async function buildCandidateContextsUncached(orgId: string): Promise<{
     } else if (!normalizedEmail) {
       identityState = "unresolved";
       identityReason = "missing_email";
+    }
+
+    if (identityState === "unresolved" && sourceProfileId) {
+      identitySource = "ats_linked";
+      if (identityReason === "identity_not_resolved") {
+        identityReason = "profile_email_matched_unresolved";
+      }
     }
 
     if (evidenceProfileId) profileIdsNeedingArtifacts.add(evidenceProfileId);

@@ -56,6 +56,8 @@ describe("post-auth redirect routing", () => {
     artifactRepository: true,
     capabilityDashboard: false,
     pathwayPlanner: false,
+    capabilityCoach: false,
+    networkingCoach: false,
     aiGuidance: false,
     interviewPrep: false,
     manageRoles: false

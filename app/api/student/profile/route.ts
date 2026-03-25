@@ -4,10 +4,12 @@ import { defaultFocusCompanyOptions } from "@/lib/companies/default-focus-compan
 import { defaultFocusRoleOptions } from "@/lib/roles/default-focus-roles";
 import { hasPersona } from "@/lib/authorization";
 import { extractTargetCompanyNames, extractTargetRoleNames } from "@/lib/auth/onboarding-persistence";
+import { notifyOnNewRolesForMapping } from "@/lib/capabilities/role-mapping-alerts";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveOptionSelections } from "@/lib/text/fuzzy-option-match";
 
 type StudentRow = { student_data: unknown };
+type ProfilePersonalInfoRow = { personal_info: unknown };
 type CompanyRow = { company_name: string | null };
 type RoleRow = { role_name: string | null };
 type ShareLinkRow = { share_slug: string | null };
@@ -40,6 +42,8 @@ const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 };
+
+const isNonEmptyRecord = (value: Record<string, unknown>): boolean => Object.keys(value).length > 0;
 
 const asTrimmedString = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -191,12 +195,34 @@ const hydrateProfilePersonalInfo = async (supabase: unknown, personalInfo: Recor
   return hydrated;
 };
 
+const normalizeProfilePersonalInfo = (personalInfo: Record<string, unknown>): Record<string, unknown> => {
+  const normalized = { ...personalInfo };
+  const firstName = asTrimmedString(normalized.first_name);
+  const lastName = asTrimmedString(normalized.last_name);
+  const fullName = asTrimmedString(normalized.full_name);
+
+  const fullNameTokens = (fullName ?? "").split(/\s+/).filter(Boolean);
+  const derivedFirst = fullNameTokens[0] ?? null;
+  const derivedLast = fullNameTokens.slice(1).join(" ").trim() || null;
+
+  if (!firstName && derivedFirst) normalized.first_name = derivedFirst;
+  if (!lastName && derivedLast) normalized.last_name = derivedLast;
+
+  const resolvedFirst = asTrimmedString(normalized.first_name);
+  const resolvedLast = asTrimmedString(normalized.last_name);
+  if (!fullName && (resolvedFirst || resolvedLast)) {
+    normalized.full_name = [resolvedFirst, resolvedLast].filter(Boolean).join(" ");
+  }
+
+  return normalized;
+};
+
 export async function GET() {
   const context = await getAuthContext();
-  if (!hasPersona(context, ["student"])) return forbidden();
+  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
 
   const supabase = await getSupabaseServerClient();
-  const profilePersonalInfo = toRecord(context.profile?.personal_info);
+  let profilePersonalInfo = toRecord(context.profile?.personal_info);
   let studentData: Record<string, unknown> = {};
   let roleOptions: string[] = [...defaultFocusRoleOptions];
   let companyOptions: string[] = [...defaultFocusCompanyOptions];
@@ -204,8 +230,16 @@ export async function GET() {
   let endorsements: EndorsementRow[] = [];
 
   if (supabase) {
-    const [{ data: studentRows }, { data: roleRows }, { data: companyRows }, { data: shareRows }, { data: endorsementRows }] =
+    const [
+      { data: profileRows },
+      { data: studentRows },
+      { data: roleRows },
+      { data: companyRows },
+      { data: shareRows },
+      { data: endorsementRows },
+    ] =
       (await Promise.all([
+      supabase.from("profiles").select("personal_info").eq("id", context.user_id).limit(1),
       supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
       supabase.from("job_roles").select("role_name").order("role_name", { ascending: true }),
       supabase.from("companies").select("company_name").order("company_name", { ascending: true }),
@@ -218,6 +252,7 @@ export async function GET() {
         .eq("student_profile_id", context.user_id)
         .order("updated_at", { ascending: false })
     ])) as [
+      { data: ProfilePersonalInfoRow[] | null },
       { data: StudentRow[] | null },
       { data: RoleRow[] | null },
       { data: CompanyRow[] | null },
@@ -225,6 +260,10 @@ export async function GET() {
       { data: EndorsementRow[] | null }
     ];
 
+    const persistedProfilePersonalInfo = toRecord(profileRows?.[0]?.personal_info);
+    if (isNonEmptyRecord(persistedProfilePersonalInfo)) {
+      profilePersonalInfo = persistedProfilePersonalInfo;
+    }
     studentData = toRecord(studentRows?.[0]?.student_data);
     roleOptions = buildOptionList(
       (roleRows ?? []).map((row) => row.role_name ?? ""),
@@ -246,7 +285,8 @@ export async function GET() {
     studentData = {};
   }
 
-  const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, profilePersonalInfo);
+  const normalizedProfilePersonalInfo = normalizeProfilePersonalInfo(profilePersonalInfo);
+  const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, normalizedProfilePersonalInfo);
 
   return ok({
     resource: "student_profile",
@@ -276,7 +316,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const context = await getAuthContext();
-  if (!hasPersona(context, ["student"])) return forbidden();
+  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
 
   const payload = await req.json().catch(() => null);
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -286,8 +326,22 @@ export async function POST(req: Request) {
   const payloadRecord = toRecord(payload);
   const personalInfoInput = toRecord(payloadRecord.personal_info);
   const studentDataInput = toRecord(payloadRecord.student_data);
-  const existingPersonalInfo = toRecord(context.profile?.personal_info);
+  let existingPersonalInfo = toRecord(context.profile?.personal_info);
   let existingStudentData: Record<string, unknown> = {};
+
+  const supabase = await getSupabaseServerClient();
+  if (supabase) {
+    const [{ data: existingProfileRows }, { data: existingStudentRows }] = (await Promise.all([
+      supabase.from("profiles").select("personal_info").eq("id", context.user_id).limit(1),
+      supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
+    ])) as [{ data: ProfilePersonalInfoRow[] | null }, { data: StudentRow[] | null }];
+
+    const persistedProfilePersonalInfo = toRecord(existingProfileRows?.[0]?.personal_info);
+    if (isNonEmptyRecord(persistedProfilePersonalInfo)) {
+      existingPersonalInfo = persistedProfilePersonalInfo;
+    }
+    existingStudentData = toRecord(existingStudentRows?.[0]?.student_data);
+  }
 
   const firstName = asTrimmedString(personalInfoInput.first_name) ?? asTrimmedString(existingPersonalInfo.first_name);
   const lastName = asTrimmedString(personalInfoInput.last_name) ?? asTrimmedString(existingPersonalInfo.last_name);
@@ -324,17 +378,6 @@ export async function POST(req: Request) {
         path: parsedAvatarFileRef.path
       };
     }
-  }
-
-  const supabase = await getSupabaseServerClient();
-  if (supabase) {
-    const { data: existingStudentRows } = (await supabase
-      .from("students")
-      .select("student_data")
-      .eq("profile_id", context.user_id)
-      .limit(1)) as { data: StudentRow[] | null };
-
-    existingStudentData = toRecord(existingStudentRows?.[0]?.student_data);
   }
 
   const hasTargetRolesInput = Object.prototype.hasOwnProperty.call(studentDataInput, "target_roles");
@@ -425,6 +468,13 @@ export async function POST(req: Request) {
         { onConflict: "role_name_normalized" }
       )) as { error: unknown };
       if (roleUpsertError) return badRequest("role_option_save_failed");
+
+      await notifyOnNewRolesForMapping({
+        supabase,
+        roleNames: rolesToInsert,
+        detectedByProfileId: context.user_id,
+        sourceFlow: "student_profile_update",
+      });
     }
 
     if (companiesToInsert.length > 0) {

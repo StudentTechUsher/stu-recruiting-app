@@ -9,6 +9,8 @@ const toggledClassName =
 const untoggledClassName =
   "border-[#d1e0d9] bg-white text-[#1f4035] hover:bg-[#f2f8f5] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
 const skeletonBlockClassName = "animate-pulse rounded-lg bg-[#e4efe9] dark:bg-slate-700/70";
+const targetPositionChangeConfirmationMessage =
+  "Changing target positions updates the capability attributes tracked in your dashboard. Continue?";
 
 type StudentProfileApiData = {
   profile: {
@@ -34,6 +36,29 @@ type StudentProfileApiData = {
 
 type ProfileLinkKey = "linkedin" | "handshake" | "github" | "kaggle" | "otherRepo" | "portfolio";
 type StudentManageRolesView = "all" | "profile" | "targets";
+type CapabilitySourceType = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
+
+type SourceExtractionEntry = {
+  last_extracted_at?: string;
+  extracted_from?: string;
+  extracted_from_filename?: string;
+  artifact_count?: number;
+  status?: "extracting" | "succeeded" | "failed";
+  error_message?: string | null;
+  warning_code?: string | null;
+  warning_message?: string | null;
+  last_run_summary?: string | null;
+  identity_confidence?: "high" | "medium" | "low";
+  storage_file_ref?: {
+    bucket?: string;
+    path?: string;
+    kind?: string;
+  };
+};
+
+type SourceExtractionLog = Partial<Record<CapabilitySourceType, SourceExtractionEntry>>;
+
+type SourceDisplayState = "Not connected" | "Ready" | "Extracting" | "Up to date" | "Needs update" | "Failed";
 
 const asTrimmedString = (value: unknown): string => {
   if (typeof value !== "string") return "";
@@ -54,6 +79,28 @@ const asBoolean = (value: unknown, fallback = false): boolean => {
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+};
+
+const resolvePersonalNames = (personalInfo: Record<string, unknown>): { firstName: string; lastName: string } => {
+  const explicitFirst = asTrimmedString(personalInfo.first_name);
+  const explicitLast = asTrimmedString(personalInfo.last_name);
+  const fullName = asTrimmedString(personalInfo.full_name);
+
+  if (explicitFirst && explicitLast) {
+    return {
+      firstName: explicitFirst,
+      lastName: explicitLast,
+    };
+  }
+
+  const fullNameTokens = fullName.split(/\s+/).filter(Boolean);
+  const fallbackFirst = explicitFirst || fullNameTokens[0] || "";
+  const fallbackLast = explicitLast || fullNameTokens.slice(1).join(" ");
+
+  return {
+    firstName: fallbackFirst,
+    lastName: fallbackLast,
+  };
 };
 
 const isAllowedVideoUrl = (value: string): boolean => {
@@ -101,6 +148,83 @@ const mergeOptionList = (options: string[], selected: string[]): string[] => {
   return Array.from(deduped.values()).sort((a, b) => a.localeCompare(b));
 };
 
+const sourceLabel: Record<CapabilitySourceType, string> = {
+  resume: "Resume",
+  transcript: "Transcript",
+  linkedin: "LinkedIn",
+  github: "GitHub",
+  kaggle: "Kaggle"
+};
+
+const sourceStateToneClass: Record<SourceDisplayState, string> = {
+  "Not connected": "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200",
+  Ready: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200",
+  Extracting: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200",
+  "Up to date": "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200",
+  "Needs update": "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200",
+  Failed: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200"
+};
+
+const normalizeGithubProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  const normalizedInput = trimmed.replace(/^@+/, "");
+  if (!normalizedInput.includes("://") && !normalizedInput.includes("/")) {
+    const username = normalizedInput.replace(/^\/+|\/+$/g, "");
+    return username.length > 0 ? `https://github.com/${username}` : "";
+  }
+
+  try {
+    const parsed = new URL(normalizedInput.includes("://") ? normalizedInput : `https://${normalizedInput}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "github.com" || host === "www.github.com") {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://github.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeLinkedinProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("linkedin.com")) {
+      const cleanedPath = parsed.pathname.replace(/\/+$/, "");
+      if (cleanedPath.length > 0) return `https://www.linkedin.com${cleanedPath}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
+const normalizeKaggleProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("kaggle.com")) {
+      const [username] = parsed.pathname.split("/").filter(Boolean);
+      if (username) return `https://www.kaggle.com/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
 export function StudentManageRoles({ view = "all" }: { view?: StudentManageRolesView }) {
   const showProfileSections = view !== "targets";
   const showTargetSections = view !== "profile";
@@ -129,15 +253,18 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const [isSavingExternalSignals, setIsSavingExternalSignals] = useState(false);
   const [hasSavedProfileDetails, setHasSavedProfileDetails] = useState(false);
   const [hasSavedExternalSignals, setHasSavedExternalSignals] = useState(false);
-  const [hasSavedTargets, setHasSavedTargets] = useState(false);
   const [isVisibleToTargetEmployers, setIsVisibleToTargetEmployers] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [sourceExtractionLog, setSourceExtractionLog] = useState<SourceExtractionLog>({});
+  const [extractingSources, setExtractingSources] = useState<Partial<Record<CapabilitySourceType, boolean>>>({});
   const [studentSharePath, setStudentSharePath] = useState("");
   const [endorsements, setEndorsements] = useState<StudentProfileApiData["endorsements"]>([]);
   const [isCopyingShareUrl, setIsCopyingShareUrl] = useState(false);
   const [appOrigin, setAppOrigin] = useState("");
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const resumeInputRef = useRef<HTMLInputElement | null>(null);
+  const transcriptInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -184,12 +311,14 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
           }
         }
         const savedVideoLinks = toRecord(studentData.video_links);
+        const extractionLog = toRecord(studentData.source_extraction_log);
         const availableRoles = mergeOptionList(toStringArray(payload.data.role_options ?? []), loadedRoles);
         const availableEmployers = mergeOptionList(toStringArray(payload.data.company_options ?? []), loadedEmployers);
         const referralProfile = toRecord(payload.data.referral_profile);
+        const resolvedNames = resolvePersonalNames(personalInfo);
 
-        setFirstName(asTrimmedString(personalInfo.first_name));
-        setLastName(asTrimmedString(personalInfo.last_name));
+        setFirstName(resolvedNames.firstName);
+        setLastName(resolvedNames.lastName);
         setEmail(asTrimmedString(personalInfo.email));
         setAvatarUrl(asTrimmedString(personalInfo.avatar_url) || asTrimmedString(personalInfo.avatarUrl));
         setStudentSharePath(asTrimmedString(referralProfile.share_path));
@@ -199,6 +328,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         setIsVisibleToTargetEmployers(loadedEmployerVisibility);
         setRoleOptions(availableRoles);
         setEmployerOptions(availableEmployers);
+        setSourceExtractionLog(extractionLog as SourceExtractionLog);
         setProfileLinks({
           linkedin: asTrimmedString(savedLinks.linkedin),
           handshake: asTrimmedString(savedLinks.handshake),
@@ -226,9 +356,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     };
   }, []);
 
-  const hasSelections = useMemo(() => selectedRoles.length > 0 && selectedEmployers.length > 0, [selectedEmployers.length, selectedRoles.length]);
   const hasNameFields = useMemo(() => firstName.trim().length > 1 && lastName.trim().length > 1, [firstName, lastName]);
-  const canSaveTargets = !isLoading && !isSaving && hasSelections;
   const canSaveProfileDetails = !isLoading && !isSavingProfileDetails && hasNameFields;
   const externalSignalSourceCount = useMemo(() => {
     return (
@@ -272,6 +400,56 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     if (!studentSharePath) return "";
     return appOrigin ? `${appOrigin}${studentSharePath}` : studentSharePath;
   }, [appOrigin, studentSharePath]);
+  const normalizedExternalLinks = useMemo(
+    () => ({
+      linkedin: normalizeLinkedinProfileUrl(profileLinks.linkedin),
+      github: normalizeGithubProfileUrl(profileLinks.github),
+      kaggle: normalizeKaggleProfileUrl(profileLinks.kaggle)
+    }),
+    [profileLinks.github, profileLinks.kaggle, profileLinks.linkedin]
+  );
+  const sourceRows = useMemo(() => {
+    const getExternalState = (source: "linkedin" | "github" | "kaggle"): SourceDisplayState => {
+      const entry = sourceExtractionLog[source];
+      const configuredUrl = normalizedExternalLinks[source];
+      if (!configuredUrl) return "Not connected";
+      if (extractingSources[source] || entry?.status === "extracting") return "Extracting";
+      if (entry?.status === "failed") return "Failed";
+      if (!entry?.last_extracted_at) return "Ready";
+
+      const extractedFrom = asTrimmedString(entry.extracted_from);
+      if (extractedFrom && extractedFrom !== configuredUrl) return "Needs update";
+      return entry?.status === "succeeded" ? "Up to date" : "Ready";
+    };
+
+    const getDocumentState = (source: "resume" | "transcript"): SourceDisplayState => {
+      const entry = sourceExtractionLog[source];
+      if (extractingSources[source] || entry?.status === "extracting") return "Extracting";
+      if (entry?.status === "failed") return "Failed";
+      const hasDocument = Boolean(
+        asTrimmedString(entry?.extracted_from_filename) ||
+          asTrimmedString(entry?.storage_file_ref?.path) ||
+          asTrimmedString(entry?.storage_file_ref?.bucket)
+      );
+      if (!hasDocument) return "Not connected";
+      return entry?.status === "succeeded" ? "Up to date" : "Ready";
+    };
+
+    return {
+      resume: getDocumentState("resume"),
+      transcript: getDocumentState("transcript"),
+      linkedin: getExternalState("linkedin"),
+      github: getExternalState("github"),
+      kaggle: getExternalState("kaggle")
+    } as Record<CapabilitySourceType, SourceDisplayState>;
+  }, [extractingSources, normalizedExternalLinks, sourceExtractionLog]);
+  const sourcesNeedingUpdate = useMemo(
+    () =>
+      (["linkedin", "github", "kaggle"] as CapabilitySourceType[]).filter(
+        (source) => sourceRows[source] === "Needs update"
+      ),
+    [sourceRows]
+  );
 
   const notifyStudentProfileUpdated = () => {
     if (typeof window === "undefined") return;
@@ -292,28 +470,48 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   };
 
   const toggleRole = (role: string) => {
+    if (isLoading || isSaving) return;
     const normalized = normalizeOptionSearchKey(role);
-    setSelectedRoles((current) =>
-      current.some((value) => normalizeOptionSearchKey(value) === normalized)
-        ? current.filter((value) => normalizeOptionSearchKey(value) !== normalized)
-        : [...current, role]
-    );
-    setHasSavedTargets(false);
-    setStatusMessage(null);
+    const nextSelectedRoles = selectedRoles.some((value) => normalizeOptionSearchKey(value) === normalized)
+      ? selectedRoles.filter((value) => normalizeOptionSearchKey(value) !== normalized)
+      : [...selectedRoles, role];
+    if (nextSelectedRoles.length === 0) {
+      setStatusMessage("Keep at least one target position selected.");
+      return;
+    }
+    if (typeof window !== "undefined" && !window.confirm(targetPositionChangeConfirmationMessage)) {
+      return;
+    }
+    setSelectedRoles(nextSelectedRoles);
+    setStatusMessage("Saving target positions...");
+    void saveSelections({
+      rolesOverride: nextSelectedRoles,
+      employersOverride: selectedEmployers,
+      successMessage: "Target positions saved. Capability tracking updated.",
+    });
   };
 
   const toggleEmployer = (employer: string) => {
+    if (isLoading || isSaving) return;
     const normalized = normalizeOptionSearchKey(employer);
-    setSelectedEmployers((current) =>
-      current.some((value) => normalizeOptionSearchKey(value) === normalized)
-        ? current.filter((value) => normalizeOptionSearchKey(value) !== normalized)
-        : [...current, employer]
-    );
-    setHasSavedTargets(false);
-    setStatusMessage(null);
+    const nextSelectedEmployers = selectedEmployers.some((value) => normalizeOptionSearchKey(value) === normalized)
+      ? selectedEmployers.filter((value) => normalizeOptionSearchKey(value) !== normalized)
+      : [...selectedEmployers, employer];
+    if (nextSelectedEmployers.length === 0) {
+      setStatusMessage("Keep at least one target employer selected.");
+      return;
+    }
+    setSelectedEmployers(nextSelectedEmployers);
+    setStatusMessage("Saving target employers...");
+    void saveSelections({
+      rolesOverride: selectedRoles,
+      employersOverride: nextSelectedEmployers,
+      successMessage: "Target employers saved.",
+    });
   };
 
   const addCustomRole = () => {
+    if (isLoading || isSaving) return;
     const normalized = normalizeOptionLabel(customRoleName);
     const normalizedKey = normalizeOptionSearchKey(normalized);
     if (normalizedKey.length < 2) {
@@ -324,24 +522,31 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     const matched = findBestOptionMatch(normalized, roleOptions);
     const resolvedRole = matched?.option ?? normalized;
     const resolvedKey = normalizeOptionSearchKey(resolvedRole);
+    if (typeof window !== "undefined" && !window.confirm(targetPositionChangeConfirmationMessage)) {
+      return;
+    }
 
     setRoleOptions((current) => {
       if (current.some((value) => normalizeOptionSearchKey(value) === resolvedKey)) return current;
       return mergeOptionList(current, [resolvedRole]);
     });
-    setSelectedRoles((current) =>
-      current.some((value) => normalizeOptionSearchKey(value) === resolvedKey) ? current : [...current, resolvedRole]
-    );
+    const nextSelectedRoles = selectedRoles.some((value) => normalizeOptionSearchKey(value) === resolvedKey)
+      ? selectedRoles
+      : [...selectedRoles, resolvedRole];
+    setSelectedRoles(nextSelectedRoles);
     setCustomRoleName("");
-    setHasSavedTargets(false);
-    if (matched) {
-      setStatusMessage(`Matched your input to existing role: ${resolvedRole}.`);
-      return;
-    }
-    setStatusMessage(`Added ${resolvedRole} to your role targets.`);
+    setStatusMessage("Saving target positions...");
+    void saveSelections({
+      rolesOverride: nextSelectedRoles,
+      employersOverride: selectedEmployers,
+      successMessage: matched
+        ? `Matched and saved role: ${resolvedRole}. Capability tracking updated.`
+        : `Added and saved role: ${resolvedRole}. Capability tracking updated.`,
+    });
   };
 
   const addCustomEmployer = () => {
+    if (isLoading || isSaving) return;
     const normalized = normalizeOptionLabel(customEmployerName);
     const normalizedKey = normalizeOptionSearchKey(normalized);
     if (normalizedKey.length < 2) {
@@ -357,24 +562,19 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       if (current.some((value) => normalizeOptionSearchKey(value) === resolvedKey)) return current;
       return mergeOptionList(current, [resolvedEmployer]);
     });
-    setSelectedEmployers((current) =>
-      current.some((value) => normalizeOptionSearchKey(value) === resolvedKey) ? current : [...current, resolvedEmployer]
-    );
+    const nextSelectedEmployers = selectedEmployers.some((value) => normalizeOptionSearchKey(value) === resolvedKey)
+      ? selectedEmployers
+      : [...selectedEmployers, resolvedEmployer];
+    setSelectedEmployers(nextSelectedEmployers);
     setCustomEmployerName("");
-    setHasSavedTargets(false);
-    if (matched) {
-      setStatusMessage(`Matched your input to existing employer: ${resolvedEmployer}.`);
-      return;
-    }
-    setStatusMessage(`Added ${resolvedEmployer} to your employer targets.`);
-  };
-
-  const clearSelections = () => {
-    setSelectedRoles([]);
-    setSelectedEmployers([]);
-    setIsVisibleToTargetEmployers(false);
-    setHasSavedTargets(false);
-    setStatusMessage(null);
+    setStatusMessage("Saving target employers...");
+    void saveSelections({
+      rolesOverride: selectedRoles,
+      employersOverride: nextSelectedEmployers,
+      successMessage: matched
+        ? `Matched and saved employer: ${resolvedEmployer}.`
+        : `Added and saved employer: ${resolvedEmployer}.`,
+    });
   };
 
   const handleProfileLinkChange = (key: ProfileLinkKey, value: string) => {
@@ -383,6 +583,227 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       [key]: value
     }));
     setHasSavedExternalSignals(false);
+    if (key === "linkedin" || key === "github" || key === "kaggle") {
+      setStatusMessage(`Your ${key === "linkedin" ? "LinkedIn" : key === "github" ? "GitHub" : "Kaggle"} link changed. Extract to update your profile.`);
+    }
+  };
+
+  const refreshSourceExtractionState = async () => {
+    const response = await fetch("/api/student/artifacts", { cache: "no-store" });
+    const payload = (await response.json().catch(() => null)) as
+      | { ok: true; data: { source_extraction_log?: unknown; profile_links?: Record<string, unknown> } }
+      | { ok: false; error?: string }
+      | null;
+    if (!response.ok || !payload || !payload.ok) throw new Error("source_state_refresh_failed");
+
+    const extractionLog = toRecord(payload.data.source_extraction_log);
+    setSourceExtractionLog(extractionLog as SourceExtractionLog);
+
+    const profileLinksFromArtifacts = toRecord(payload.data.profile_links);
+    setProfileLinks((current) => ({
+      ...current,
+      linkedin: asTrimmedString(profileLinksFromArtifacts.linkedin) || current.linkedin,
+      github: asTrimmedString(profileLinksFromArtifacts.github) || current.github,
+      kaggle: asTrimmedString(profileLinksFromArtifacts.kaggle) || current.kaggle
+    }));
+  };
+
+  const setSourceLoadingState = (source: CapabilitySourceType, isLoadingSource: boolean) => {
+    setExtractingSources((current) => ({
+      ...current,
+      [source]: isLoadingSource
+    }));
+  };
+
+  const shouldConfirmReextract = (source: CapabilitySourceType): boolean => sourceExtractionLog[source]?.status === "succeeded";
+
+  const parseGithubUsername = (value: string): string => {
+    const normalized = normalizeGithubProfileUrl(value);
+    if (!normalized) return "";
+    return normalized.replace(/^https?:\/\/github\.com\//, "").split("/")[0] ?? "";
+  };
+
+  const resolveExtractionFailureMessage = (errorCode: string, source: CapabilitySourceType): string => {
+    if (errorCode === "source_url_invalid_or_unsupported") return "Source link is invalid or unsupported.";
+    if (errorCode === "source_not_found") return `${sourceLabel[source]} profile not found. Check the URL and try again.`;
+    if (errorCode === "source_private_or_inaccessible") {
+      return `${sourceLabel[source]} is private or inaccessible. Make it public and retry extraction.`;
+    }
+    return `${sourceLabel[source]} extraction failed. Please try again.`;
+  };
+
+  const runExternalSourceExtraction = async ({
+    source,
+    allowLowConfidence = false
+  }: {
+    source: "linkedin" | "github" | "kaggle";
+    allowLowConfidence?: boolean;
+  }) => {
+    if (extractingSources[source]) return;
+
+    const linkValue = source === "linkedin" ? profileLinks.linkedin : source === "github" ? profileLinks.github : profileLinks.kaggle;
+    const normalizedLink =
+      source === "linkedin"
+        ? normalizeLinkedinProfileUrl(linkValue)
+        : source === "github"
+          ? normalizeGithubProfileUrl(linkValue)
+          : normalizeKaggleProfileUrl(linkValue);
+    if (!normalizedLink) {
+      setStatusMessage(`Add your ${sourceLabel[source]} URL first, then extract.`);
+      return;
+    }
+
+    if (!allowLowConfidence && shouldConfirmReextract(source)) {
+      const confirmed = window.confirm(
+        `Re-extract from ${sourceLabel[source]}?\n\nWe'll keep previous versions, avoid duplicate entries when nothing has changed, and create new provenance-linked versions when content changes.`
+      );
+      if (!confirmed) return;
+    }
+
+    setSourceLoadingState(source, true);
+    setSourceExtractionLog((current) => ({
+      ...current,
+      [source]: {
+        ...(current[source] ?? {}),
+        status: "extracting",
+        error_message: null
+      }
+    }));
+
+    try {
+      const endpoint = source === "linkedin" ? "/api/student/extract/linkedin" : source === "github" ? "/api/student/extract/github" : "/api/student/extract/kaggle";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          source === "github"
+            ? { github_username: parseGithubUsername(normalizedLink), allow_low_confidence: allowLowConfidence }
+            : { profile_url: normalizedLink, allow_low_confidence: allowLowConfidence }
+        )
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data: Record<string, unknown> }
+        | { ok: false; error?: string }
+        | null;
+
+      if (!response.ok || !payload || !payload.ok) {
+        const failureCode = payload && !payload.ok && typeof payload.error === "string" ? payload.error : "extraction_failed";
+        throw new Error(failureCode);
+      }
+
+      const status = asTrimmedString(payload.data.status);
+      const sourceRun = toRecord(payload.data.source_run);
+      const requiresConfirmation = asBoolean(sourceRun.requires_confirmation, false) || status === "confirmation_required";
+      if (requiresConfirmation && !allowLowConfidence) {
+        const reason =
+          asTrimmedString(sourceRun.warning_message) ||
+          `We couldn't confidently match this ${sourceLabel[source]} profile to your identity.`;
+        const confirmed = window.confirm(`${reason}\n\nExtract anyway?`);
+        if (confirmed) {
+          await runExternalSourceExtraction({ source, allowLowConfidence: true });
+        } else {
+          setStatusMessage(`${sourceLabel[source]} extraction canceled.`);
+          await refreshSourceExtractionState();
+        }
+        return;
+      }
+
+      await refreshSourceExtractionState();
+      const summary = asTrimmedString(sourceRun.result_summary);
+      const warning = asTrimmedString(sourceRun.warning_message);
+      if (summary) setStatusMessage(warning ? `${summary} ${warning}` : summary);
+      else if (warning) setStatusMessage(warning);
+      else setStatusMessage(`${sourceLabel[source]} extraction completed.`);
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : "extraction_failed";
+      setStatusMessage(resolveExtractionFailureMessage(errorCode, source));
+      setSourceExtractionLog((current) => ({
+        ...current,
+        [source]: {
+          ...(current[source] ?? {}),
+          status: "failed",
+          error_message: resolveExtractionFailureMessage(errorCode, source)
+        }
+      }));
+    } finally {
+      setSourceLoadingState(source, false);
+    }
+  };
+
+  const runDocumentSourceExtraction = async ({ source, file }: { source: "resume" | "transcript"; file: File }) => {
+    if (extractingSources[source]) return;
+    if (shouldConfirmReextract(source)) {
+      const confirmed = window.confirm(
+        `Re-extract from ${sourceLabel[source]}?\n\nWe'll keep previous versions, avoid duplicate entries when nothing has changed, and create new provenance-linked versions when content changes.`
+      );
+      if (!confirmed) return;
+    }
+
+    setSourceLoadingState(source, true);
+    setSourceExtractionLog((current) => ({
+      ...current,
+      [source]: {
+        ...(current[source] ?? {}),
+        status: "extracting",
+        extracted_from_filename: file.name,
+        error_message: null
+      }
+    }));
+
+    try {
+      const endpoint = source === "resume" ? "/api/student/extract/resume" : "/api/student/extract/transcript";
+      const form = new FormData();
+      form.set("file", file);
+      const response = await fetch(endpoint, { method: "POST", body: form });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data: { artifacts?: unknown[]; signals?: Record<string, unknown> } }
+        | { ok: false; error?: string }
+        | null;
+      if (!response.ok || !payload || !payload.ok) {
+        const errorCode = payload && !payload.ok && typeof payload.error === "string" ? payload.error : "extraction_failed";
+        throw new Error(errorCode);
+      }
+
+      await refreshSourceExtractionState();
+      const addedArtifacts = Array.isArray(payload.data.artifacts) ? payload.data.artifacts.length : 0;
+      const artifactLabel = addedArtifacts === 1 ? "artifact" : "artifacts";
+      const defaultSummary =
+        addedArtifacts === 0
+          ? "No new artifacts found. Your profile is already up to date."
+          : `${addedArtifacts} new ${artifactLabel} added from ${sourceLabel[source]}.`;
+      const lowConfidence = asBoolean(toRecord(payload.data.signals).low_extraction_confidence, false);
+      setStatusMessage(
+        lowConfidence
+          ? `${defaultSummary} Extraction confidence was low; consider uploading a clearer file.`
+          : defaultSummary
+      );
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : "extraction_failed";
+      const message =
+        errorCode === "unsupported_file_type"
+          ? "Only PDF or DOCX files are supported."
+          : errorCode === "claim_under_review"
+            ? "Profile claim is under review. Extraction is paused until review completes."
+            : `${sourceLabel[source]} extraction failed. Please try again.`;
+      setStatusMessage(message);
+      setSourceExtractionLog((current) => ({
+        ...current,
+        [source]: {
+          ...(current[source] ?? {}),
+          status: "failed",
+          error_message: message
+        }
+      }));
+    } finally {
+      setSourceLoadingState(source, false);
+    }
+  };
+
+  const handleSourceDocumentInput = (source: "resume" | "transcript", event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    void runDocumentSourceExtraction({ source, file });
+    event.currentTarget.value = "";
   };
 
   const uploadAvatar = async (file: File) => {
@@ -515,10 +936,22 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     }
   };
 
-  const saveSelections = async ({ visibilityOverride }: { visibilityOverride?: boolean } = {}) => {
-    if (!hasSelections) {
+  const saveSelections = async ({
+    visibilityOverride,
+    rolesOverride,
+    employersOverride,
+    successMessage,
+  }: {
+    visibilityOverride?: boolean;
+    rolesOverride?: string[];
+    employersOverride?: string[];
+    successMessage?: string;
+  } = {}) => {
+    const rolesToSave = rolesOverride ?? selectedRoles;
+    const employersToSave = employersOverride ?? selectedEmployers;
+    if (rolesToSave.length === 0 || employersToSave.length === 0) {
       setStatusMessage("Choose at least one role and one employer before saving.");
-      return;
+      return false;
     }
 
     const visibilityToSave = visibilityOverride ?? isVisibleToTargetEmployers;
@@ -537,8 +970,8 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
             email: email.trim()
           },
           student_data: {
-            target_roles: selectedRoles,
-            target_companies: selectedEmployers,
+            target_roles: rolesToSave,
+            target_companies: employersToSave,
             employer_visibility_opt_in: visibilityToSave
           }
         })
@@ -565,15 +998,17 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       setIsVisibleToTargetEmployers(savedVisibility);
       setRoleOptions((current) => mergeOptionList(current, savedRoles));
       setEmployerOptions((current) => mergeOptionList(current, savedEmployers));
-      setHasSavedTargets(true);
       setStatusMessage(
-        savedVisibility
-          ? `You are now visible to ${savedEmployers.length} selected employer${savedEmployers.length === 1 ? "" : "s"}.`
-          : "Targets saved. You are currently private to selected employers."
+        successMessage ??
+          (savedVisibility
+            ? `You are now visible to ${savedEmployers.length} selected employer${savedEmployers.length === 1 ? "" : "s"}.`
+            : "Targets saved. You are currently private to selected employers.")
       );
       notifyStudentProfileUpdated();
+      return true;
     } catch {
       setStatusMessage("We couldn't save your profile right now. Please try again.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -684,8 +1119,8 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   );
 
   return (
-    <section aria-labelledby="student-manage-roles-title" className="w-full px-6 py-12 lg:px-8">
-      <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-slate-700 dark:bg-slate-900/75">
+    <section aria-labelledby="student-manage-roles-title" className="w-full px-4 py-6 lg:px-8 lg:py-12">
+      <div className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[32px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
         <header className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#4c6860] dark:text-slate-400">
             {showTargetSections && !showProfileSections ? "Student Coaching Targets" : "Student Profile"}
@@ -907,6 +1342,143 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
               )}
             </div>
 
+            <div id="capability-sources" className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4 scroll-mt-24 dark:border-slate-700 dark:bg-slate-900">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Capability Sources</h3>
+              <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
+                Manage source extraction here. Resume and transcript are primary artifacts; LinkedIn, GitHub, and Kaggle add supporting evidence.
+              </p>
+              {sourcesNeedingUpdate.length > 0 ? (
+                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                  Your {sourcesNeedingUpdate.map((source) => sourceLabel[source]).join(" and ")} source
+                  {sourcesNeedingUpdate.length > 1 ? "s have" : " has"} changed. Extract to update your profile.
+                </p>
+              ) : null}
+              <input
+                ref={resumeInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(event) => handleSourceDocumentInput("resume", event)}
+              />
+              <input
+                ref={transcriptInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(event) => handleSourceDocumentInput("transcript", event)}
+              />
+
+              <div className="mt-4 space-y-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Primary artifacts</p>
+                  <div className="mt-2 space-y-2">
+                    {(["resume", "transcript"] as const).map((source) => {
+                      const state = sourceRows[source];
+                      const entry = sourceExtractionLog[source];
+                      const lastSummary = asTrimmedString(entry?.last_run_summary);
+                      const lastExtractedAt = asTrimmedString(entry?.last_extracted_at);
+                      const fileName = asTrimmedString(entry?.extracted_from_filename);
+                      const isExtracting = Boolean(extractingSources[source] || state === "Extracting");
+                      return (
+                        <div
+                          key={`source-row-${source}`}
+                          className="rounded-xl border border-[#d2dfd9] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-950/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-[#0a1f1a] dark:text-slate-100">{sourceLabel[source]}</p>
+                              <p className="text-xs text-[#557168] dark:text-slate-400">
+                                {fileName ? `Latest file: ${fileName}` : "PDF or DOCX upload"}
+                              </p>
+                            </div>
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sourceStateToneClass[state]}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => (source === "resume" ? resumeInputRef.current?.click() : transcriptInputRef.current?.click())}
+                              disabled={isExtracting}
+                              className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                            >
+                              {isExtracting ? "Extracting..." : state === "Up to date" ? "Upload new and re-extract" : "Upload and extract"}
+                            </button>
+                            {lastExtractedAt ? (
+                              <span className="text-[11px] text-[#557168] dark:text-slate-400">
+                                Last run: {new Date(lastExtractedAt).toLocaleString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          {lastSummary ? <p className="mt-2 text-xs text-[#4f6a62] dark:text-slate-300">{lastSummary}</p> : null}
+                          {entry?.error_message ? (
+                            <p className="mt-2 text-xs font-medium text-rose-700 dark:text-rose-300">{entry.error_message}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">External sources</p>
+                  <div className="mt-2 space-y-2">
+                    {(["linkedin", "github", "kaggle"] as const).map((source) => {
+                      const state = sourceRows[source];
+                      const entry = sourceExtractionLog[source];
+                      const urlValue =
+                        source === "linkedin"
+                          ? normalizedExternalLinks.linkedin
+                          : source === "github"
+                            ? normalizedExternalLinks.github
+                            : normalizedExternalLinks.kaggle;
+                      const isExtracting = Boolean(extractingSources[source] || state === "Extracting");
+                      const lastExtractedAt = asTrimmedString(entry?.last_extracted_at);
+                      const lastSummary = asTrimmedString(entry?.last_run_summary);
+                      const warning = asTrimmedString(entry?.warning_message);
+
+                      return (
+                        <div
+                          key={`source-row-${source}`}
+                          className="rounded-xl border border-[#d2dfd9] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-950/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-[#0a1f1a] dark:text-slate-100">{sourceLabel[source]}</p>
+                              <p className="text-xs text-[#557168] dark:text-slate-400">{urlValue || "Add URL in Profile links above"}</p>
+                            </div>
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sourceStateToneClass[state]}`}>
+                              {state}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void runExternalSourceExtraction({ source })}
+                              disabled={isExtracting || urlValue.length === 0}
+                              className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                            >
+                              {isExtracting ? "Extracting..." : state === "Up to date" ? "Re-extract" : "Extract"}
+                            </button>
+                            {lastExtractedAt ? (
+                              <span className="text-[11px] text-[#557168] dark:text-slate-400">
+                                Last run: {new Date(lastExtractedAt).toLocaleString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          {lastSummary ? <p className="mt-2 text-xs text-[#4f6a62] dark:text-slate-300">{lastSummary}</p> : null}
+                          {warning ? <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">{warning}</p> : null}
+                          {entry?.error_message ? (
+                            <p className="mt-2 text-xs font-medium text-rose-700 dark:text-rose-300">{entry.error_message}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Referrals and endorsements</h3>
               <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
@@ -1002,7 +1574,6 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                         value={customRoleName}
                         onChange={(event) => {
                           setCustomRoleName(event.target.value);
-                          setHasSavedTargets(false);
                         }}
                         placeholder="Add role title"
                         className="h-10 min-w-[220px] flex-1 rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
@@ -1046,13 +1617,22 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       role="switch"
                       aria-checked={isVisibleToTargetEmployers}
                       onClick={() => {
+                        if (isLoading || isSaving) return;
+                        const nextVisibility = !isVisibleToTargetEmployers;
                         if (!isVisibleToTargetEmployers && !canEnableEmployerVisibility) {
                           setStatusMessage("Complete the visibility checklist before enabling recruiter visibility.");
                           return;
                         }
-                        setIsVisibleToTargetEmployers((current) => !current);
-                        setHasSavedTargets(false);
-                        setStatusMessage(null);
+                        setIsVisibleToTargetEmployers(nextVisibility);
+                        setStatusMessage("Saving visibility preference...");
+                        void saveSelections({
+                          rolesOverride: selectedRoles,
+                          employersOverride: selectedEmployers,
+                          visibilityOverride: nextVisibility,
+                          successMessage: nextVisibility
+                            ? "You are now visible to selected employers."
+                            : "Visibility updated. Your profile is private to selected employers."
+                        });
                       }}
                       className="inline-flex items-center gap-2 rounded-full border border-[#bfd2ca] bg-[#f5faf7] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#ebf5f0] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
@@ -1146,7 +1726,6 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                         value={customEmployerName}
                         onChange={(event) => {
                           setCustomEmployerName(event.target.value);
-                          setHasSavedTargets(false);
                         }}
                         placeholder="Add employer"
                         className="h-10 min-w-[220px] flex-1 rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
@@ -1179,63 +1758,12 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                   {selectedRoles.length} role{selectedRoles.length === 1 ? "" : "s"} and {selectedEmployers.length} employer
                   {selectedEmployers.length === 1 ? "" : "s"} selected
                 </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={clearSelections}
-                    className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveSelections()}
-                    disabled={!canSaveTargets}
-                    className="rounded-xl bg-[#12f987] px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] transition-colors hover:bg-[#0ed978] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSaving ? "Saving..." : hasSavedTargets ? "Saved" : "Save targets"}
-                  </button>
-                </div>
+                <p className="text-xs font-medium text-[#4a665d] dark:text-slate-300">
+                  {isSaving ? "Saving changes..." : "Changes auto-save as you select roles and employers."}
+                </p>
               </div>
             )}
 
-            <div className="mt-4 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Coaching tools</h3>
-                <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800 dark:border-amber-400/50 dark:bg-amber-500/10 dark:text-amber-200">
-                  Coming Soon
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
-                Use these views to work directly against your selected positions and employers.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Link
-                  href="/student/capability-coach"
-                  className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Open Capability Coach
-                </Link>
-                <Link
-                  href="/student/networking-coach"
-                  className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Open Networking Coach
-                </Link>
-                <Link
-                  href="/student/pathway"
-                  className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Open Pathway Planner
-                </Link>
-                <Link
-                  href="/student/interview-prep"
-                  className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Open Interview Prep
-                </Link>
-              </div>
-            </div>
           </>
         ) : null}
 

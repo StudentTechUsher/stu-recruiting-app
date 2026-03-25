@@ -39,6 +39,7 @@ export type ArtifactVersion = {
 
 export type CandidateIdentityStore = {
   findCandidateByNormalizedEmail: (normalizedEmail: string) => Promise<CandidateProfileRecord | null>;
+  findCandidateById: (candidateId: string) => Promise<CandidateProfileRecord | null>;
   createCandidateProfile: (input: {
     normalizedEmail: string;
     claimed?: boolean;
@@ -383,6 +384,15 @@ export function createSupabaseCandidateIdentityStore(supabase: unknown): Candida
         .from("candidate_profiles")
         .select("candidate_id, normalized_email, claimed, claimed_at, canonical_profile_id, profile_data")
         .eq("normalized_email", normalizedEmail)
+        .limit(1)) as { data: unknown[] | null };
+
+      return parseCandidate(data?.[0] ?? null);
+    },
+    async findCandidateById(candidateId: string) {
+      const { data } = await (client
+        .from("candidate_profiles")
+        .select("candidate_id, normalized_email, claimed, claimed_at, canonical_profile_id, profile_data")
+        .eq("candidate_id", candidateId)
         .limit(1)) as { data: unknown[] | null };
 
       return parseCandidate(data?.[0] ?? null);

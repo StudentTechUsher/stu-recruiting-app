@@ -2,16 +2,14 @@
 
 import { useRef } from "react";
 import { useRouter } from "next/navigation";
-import { StudentOnboardingSignup } from "@/components/mock/StudentOnboardingSignup/StudentOnboardingSignup";
+import { StudentPhase1Onboarding } from "../../../components/student/StudentPhase1Onboarding";
 
 export function StudentOnboardingClient({
   defaultCampusEmail,
-  focusCompanyOptions,
-  focusRoleOptions
+  claimStatus,
 }: {
   defaultCampusEmail: string;
-  focusCompanyOptions: string[];
-  focusRoleOptions: string[];
+  claimStatus: string | null;
 }) {
   const router = useRouter();
   const onboardingStartedAtRef = useRef<Date>(new Date());
@@ -42,6 +40,9 @@ export function StudentOnboardingClient({
       router.refresh();
       return;
     }
+    if (response.status === 409 && data?.error === "claim_under_review") {
+      throw new Error("claim_under_review");
+    }
 
     if (!response.ok || !data.ok || !data.redirectPath) {
       throw new Error("onboarding_complete_failed");
@@ -53,11 +54,10 @@ export function StudentOnboardingClient({
 
   return (
     <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
-      <StudentOnboardingSignup
+      <StudentPhase1Onboarding
         onComplete={completeOnboarding}
         defaultCampusEmail={defaultCampusEmail}
-        focusCompanyOptions={focusCompanyOptions}
-        focusRoleOptions={focusRoleOptions}
+        claimStatus={claimStatus}
       />
     </main>
   );

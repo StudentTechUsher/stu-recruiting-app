@@ -73,12 +73,63 @@ export async function POST(req: Request) {
         description: "Transcript uploaded for coursework parsing.",
         status: "uploaded"
       },
-      file_refs: [transcriptFileRef]
+      file_refs: [transcriptFileRef],
+      source_provenance: {
+        source: "transcript_upload",
+        transcript_file_ref: transcriptFileRef
+      },
+      source_object_id: `${TRANSCRIPT_BUCKET}:${filePath}`,
+      ingestion_run_id: now,
+      // Publish only after version row is written and pointer is set.
+      is_active: false
     })
-    .select("artifact_id")
-    .single<{ artifact_id: string }>();
+    .select("artifact_id, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id")
+    .single<{
+      artifact_id: string;
+      artifact_data: Record<string, unknown>;
+      file_refs: unknown;
+      source_provenance: Record<string, unknown>;
+      source_object_id: string | null;
+      ingestion_run_id: string | null;
+    }>();
 
   if (artifactError || !artifactRow) return badRequest("transcript_artifact_create_failed");
+
+  const { data: versionRows, error: versionError } = await supabase
+    .from("artifact_versions")
+    .insert({
+      artifact_id: artifactRow.artifact_id,
+      profile_id: context.user_id,
+      operation: "reextract",
+      artifact_type: "transcript",
+      artifact_data: artifactRow.artifact_data,
+      file_refs: Array.isArray(artifactRow.file_refs) ? artifactRow.file_refs : [],
+      verification_status: "unverified",
+      source_provenance: artifactRow.source_provenance ?? {},
+      source_object_id: artifactRow.source_object_id,
+      ingestion_run_id: artifactRow.ingestion_run_id
+    })
+    .select("version_id");
+
+  const versionId =
+    Array.isArray(versionRows) && versionRows.length > 0 && typeof (versionRows[0] as Record<string, unknown>).version_id === "string"
+      ? ((versionRows[0] as Record<string, unknown>).version_id as string)
+      : null;
+
+  if (!versionId || versionError) {
+    await supabase
+      .from("artifacts")
+      .delete()
+      .eq("artifact_id", artifactRow.artifact_id)
+      .eq("profile_id", context.user_id);
+    return badRequest("transcript_artifact_create_failed");
+  }
+
+  await supabase
+    .from("artifacts")
+    .update({ active_version_id: versionId, is_active: true, deactivated_at: null })
+    .eq("artifact_id", artifactRow.artifact_id)
+    .eq("profile_id", context.user_id);
 
   const parserModel = process.env.OPENAI_TRANSCRIPT_PARSE_MODEL || "gpt-5-mini";
   const { data: sessionRow, error: sessionError } = await supabase

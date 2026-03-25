@@ -1,5 +1,7 @@
-import { type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { CapabilityRadar, type CapabilityRadarAxis } from '@/components/student/CapabilityRadar';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -31,6 +33,17 @@ type ArtifactRecord = {
   type: ArtifactType;
   artifactData: Record<string, unknown>;
   fileRefs: Array<Record<string, unknown>>;
+  sourceProvenance: Record<string, unknown>;
+  sourceObjectId?: string;
+  ingestionRunId?: string;
+  activeVersionId?: string;
+  versionCount: number;
+  provenanceVersions: Array<{
+    versionId: string;
+    operation: string;
+    createdAt: string;
+    verificationStatus?: string;
+  }>;
   source: string;
   description: string;
   link?: string;
@@ -47,6 +60,12 @@ type ArtifactApiRow = {
   artifact_type: string;
   artifact_data: unknown;
   file_refs: unknown;
+  source_provenance?: unknown;
+  source_object_id?: string | null;
+  ingestion_run_id?: string | null;
+  active_version_id?: string | null;
+  version_count?: number | null;
+  provenance_versions?: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -79,7 +98,6 @@ type ArtifactsApiPayload = {
   profile_links?: Record<string, string | null>;
 };
 
-type SourceDocumentType = 'resume' | 'transcript';
 type SnackbarState = { kind: 'success' | 'error' | 'info'; message: string } | null;
 
 type DraftArtifactForm = {
@@ -242,15 +260,6 @@ const tagToneClass: Record<ArtifactTag, string> = {
   'Reliability signal': 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-100'
 };
 
-const signalBarColorByTag: Record<ArtifactTag, string> = {
-  'Technical depth': '#0284c7',
-  'Applied execution': '#059669',
-  'Collaboration signal': '#64748b',
-  'Systems thinking': '#0ea5e9',
-  'Communication signal': '#475569',
-  'Reliability signal': '#d97706'
-};
-
 const formatDate = () =>
   new Date().toLocaleDateString('en-US', {
     month: 'short',
@@ -390,36 +399,6 @@ const PlusIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
   </svg>
 );
 
-const UploadIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    aria-hidden="true"
-  >
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
-);
-
-const SpinnerIcon = ({ className = 'h-3.5 w-3.5' }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    className={`${className} animate-spin`}
-    aria-hidden="true"
-  >
-    <circle cx="12" cy="12" r="10" className="stroke-current opacity-25" strokeWidth="3" />
-    <path className="fill-current opacity-90" d="M22 12a10 10 0 0 0-10-10v4a6 6 0 0 1 6 6h4Z" />
-  </svg>
-);
 
 const ArtifactCardSkeleton = () => (
   <div className="rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
@@ -444,12 +423,33 @@ const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
   const source = toTrimmedString(data.source) ?? artifactTypeSourcePreset[artifactType];
   const description = toTrimmedString(data.description) ?? 'Student-linked evidence artifact.';
 
+  const provenanceVersions = Array.isArray(row.provenance_versions)
+    ? row.provenance_versions
+        .map((entry) => toRecord(entry))
+        .map((entry) => ({
+          versionId: toTrimmedString(entry.version_id) ?? '',
+          operation: toTrimmedString(entry.operation) ?? 'replace',
+          createdAt: toUpdatedAtLabel(toTrimmedString(entry.created_at) ?? row.updated_at),
+          verificationStatus: toTrimmedString(entry.verification_status) ?? undefined
+        }))
+        .filter((entry) => entry.versionId.length > 0)
+    : [];
+
   return {
     id: row.artifact_id,
     title,
     type: artifactType,
     artifactData: data,
     fileRefs: toFileRefs(row.file_refs),
+    sourceProvenance: toRecord(row.source_provenance),
+    sourceObjectId: toTrimmedString(row.source_object_id) ?? undefined,
+    ingestionRunId: toTrimmedString(row.ingestion_run_id) ?? undefined,
+    activeVersionId: toTrimmedString(row.active_version_id) ?? undefined,
+    versionCount:
+      typeof row.version_count === 'number' && Number.isFinite(row.version_count)
+        ? Math.max(1, Math.floor(row.version_count))
+        : Math.max(1, provenanceVersions.length + 1),
+    provenanceVersions,
     source,
     description,
     link: toTrimmedString(data.link) ?? undefined,
@@ -465,16 +465,6 @@ const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
 const getArtifactDataString = (data: Record<string, unknown>, key: string, fallback = ''): string => {
   const value = toTrimmedString(data[key]);
   return value ?? fallback;
-};
-
-const getExtractionArtifactCount = (payload: unknown): number => {
-  const payloadRecord = toRecord(payload);
-  const dataRecord = toRecord(payloadRecord.data);
-  const nestedDataRecord = toRecord(dataRecord.data);
-
-  if (Array.isArray(dataRecord.artifacts)) return dataRecord.artifacts.length;
-  if (Array.isArray(nestedDataRecord.artifacts)) return nestedDataRecord.artifacts.length;
-  return 0;
 };
 
 const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm => {
@@ -553,8 +543,49 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
 
 type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin' | 'kaggle';
 const importSourceTypes: ImportSourceType[] = ['resume', 'transcript', 'github', 'linkedin', 'kaggle'];
-const isImportSourceType = (value: string | null): value is ImportSourceType =>
-  Boolean(value && importSourceTypes.includes(value as ImportSourceType));
+
+const normalizeLinkedinUrl = (value: string | null | undefined): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed.length === 0) return '';
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    if (!parsed.hostname.toLowerCase().endsWith('linkedin.com')) return '';
+    const cleanedPath = parsed.pathname.replace(/\/+$/, '');
+    if (!cleanedPath.startsWith('/in/')) return '';
+    return `https://www.linkedin.com${cleanedPath}`;
+  } catch {
+    return '';
+  }
+};
+
+const normalizeGithubUrl = (value: string | null | undefined): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed.length === 0) return '';
+  const cleaned = trimmed.replace(/^@+/, '');
+  if (!cleaned.includes('://') && !cleaned.includes('/')) return `https://github.com/${cleaned}`;
+  try {
+    const parsed = new URL(cleaned.includes('://') ? cleaned : `https://${cleaned}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'github.com' && host !== 'www.github.com') return '';
+    const [username] = parsed.pathname.split('/').filter(Boolean);
+    return username ? `https://github.com/${username}` : '';
+  } catch {
+    return '';
+  }
+};
+
+const normalizeKaggleUrl = (value: string | null | undefined): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed.length === 0) return '';
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    if (!parsed.hostname.toLowerCase().endsWith('kaggle.com')) return '';
+    const [username] = parsed.pathname.split('/').filter(Boolean);
+    return username ? `https://www.kaggle.com/${username}` : '';
+  } catch {
+    return '';
+  }
+};
 
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
@@ -569,99 +600,11 @@ export const StudentArtifactRepository = () => {
   const [isDeletingArtifact, setIsDeletingArtifact] = useState(false);
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
   const hasAutoOpenedFromQueryRef = useRef(false);
-  const hasAutoOpenedExtractFromQueryRef = useRef(false);
-  const hasAutoOpenedFirstVisitExtractRef = useRef(false);
-
-  // Extract from source dialog
-  const [showImportSourceDialog, setShowImportSourceDialog] = useState(false);
-  const [importSourceType, setImportSourceType] = useState<ImportSourceType>('resume');
-  const [importGithubUsername, setImportGithubUsername] = useState('');
-  const [importLinkedinUrl, setImportLinkedinUrl] = useState('');
-  const [importKaggleUrl, setImportKaggleUrl] = useState('');
-  const [importFileName, setImportFileName] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
-  const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
-  const importFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Source extraction state
   const [sourceExtractionLog, setSourceExtractionLog] = useState<SourceExtractionLog>({});
   const [savedProfileLinks, setSavedProfileLinks] = useState<Record<string, string | null>>({});
-  const [openingSourceDocument, setOpeningSourceDocument] = useState<SourceDocumentType | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>(null);
-
-  const openImportSourceDialog = useCallback((type?: ImportSourceType) => {
-    const resolvedType = type ?? 'resume';
-    setImportSourceType(resolvedType);
-    // Pre-fill from saved profile links
-    const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : '';
-    const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : '';
-    const savedKaggle = typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : '';
-    // Extract username from full github URL if stored that way
-    const githubUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0] ?? savedGithub;
-    setImportGithubUsername(githubUsername);
-    setImportLinkedinUrl(savedLinkedin);
-    setImportKaggleUrl(savedKaggle);
-    setImportFileName('');
-    setImportStatusMessage(null);
-    setShowImportSourceDialog(true);
-  }, [savedProfileLinks.github, savedProfileLinks.kaggle, savedProfileLinks.linkedin]);
-
-  const closeImportSourceDialog = () => {
-    setShowImportSourceDialog(false);
-    setImportStatusMessage(null);
-    if (importFileInputRef.current) importFileInputRef.current.value = '';
-  };
-
-  const setSourceExtractionEntry = (source: ImportSourceType, updates: Partial<SourceExtractionEntry>) => {
-    setSourceExtractionLog((current) => ({
-      ...current,
-      [source]: {
-        ...(current[source] ?? {}),
-        ...updates
-      }
-    }));
-  };
-
-  const hasSourceDocumentFile = (entry: SourceExtractionEntry | undefined) => {
-    const fileRef = entry?.storage_file_ref;
-    if (!fileRef) return false;
-    return typeof fileRef.bucket === 'string' && fileRef.bucket.trim().length > 0 && typeof fileRef.path === 'string' && fileRef.path.trim().length > 0;
-  };
-
-  const openSourceDocument = async (event: MouseEvent<HTMLButtonElement>, source: SourceDocumentType) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (openingSourceDocument) return;
-
-    setOpeningSourceDocument(source);
-    try {
-      const response = await fetch('/api/student/artifacts/source-document-url', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ source })
-      });
-      const payload = await response.json().catch(() => null);
-      const payloadRecord = typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
-      const dataRecord =
-        typeof payloadRecord.data === 'object' && payloadRecord.data !== null && !Array.isArray(payloadRecord.data)
-          ? (payloadRecord.data as Record<string, unknown>)
-          : {};
-      const signedUrl = typeof dataRecord.signed_url === 'string' ? dataRecord.signed_url : null;
-
-      if (!response.ok || !payloadRecord.ok || !signedUrl) {
-        throw new Error('source_document_url_unavailable');
-      }
-
-      const opened = window.open(signedUrl, '_blank', 'noopener,noreferrer');
-      if (!opened) {
-        setStatusMessage('Popup blocked. Allow popups for this site and try again.');
-      }
-    } catch {
-      setStatusMessage('Unable to open the source document right now. Please try again.');
-    } finally {
-      setOpeningSourceDocument(null);
-    }
-  };
 
   useEffect(() => {
     if (!snackbar) return;
@@ -669,154 +612,6 @@ export const StudentArtifactRepository = () => {
     return () => window.clearTimeout(timeoutId);
   }, [snackbar]);
 
-  const submitImport = async () => {
-    if (isImporting) return;
-    setImportStatusMessage(null);
-    const source = importSourceType;
-    const sourceLabel =
-      source === 'linkedin'
-        ? 'LinkedIn'
-        : source === 'kaggle'
-          ? 'Kaggle'
-          : source.charAt(0).toUpperCase() + source.slice(1);
-
-    try {
-      let response: Response;
-
-      setIsImporting(true);
-
-      if (source === 'resume' || source === 'transcript') {
-        const file = importFileInputRef.current?.files?.[0];
-        if (!file) {
-          setImportStatusMessage('Please select a file to upload.');
-          return;
-        }
-
-        setSourceExtractionEntry(source, {
-          status: 'extracting',
-          extracted_from_filename: file.name,
-          error_message: null
-        });
-        closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: `${sourceLabel} extraction started. You can keep browsing while we process it.` });
-
-        const form = new FormData();
-        form.set('file', file);
-        const endpoint = source === 'resume' ? '/api/student/extract/resume' : '/api/student/extract/transcript';
-        response = await fetch(endpoint, { method: 'POST', body: form });
-      } else if (source === 'github') {
-        const username = importGithubUsername.trim();
-        if (!username) {
-          setImportStatusMessage('Please enter your GitHub username.');
-          return;
-        }
-        const linkedInProfileUrl = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin.trim() : '';
-        if (!linkedInProfileUrl) {
-          setImportStatusMessage('Add your LinkedIn profile URL first, then retry GitHub extraction.');
-          return;
-        }
-
-        setSourceExtractionEntry(source, {
-          status: 'extracting',
-          extracted_from: `https://github.com/${username}`,
-          error_message: null
-        });
-        closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'GitHub extraction started. You can keep browsing while we process it.' });
-
-        response = await fetch('/api/student/extract/github', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ github_username: username })
-        });
-      } else if (source === 'linkedin') {
-        const profileUrl = importLinkedinUrl.trim();
-        if (!profileUrl) {
-          setImportStatusMessage('Please enter your LinkedIn profile URL.');
-          return;
-        }
-
-        setSourceExtractionEntry(source, {
-          status: 'extracting',
-          extracted_from: profileUrl,
-          error_message: null
-        });
-        closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'LinkedIn extraction started. You can keep browsing while we process it.' });
-
-        response = await fetch('/api/student/extract/linkedin', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ profile_url: profileUrl })
-        });
-      } else if (source === 'kaggle') {
-        const profileUrl = importKaggleUrl.trim();
-        if (!profileUrl) {
-          setImportStatusMessage('Please enter your Kaggle profile URL.');
-          return;
-        }
-
-        setSourceExtractionEntry(source, {
-          status: 'extracting',
-          extracted_from: profileUrl,
-          error_message: null
-        });
-        closeImportSourceDialog();
-        setSnackbar({ kind: 'info', message: 'Kaggle extraction started. You can keep browsing while we process it.' });
-
-        response = await fetch('/api/student/extract/kaggle', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ profile_url: profileUrl })
-        });
-      } else {
-        return;
-      }
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.ok) {
-        const maybeError =
-          typeof payload === 'object' && payload !== null && !Array.isArray(payload) && typeof payload.error === 'string'
-            ? payload.error
-            : 'extraction_failed';
-        throw new Error(maybeError);
-      }
-
-      const addedArtifacts = getExtractionArtifactCount(payload);
-      const artifactLabel = addedArtifacts === 1 ? 'artifact' : 'artifacts';
-
-      await loadArtifacts();
-      setSnackbar({
-        kind: 'success',
-        message: `${sourceLabel} extraction complete. Added ${addedArtifacts} ${artifactLabel}. Review and edit the new drafts as needed.`
-      });
-    } catch (error) {
-      const errorCode = error instanceof Error ? error.message : 'extraction_failed';
-      const failureMessage =
-        errorCode === 'github_linkedin_profile_required'
-          ? 'Add your LinkedIn profile URL first, then retry GitHub extraction.'
-          : errorCode === 'github_linkedin_link_required'
-            ? 'Your GitHub profile must include your LinkedIn profile URL as a social link before extraction.'
-            : errorCode === 'github_profile_name_mismatch'
-              ? 'GitHub profile name does not appear to match your student profile. Update profile names and try again.'
-              : errorCode === 'linkedin_profile_name_mismatch'
-                ? 'LinkedIn profile name does not appear to match your student profile. Verify the URL and try again.'
-                : errorCode === 'kaggle_extraction_failed'
-                  ? 'Kaggle extraction failed. Verify your profile URL and public visibility, then try again.'
-                : `${sourceLabel} extraction failed. Please try again.`;
-
-      setSourceExtractionEntry(source, {
-        status: 'failed',
-        error_message: failureMessage
-      });
-      setSnackbar({ kind: 'error', message: `${failureMessage} Update the source input and try again.` });
-      if (source === 'resume' || source === 'transcript') {
-        await loadArtifacts().catch(() => undefined);
-      }
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
   const [draftType, setDraftType] = useState<ArtifactType>('coursework');
   const [draftData, setDraftData] = useState<DraftArtifactForm>({ ...initialDraftArtifactForm });
@@ -842,10 +637,106 @@ export const StudentArtifactRepository = () => {
     return Math.max(...signalCoverage.map((item) => item.count), 1);
   }, [signalCoverage]);
 
-  const activeDocumentSource = importSourceType === 'resume' || importSourceType === 'transcript' ? importSourceType : null;
-  const activeDocumentSourceEntry = activeDocumentSource ? sourceExtractionLog[activeDocumentSource] : undefined;
-  const hasExistingActiveDocument = activeDocumentSource ? hasSourceDocumentFile(activeDocumentSourceEntry) : false;
-  const activeDocumentLabel = activeDocumentSource ? activeDocumentSource.charAt(0).toUpperCase() + activeDocumentSource.slice(1) : 'Document';
+  const signalRadarAxes = useMemo<CapabilityRadarAxis[]>(() => {
+    return signalCoverage.map((signal) => ({
+      id: signal.tag.toLowerCase().replace(/\s+/g, '-'),
+      label: signal.tag,
+      magnitude: signal.count === 0 ? 0 : signal.count / maxTagCount
+    }));
+  }, [maxTagCount, signalCoverage]);
+
+  const verificationSummary = useMemo(() => {
+    return artifacts.reduce(
+      (totals, artifact) => {
+        const status = getArtifactVerificationStatus(artifact);
+        if (status === 'verified') {
+          totals.verified += 1;
+          return totals;
+        }
+        totals.unverified += 1;
+        return totals;
+      },
+      { verified: 0, unverified: 0 }
+    );
+  }, [artifacts]);
+
+  const sourceStatusSummary = useMemo(() => {
+    const sourceLabels: Record<ImportSourceType, string> = {
+      resume: 'Resume',
+      transcript: 'Transcript',
+      linkedin: 'LinkedIn',
+      github: 'GitHub',
+      kaggle: 'Kaggle'
+    };
+    const normalizedLinks = {
+      linkedin: normalizeLinkedinUrl(typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null),
+      github: normalizeGithubUrl(typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null),
+      kaggle: normalizeKaggleUrl(typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : null)
+    };
+
+    const needsUpdateSources: string[] = [];
+    const failedSources: string[] = [];
+    const extractingSources: string[] = [];
+    let connectedCount = 0;
+
+    for (const source of importSourceTypes) {
+      const entry = sourceExtractionLog[source];
+      const hasDocumentConnection =
+        source === 'resume' || source === 'transcript'
+          ? Boolean(entry?.extracted_from_filename || entry?.storage_file_ref?.path || entry?.storage_file_ref?.bucket)
+          : false;
+      const hasExternalConnection =
+        source === 'linkedin'
+          ? normalizedLinks.linkedin.length > 0
+          : source === 'github'
+            ? normalizedLinks.github.length > 0
+            : source === 'kaggle'
+              ? normalizedLinks.kaggle.length > 0
+              : false;
+      const isConnected = hasDocumentConnection || hasExternalConnection;
+      if (isConnected) connectedCount += 1;
+
+      if (entry?.status === 'extracting') extractingSources.push(sourceLabels[source]);
+      if (entry?.status === 'failed') failedSources.push(sourceLabels[source]);
+
+      if (source === 'linkedin' || source === 'github' || source === 'kaggle') {
+        const extractedFrom = typeof entry?.extracted_from === 'string' ? entry.extracted_from.trim() : '';
+        const currentUrl =
+          source === 'linkedin'
+            ? normalizedLinks.linkedin
+            : source === 'github'
+              ? normalizedLinks.github
+              : normalizedLinks.kaggle;
+        if (currentUrl && (!extractedFrom || extractedFrom !== currentUrl)) needsUpdateSources.push(sourceLabels[source]);
+      } else if (source === 'resume' || source === 'transcript') {
+        if (hasDocumentConnection && entry?.status !== 'succeeded' && entry?.status !== 'extracting') {
+          needsUpdateSources.push(sourceLabels[source]);
+        }
+      }
+    }
+
+    const contextLine =
+      failedSources.length > 0
+        ? `${failedSources[0]} failed`
+        : needsUpdateSources.length > 0
+          ? `${needsUpdateSources[0]} needs extraction`
+          : extractingSources.length > 0
+            ? `${extractingSources[0]} extracting`
+            : connectedCount === 0
+              ? 'No sources connected yet'
+              : 'All connected sources are up to date';
+    const attentionCount = failedSources.length + needsUpdateSources.length;
+    const attentionLine = attentionCount > 1 ? `${attentionCount} sources need attention` : contextLine;
+
+    return {
+      connectedCount,
+      extractingCount: extractingSources.length,
+      needsUpdateCount: needsUpdateSources.length,
+      failedCount: failedSources.length,
+      contextLine: attentionCount > 1 ? attentionLine : contextLine
+    };
+  }, [savedProfileLinks.github, savedProfileLinks.kaggle, savedProfileLinks.linkedin, sourceExtractionLog]);
+
   const hasAnySuccessfulExtraction = useMemo(
     () => Object.values(sourceExtractionLog).some((entry) => entry?.status === 'succeeded'),
     [sourceExtractionLog]
@@ -950,11 +841,6 @@ export const StudentArtifactRepository = () => {
     }
   };
 
-  const startFirstArtifactTour = () => {
-    dismissArtifactIntroTour();
-    openImportSourceDialog('resume');
-  };
-
   const openEditArtifactDialog = (artifact: ArtifactRecord) => {
     setEditingArtifactId(artifact.id);
     setDraftType(artifact.type);
@@ -983,17 +869,6 @@ export const StudentArtifactRepository = () => {
   }, [searchParams, showAddArtifactDialog]);
 
   useEffect(() => {
-    const openExtractSourceParam = searchParams.get('openExtractSource');
-    const shouldOpenFromQuery = openExtractSourceParam === 'true' || openExtractSourceParam === '1';
-    if (!shouldOpenFromQuery || hasAutoOpenedExtractFromQueryRef.current || showImportSourceDialog) return;
-
-    const requestedSource = searchParams.get('extractSource');
-    const resolvedSource = isImportSourceType(requestedSource) ? requestedSource : 'resume';
-    hasAutoOpenedExtractFromQueryRef.current = true;
-    openImportSourceDialog(resolvedSource);
-  }, [openImportSourceDialog, searchParams, showImportSourceDialog]);
-
-  useEffect(() => {
     if (isLoadingArtifacts) return;
 
     const introParam = searchParams.get('tour');
@@ -1012,12 +887,6 @@ export const StudentArtifactRepository = () => {
     if (hasSeenIntroTour && !forceShowFromQuery) return;
     setShowArtifactIntroTour(true);
   }, [artifacts.length, isLoadingArtifacts, searchParams]);
-
-  useEffect(() => {
-    if (!isFirstTimeExtractionUser || hasAutoOpenedFirstVisitExtractRef.current || showImportSourceDialog) return;
-    hasAutoOpenedFirstVisitExtractRef.current = true;
-    openImportSourceDialog('resume');
-  }, [isFirstTimeExtractionUser, openImportSourceDialog, showImportSourceDialog]);
 
   const updateDraftField = <K extends keyof DraftArtifactForm>(key: K, value: DraftArtifactForm[K]) => {
     setDraftData((current) => ({
@@ -1367,7 +1236,7 @@ export const StudentArtifactRepository = () => {
   const deleteEditingArtifact = async () => {
     const artifactIdToDelete = editingArtifactId;
     if (!artifactIdToDelete || isSubmittingArtifact || isDeletingArtifact) return;
-    if (!window.confirm('Delete this artifact? This action cannot be undone.')) return;
+    if (!window.confirm('Remove this artifact from active Evidence Profile view? Version history will be preserved.')) return;
 
     setIsDeletingArtifact(true);
     try {
@@ -1383,14 +1252,14 @@ export const StudentArtifactRepository = () => {
 
       const payload = (await response.json().catch(() => null)) as { ok: boolean } | null;
       if (!response.ok || !payload || !payload.ok) {
-        setStatusMessage('Unable to delete artifact right now. Please try again.');
+        setStatusMessage('Unable to remove artifact right now. Please try again.');
         return;
       }
 
       setArtifacts((current) => current.filter((artifact) => artifact.id !== artifactIdToDelete));
       setSelectedArtifactId((current) => (current === artifactIdToDelete ? null : current));
       closeArtifactDialog();
-      setStatusMessage('Artifact deleted.');
+      setStatusMessage('Artifact removed from active view. Provenance history retained.');
     } finally {
       setIsDeletingArtifact(false);
     }
@@ -1406,17 +1275,17 @@ export const StudentArtifactRepository = () => {
 
   return (
     <section
-      aria-labelledby="student-artifact-repository-title"
-      className="w-full overflow-x-hidden px-4 pt-8 pb-8 sm:px-6 lg:px-8 lg:pt-12 lg:pb-12 xl:pb-10"
+      aria-labelledby="student-evidence-profile-title"
+      className="w-full overflow-x-hidden px-4 pt-6 pb-8 sm:px-6 lg:px-8 lg:pt-12 lg:pb-12 xl:pb-10"
     >
-      <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-slate-700 dark:bg-slate-900/75">
+      <div className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[32px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
             <h2
-              id="student-artifact-repository-title"
+              id="student-evidence-profile-title"
               className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl"
             >
-              Artifact Repository
+              Evidence Profile
             </h2>
           </div>
         </div>
@@ -1425,15 +1294,15 @@ export const StudentArtifactRepository = () => {
           <div className="mt-4 rounded-2xl border border-[#bfe0d1] bg-[#ecfaf3] p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
             <p className="text-sm font-semibold text-[#1b4a3a] dark:text-emerald-100">First-time tour</p>
             <p className="mt-1 text-xs text-[#3e6658] dark:text-slate-300">
-              Fastest path: extract from a source first, then review generated drafts. You can still add artifacts manually at any time.
+              Fastest path: manage your capability sources first, then review generated drafts. You can still add artifacts manually at any time.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => startFirstArtifactTour()}>
-                <span className="inline-flex items-center gap-2">
-                  <UploadIcon />
-                  <span>Extract from source</span>
-                </span>
-              </Button>
+              <Link
+                href="/student/profile#capability-sources"
+                className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Manage sources
+              </Link>
               <Button type="button" size="sm" variant="secondary" onClick={() => openAddArtifactDialog()}>
                 <span className="inline-flex items-center gap-2">
                   <PlusIcon />
@@ -1451,16 +1320,16 @@ export const StudentArtifactRepository = () => {
           <div className="mt-4 rounded-2xl border border-dashed border-[#c8d7d1] bg-[#f7fcf9] p-4 dark:border-slate-700 dark:bg-slate-900">
             <p className="text-sm font-semibold text-[#2a5044] dark:text-slate-200">Quick start tour</p>
             <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
-              1) Extract from source to auto-generate drafts. 2) Review and edit generated artifacts.
+              1) Manage sources to run extraction. 2) Review and edit generated artifacts.
               3) Add manual artifacts for any missing evidence.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={() => openImportSourceDialog()}>
-                <span className="inline-flex items-center gap-2">
-                  <UploadIcon />
-                  <span>Extract from source</span>
-                </span>
-              </Button>
+              <Link
+                href="/student/profile#capability-sources"
+                className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Manage sources
+              </Link>
               <Button type="button" size="sm" variant="secondary" onClick={() => openAddArtifactDialog()}>
                 <span className="inline-flex items-center gap-2">
                   <PlusIcon />
@@ -1471,79 +1340,137 @@ export const StudentArtifactRepository = () => {
           </div>
         ) : null}
 
-        <div className="mt-5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5a7a70] dark:text-slate-400">
-            Filter by evidence type
-          </p>
-        </div>
-
-        <div className="-mx-4 mt-2 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:overflow-visible lg:px-0">
-          <div className="flex gap-2 pb-2 lg:flex-wrap lg:pb-0">
-            <button
-              type="button"
-              onClick={() => setActiveFilter('all')}
-              className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                activeFilter === 'all'
-                  ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
-                  : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-              }`}
-            >
-              All · {artifacts.length}
-            </button>
-            {artifactTypes.map((type) => {
-              const count = artifacts.filter((a) => a.type === type.id).length;
-              return (
-                <button
-                  key={type.id}
-                  type="button"
-                  onClick={() => setActiveFilter(type.id)}
-                  className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    activeFilter === type.id
-                      ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
-                      : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {type.label}{count > 0 ? ` · ${count}` : ''}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {statusMessage ? (
           <p className="mt-3 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] lg:hidden dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
             {statusMessage}
           </p>
         ) : null}
 
-        {!isLoadingArtifacts && artifacts.length > 0 ? (
-          <div className="-mx-4 mt-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
-            <div className="flex gap-2 pb-1" style={{ minWidth: 'max-content' }}>
-              {signalCoverage.map((signal) => {
-                const color = signalBarColorByTag[signal.tag];
-                return (
+        {!isLoadingArtifacts ? (
+          <div className="mt-4 lg:hidden">
+            <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Signal coverage summary</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.verified}`}>
+                    Verified: {verificationSummary.verified}
+                  </span>
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.unverified}`}>
+                    Unverified: {verificationSummary.unverified}
+                  </span>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
+                Coverage uses a neutral radar shape. Verification colors represent trust labels only.
+              </p>
+              <div className="mt-3 flex items-center justify-center overflow-visible">
+                <CapabilityRadar
+                  axes={signalRadarAxes}
+                  ariaLabel="Mobile evidence signal coverage radar"
+                  className="h-[340px] w-full max-w-[520px]"
+                  labelFontSize={12}
+                />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {signalCoverage.map((signal) => (
                   <div
                     key={`mobile-cov-${signal.tag}`}
-                    className="w-28 shrink-0 rounded-xl border border-[#d4e1db] bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
+                    className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-950/70"
                   >
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="truncate text-[9px] font-semibold leading-tight text-[#4f6a62] dark:text-slate-400">{signal.tag}</p>
-                      <span className="shrink-0 text-[10px] font-bold text-[#0f2b23] dark:text-slate-100">{signal.count}</span>
-                    </div>
-                    <div className="mt-1.5 h-1 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: signal.count === 0 ? '0%' : `${Math.max((signal.count / maxTagCount) * 100, 14)}%`, backgroundColor: color }}
-                      />
-                    </div>
+                    <p className="text-xs font-semibold text-[#1f4338] dark:text-slate-200">{signal.tag}</p>
+                    <p className="mt-0.5 text-[11px] text-[#4f6a62] dark:text-slate-400">
+                      {signal.count} linked artifact{signal.count === 1 ? '' : 's'}
+                    </p>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {!isLoadingArtifacts ? (
+          <div className="mt-4 lg:hidden">
+            <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Source Status</p>
+                  <p className="mt-1 text-xs font-medium text-[#3f6055] dark:text-slate-300">{sourceStatusSummary.contextLine}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-[#d4e1db] bg-[#f8fcfa] px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Connected</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.connectedCount}</p>
+                </div>
+                <div className="rounded-lg border border-[#d4e1db] bg-[#f8fcfa] px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Extracting</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.extractingCount}</p>
+                </div>
+                <div className="rounded-lg border border-[#d4e1db] bg-[#f8fcfa] px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Needs Update</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.needsUpdateCount}</p>
+                </div>
+                <div className="rounded-lg border border-[#d4e1db] bg-[#f8fcfa] px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Failed</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.failedCount}</p>
+                </div>
+              </div>
+              <Link
+                href="/student/profile#capability-sources"
+                className="mt-3 inline-flex h-8 w-full items-center justify-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-center text-xs font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Manage sources
+              </Link>
+              {sourceStatusSummary.connectedCount === 0 ? (
+                <Link
+                  href="/student/profile#capability-sources"
+                  className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-center text-xs font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Add a source
+                </Link>
+              ) : null}
             </div>
           </div>
         ) : null}
 
         <div className="mt-4 space-y-3 lg:hidden">
+          <div className="rounded-2xl border border-[#d2e1db] bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5a7a70] dark:text-slate-400">
+              Filter by evidence type
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveFilter('all')}
+                className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeFilter === 'all'
+                    ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
+                    : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                All · {artifacts.length}
+              </button>
+              {artifactTypes.map((type) => {
+                const count = artifacts.filter((a) => a.type === type.id).length;
+                return (
+                  <button
+                    key={`mobile-filter-${type.id}`}
+                    type="button"
+                    onClick={() => setActiveFilter(type.id)}
+                    className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      activeFilter === type.id
+                        ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
+                        : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {type.label}
+                    {count > 0 ? ` · ${count}` : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {isLoadingArtifacts ? (
             <>
               <ArtifactCardSkeleton />
@@ -1597,6 +1524,11 @@ export const StudentArtifactRepository = () => {
                     >
                       {artifact.description}
                     </p>
+                    {artifact.versionCount > 1 ? (
+                      <p className="mt-1 text-[11px] font-medium text-[#4f6a62] dark:text-slate-400">
+                        {artifact.versionCount} versions retained with provenance history.
+                      </p>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {artifact.tags.slice(0, 3).map((tag) => (
                         <span key={`${artifact.id}-${tag}`} className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${tagToneClass[tag]}`}>
@@ -1612,22 +1544,60 @@ export const StudentArtifactRepository = () => {
         </div>
 
         <div className="mt-7 hidden gap-4 xl:grid xl:grid-cols-[1.08fr_0.92fr] xl:pb-6">
-          <Card
-            className="bg-white/95 p-5 dark:bg-slate-900/80"
-            header={
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#55736a] dark:text-slate-400">
-                    Artifact cards
-                  </p>
-                  <h3 className="mt-1 text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">
-                    {isLoadingArtifacts ? 'Loading artifacts...' : `${filteredArtifacts.length} artifacts in view`}
-                  </h3>
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#55736a] dark:text-slate-400">
+                        Artifact cards
+                      </p>
+                      <h3 className="mt-1 text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">
+                        {isLoadingArtifacts ? 'Loading artifacts...' : `${filteredArtifacts.length} artifacts in view`}
+                      </h3>
+                    </div>
+                    <Badge>{isLoadingArtifacts ? 'Loading' : activeFilter === 'all' ? 'All types' : artifactTypeLabelMap[activeFilter]}</Badge>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5a7a70] dark:text-slate-400">
+                      Filter by evidence type
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveFilter('all')}
+                        className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          activeFilter === 'all'
+                            ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
+                            : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        All · {artifacts.length}
+                      </button>
+                      {artifactTypes.map((type) => {
+                        const count = artifacts.filter((a) => a.type === type.id).length;
+                        return (
+                          <button
+                            key={`desktop-filter-${type.id}`}
+                            type="button"
+                            onClick={() => setActiveFilter(type.id)}
+                            className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                              activeFilter === type.id
+                                ? 'border-[#0fd978] bg-[#12f987] text-[#0a1f1a]'
+                                : 'border-[#c4d5ce] bg-white text-[#3a574e] hover:bg-[#eff6f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {type.label}
+                            {count > 0 ? ` · ${count}` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                <Badge>{isLoadingArtifacts ? 'Loading' : activeFilter === 'all' ? 'All types' : artifactTypeLabelMap[activeFilter]}</Badge>
-              </div>
-            }
-          >
+              }
+            >
             {isLoadingArtifacts ? (
               <div className="space-y-3">
                 <ArtifactCardSkeleton />
@@ -1678,6 +1648,17 @@ export const StudentArtifactRepository = () => {
                       </div>
 
                       <p className="mt-2 text-xs leading-5 text-[#48635b] dark:text-slate-300">{artifact.description}</p>
+                      {artifact.versionCount > 1 ? (
+                        <div className="mt-1 text-[11px] text-[#4f6a62] dark:text-slate-400">
+                          <p className="font-medium">{artifact.versionCount} versions retained with provenance history.</p>
+                          <p className="mt-0.5">
+                            {artifact.provenanceVersions
+                              .slice(0, 2)
+                              .map((version) => `${version.operation} · ${version.createdAt}`)
+                              .join(' | ')}
+                          </p>
+                        </div>
+                      ) : null}
 
                       {artifact.attachmentName ? (
                         <p className="mt-1 text-xs font-medium text-[#3f5d54] dark:text-slate-300">
@@ -1747,23 +1728,41 @@ export const StudentArtifactRepository = () => {
               className="bg-white/95 p-5 dark:bg-slate-900/80"
               header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Signal coverage summary</h3>}
             >
-              <div className="mb-3 inline-flex items-center rounded-full border border-[#f3cf8a] bg-[#fff7e7] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#7a5300] dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200">
-                Coming Soon
+              <div className="mb-3 space-y-2">
+                <span className="inline-flex items-center rounded-full border border-[#cae2d8] bg-[#eef9f3] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#1f5a45] dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                  Coverage Radar
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.verified}`}>
+                    Verified: {verificationSummary.verified}
+                  </span>
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.unverified}`}>
+                    Unverified: {verificationSummary.unverified}
+                  </span>
+                </div>
               </div>
-              <div className="space-y-2">
+              <p className="text-xs text-[#4f6a62] dark:text-slate-400">
+                Coverage uses a neutral radar shape. Verification colors represent trust labels only.
+              </p>
+              <div className="mt-3 flex items-center justify-center">
+                <CapabilityRadar
+                  axes={signalRadarAxes}
+                  ariaLabel="Evidence signal coverage radar"
+                  className="h-[360px] w-full max-w-[520px]"
+                  labelFontSize={12}
+                />
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {signalCoverage.map((signal) => {
-                  const color = signalBarColorByTag[signal.tag];
-                  const width = Math.max((signal.count / maxTagCount) * 100, signal.count === 0 ? 0 : 14);
-
                   return (
-                    <div key={`coverage-${signal.tag}`}>
-                      <div className="mb-1 flex items-center justify-between text-xs font-medium text-[#4a655d] dark:text-slate-300">
-                        <span>{signal.tag}</span>
-                        <span>{signal.count}</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-[#dbe7e1] dark:bg-slate-700">
-                        <div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: color }} />
-                      </div>
+                    <div
+                      key={`coverage-${signal.tag}`}
+                      className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <p className="text-xs font-semibold text-[#1f4338] dark:text-slate-200">{signal.tag}</p>
+                      <p className="mt-0.5 text-[11px] text-[#4f6a62] dark:text-slate-400">
+                        {signal.count} linked artifact{signal.count === 1 ? '' : 's'}
+                      </p>
                     </div>
                   );
                 })}
@@ -1772,126 +1771,45 @@ export const StudentArtifactRepository = () => {
 
             <Card
               className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Sources</h3>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => openImportSourceDialog()}>
-                    <span className="inline-flex items-center gap-1.5">
-                      <UploadIcon className="h-3.5 w-3.5" />
-                      <span>Extract</span>
-                    </span>
-                  </Button>
-                </div>
-              }
+              header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Source Status</h3>}
             >
               <p className="text-xs text-[#4f6a62] dark:text-slate-400">
-                Upload a resume or transcript, connect GitHub, or link LinkedIn/Kaggle profiles to generate artifacts automatically.
+                Manage extraction inputs and reruns from your profile source controls.
               </p>
-              <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                Extraction can take some time. You can keep using this page while it runs.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
-                  Success
-                </span>
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200">
-                  In progress
-                </span>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
-                  Needs action
-                </span>
-                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200">
-                  Error
-                </span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                  Neutral
-                </span>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Connected</p>
+                  <p className="mt-1 text-lg font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.connectedCount}</p>
+                </div>
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Extracting</p>
+                  <p className="mt-1 text-lg font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.extractingCount}</p>
+                </div>
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Needs Update</p>
+                  <p className="mt-1 text-lg font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.needsUpdateCount}</p>
+                </div>
+                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Failed</p>
+                  <p className="mt-1 text-lg font-semibold text-[#0f2b23] dark:text-slate-100">{sourceStatusSummary.failedCount}</p>
+                </div>
               </div>
-              <div className="mt-3 space-y-2">
-                {importSourceTypes.map((type) => ({
-                  type,
-                  label: type === 'linkedin' ? 'LinkedIn' : type === 'kaggle' ? 'Kaggle' : type.charAt(0).toUpperCase() + type.slice(1),
-                  hint: type === 'resume' || type === 'transcript' ? '.pdf or .docx' : type === 'github' ? 'Username' : 'Profile URL'
-                })).map(({ type, label, hint }) => {
-                  const entry = sourceExtractionLog[type];
-                  const savedGithub = typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null;
-                  const savedLinkedin = typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null;
-                  const savedKaggle = typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : null;
-
-                  // Detect staleness for URL-based sources
-                  let isStale = false;
-                  if (type === 'github' && entry?.extracted_from && savedGithub) {
-                    const savedUsername = savedGithub.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
-                    const extractedUsername = entry.extracted_from.replace(/^https?:\/\/github\.com\//, '').split('/')[0];
-                    isStale = savedUsername !== extractedUsername;
-                  }
-                  if (type === 'linkedin' && entry?.extracted_from && savedLinkedin) {
-                    isStale = entry.extracted_from !== savedLinkedin;
-                  }
-                  if (type === 'kaggle' && entry?.extracted_from && savedKaggle) {
-                    isStale = entry.extracted_from !== savedKaggle;
-                  }
-
-                  const lastSyncedLabel = entry?.last_extracted_at
-                    ? new Date(entry.last_extracted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : null;
-                  const isExtracting = entry?.status === 'extracting';
-                  const isFailed = entry?.status === 'failed';
-                  const failureMessage = typeof entry?.error_message === 'string' ? entry.error_message : null;
-
-                  return (
-                    <div
-                      key={type}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => { setImportSourceType(type); openImportSourceDialog(type); }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setImportSourceType(type);
-                          openImportSourceDialog(type);
-                        }
-                      }}
-                      className="flex w-full items-center justify-between rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2.5 text-left transition-colors hover:border-[#a8c8bc] hover:bg-[#eef7f2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16d989] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f8fcfa] dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:focus-visible:ring-emerald-400 dark:focus-visible:ring-offset-slate-900"
-                    >
-                      <span className="text-xs font-semibold text-[#1b3d35] dark:text-slate-200">{label}</span>
-                      <span className="flex items-center gap-1.5">
-                        {(type === 'resume' || type === 'transcript') && hasSourceDocumentFile(entry) ? (
-                          <button
-                            type="button"
-                            onClick={(event) => void openSourceDocument(event, type)}
-                            className="inline-flex items-center rounded-full border border-[#98bdaf] bg-white px-2 py-0.5 text-[10px] font-semibold text-[#1f4f42] transition-colors hover:bg-[#eef7f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                          >
-                            {openingSourceDocument === type ? 'Opening…' : 'View file'}
-                          </button>
-                        ) : null}
-                        {isExtracting ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-500/20 dark:text-sky-200">
-                            <SpinnerIcon className="h-3 w-3" />
-                            Extracting
-                          </span>
-                        ) : isFailed ? (
-                          <span
-                            title={failureMessage ?? undefined}
-                            className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-500/20 dark:text-rose-200"
-                          >
-                            Failed
-                          </span>
-                        ) : isStale ? (
-                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
-                            Re-extract
-                          </span>
-                        ) : lastSyncedLabel ? (
-                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
-                            Extracted on {lastSyncedLabel}
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-[#5a7a70] dark:text-slate-400">{hint} ↗</span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
+              <p className="mt-3 text-xs font-medium text-[#3f6055] dark:text-slate-300">{sourceStatusSummary.contextLine}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href="/student/profile#capability-sources"
+                  className="inline-flex h-9 items-center justify-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-center text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Manage sources
+                </Link>
+                {sourceStatusSummary.connectedCount === 0 ? (
+                  <Link
+                    href="/student/profile#capability-sources"
+                    className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Add a source
+                  </Link>
+                ) : null}
               </div>
             </Card>
           </div>
@@ -1907,170 +1825,6 @@ export const StudentArtifactRepository = () => {
             <span>Add New Artifact</span>
           </span>
         </button>
-
-        {showImportSourceDialog ? (
-          <div className="fixed inset-0 z-[1200]">
-            <button
-              type="button"
-              aria-label="Close extract dialog"
-              onClick={closeImportSourceDialog}
-              className="absolute inset-0 bg-[#0a1f1a]/45"
-            />
-            <div className="absolute inset-x-0 bottom-0 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] p-4 pb-24 dark:border-slate-700 dark:bg-slate-900 lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:max-h-[90vh] lg:w-[min(38rem,calc(100vw-3rem))] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:p-6 lg:pb-6">
-              <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
-              <div className="mt-4 flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">Extract Artifacts from Source</p>
-                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">
-                    Upload a document or connect a profile to auto-generate artifact drafts.
-                  </p>
-                  <p className="mt-1 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                    Extraction may take some time. You can close this dialog after starting.
-                  </p>
-                </div>
-                <button type="button" onClick={closeImportSourceDialog} className="text-xs font-semibold text-[#4f6a62] dark:text-slate-400">Close</button>
-              </div>
-
-              {/* Source type tabs */}
-              <div className="mt-4 flex gap-1.5 rounded-xl border border-[#d4e1db] bg-[#f0f7f3] p-1 dark:border-slate-700 dark:bg-slate-800">
-                {importSourceTypes.map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => { setImportSourceType(type); setImportStatusMessage(null); }}
-                    className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize transition-colors ${
-                      importSourceType === type
-                        ? 'bg-white text-[#0a1f1a] shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                        : 'text-[#4f6a62] hover:text-[#1b3d35] dark:text-slate-400 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {type === 'linkedin' ? 'LinkedIn' : type === 'kaggle' ? 'Kaggle' : type.charAt(0).toUpperCase() + type.slice(1)}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-4">
-                {(importSourceType === 'resume' || importSourceType === 'transcript') && (
-                  <>
-                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
-                      Upload your {importSourceType} as a <strong>.pdf</strong> or <strong>.docx</strong>.
-                      Our AI will extract relevant artifacts automatically.
-                    </p>
-                    {hasExistingActiveDocument ? (
-                      <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100">
-                        Uploading a new {importSourceType} will replace your previously uploaded {activeDocumentLabel.toLowerCase()} file.
-                      </p>
-                    ) : null}
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => importFileInputRef.current?.click()}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#c4d5ce] bg-white px-4 py-6 text-sm font-semibold text-[#3a574e] transition-colors hover:border-[#8fbfb0] hover:bg-[#eef7f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500"
-                      >
-                        <UploadIcon className="h-5 w-5" />
-                        {importFileName ? importFileName : 'Click to select file'}
-                      </button>
-                      <input
-                        ref={importFileInputRef}
-                        type="file"
-                        accept=".pdf,.docx"
-                        className="sr-only"
-                        onChange={(e) => setImportFileName(e.target.files?.[0]?.name ?? '')}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {importSourceType === 'github' && (
-                  <>
-                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
-                      Enter your GitHub username. We&apos;ll scan your public repositories and generate <strong>Project</strong> artifacts for your strongest repos.
-                    </p>
-                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                      GitHub extraction requires your LinkedIn profile to be on file, and your GitHub profile should include that LinkedIn URL as a social link.
-                    </p>
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      GitHub username
-                      <input
-                        value={importGithubUsername}
-                        onChange={(e) => setImportGithubUsername(e.target.value)}
-                        placeholder="octocat"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                      Only public repos are scanned. Repos that appear to be tutorials, forks with no commits, or have no README are skipped.
-                    </p>
-                  </>
-                )}
-
-                {importSourceType === 'linkedin' && (
-                  <>
-                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
-                      Enter your public LinkedIn profile URL. We&apos;ll extract your experience and generate relevant artifacts.
-                    </p>
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Profile URL
-                      <input
-                        value={importLinkedinUrl}
-                        onChange={(e) => setImportLinkedinUrl(e.target.value)}
-                        placeholder="https://www.linkedin.com/in/yourname"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                      Your profile must be publicly visible for this to work.
-                    </p>
-                  </>
-                )}
-
-                {importSourceType === 'kaggle' && (
-                  <>
-                    <p className="text-xs text-[#4f6a62] dark:text-slate-300">
-                      Enter your public Kaggle profile URL. We&apos;ll extract project and competition evidence into artifact drafts.
-                    </p>
-                    <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Profile URL
-                      <input
-                        value={importKaggleUrl}
-                        onChange={(e) => setImportKaggleUrl(e.target.value)}
-                        placeholder="https://www.kaggle.com/yourname"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-                    <p className="mt-2 text-[11px] text-[#5a7a70] dark:text-slate-400">
-                      Your Kaggle profile must be publicly accessible for extraction.
-                    </p>
-                  </>
-                )}
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void submitImport()}
-                  disabled={isImporting}
-                  className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-sm font-semibold text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isImporting ? 'Extracting...' : 'Extract artifacts'}
-                </button>
-                <button
-                  type="button"
-                  onClick={closeImportSourceDialog}
-                  className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
-              </div>
-
-              {importStatusMessage && (
-                <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  {importStatusMessage}
-                </p>
-              )}
-            </div>
-          </div>
-        ) : null}
 
         {snackbar ? (
           <div className="pointer-events-none fixed bottom-4 left-1/2 z-[1300] w-[min(34rem,calc(100vw-1.5rem))] -translate-x-1/2">
@@ -2543,7 +2297,7 @@ export const StudentArtifactRepository = () => {
                     disabled={isDeletingArtifact || isSubmittingArtifact}
                     className="inline-flex h-10 items-center rounded-xl border border-rose-300 bg-rose-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500 dark:hover:bg-rose-400"
                   >
-                    {isDeletingArtifact ? 'Deleting...' : 'Delete'}
+                    {isDeletingArtifact ? 'Removing...' : 'Remove from active view'}
                   </button>
                 ) : null}
                 <button

@@ -127,7 +127,7 @@ const studentNavItems: NavItem[] = [
   {
     key: "student-artifacts",
     label: "Evidence Profile",
-    shortLabel: "Artifacts",
+    shortLabel: "Evidence",
     description: "Manage your evidence profile",
     icon: LayersIcon,
     href: "/student/artifacts",
@@ -148,7 +148,8 @@ const studentNavItems: NavItem[] = [
     shortLabel: "Coach",
     description: "Improve your hiring signal",
     icon: GuidanceIcon,
-    href: "/student/capability-coach"
+    href: "/student/capability-coach",
+    releaseKey: "capabilityCoach"
   },
   {
     key: "student-networking-coach",
@@ -156,12 +157,13 @@ const studentNavItems: NavItem[] = [
     shortLabel: "Networking",
     description: "Expand your network",
     icon: CandidateIcon,
-    href: "/student/networking-coach"
+    href: "/student/networking-coach",
+    releaseKey: "networkingCoach"
   },
   {
     key: "student-targets",
     label: "My Positions & Employers",
-    shortLabel: "Targets",
+    shortLabel: "Positions",
     description: "Set role and employer targets",
     icon: CompassIcon,
     href: "/student/targets",
@@ -241,6 +243,7 @@ export function AppNavigationShell({
         )
       : [];
   const showMobileBottomNav = showNavigation && audience === "student" && mobileBottomNavItems.length > 0;
+  const showMobileTopBar = showNavigation && audience === "student";
   const studentInitials = useMemo(() => toInitials(studentIdentity?.displayName ?? "Student"), [studentIdentity?.displayName]);
 
   useEffect(() => {
@@ -388,8 +391,38 @@ export function AppNavigationShell({
         </aside>
       ) : null}
 
+      {showMobileTopBar ? (
+        <header className="fixed left-0 right-0 top-0 z-[995] border-b border-[#d7e4de] bg-white/95 backdrop-blur lg:hidden dark:border-slate-700 dark:bg-slate-900/95">
+          <div className="flex h-16 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
+            <Link
+              href={navItems[0]?.href ?? "/student/dashboard"}
+              className="text-3xl font-bold leading-none tracking-tight text-[#0a1f1a] transition-opacity hover:opacity-80 dark:text-slate-100"
+              aria-label="Go to student home"
+            >
+              stu.
+            </Link>
+            <Link
+              href="/student/profile"
+              aria-label="Open profile"
+              className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e5f2ec] text-xs font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            >
+              {studentIdentity?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={studentIdentity.avatarUrl} alt="Student avatar" className="h-full w-full object-cover" />
+              ) : (
+                studentInitials
+              )}
+            </Link>
+          </div>
+        </header>
+      ) : null}
+
       <div className={`flex min-h-[100dvh] w-full ${showNavigation ? "lg:pl-[300px]" : ""}`}>
-        <div className={`min-w-0 flex-1 ${showMobileBottomNav ? "pb-28 lg:pb-0" : ""}`}>
+        <div
+          className={`min-w-0 flex-1 ${
+            showMobileBottomNav ? "pb-28 lg:pb-0" : ""
+          } ${showMobileTopBar ? "pt-[calc(4rem+env(safe-area-inset-top))] lg:pt-0" : ""}`}
+        >
           {children}
         </div>
       </div>
@@ -404,8 +437,6 @@ export function AppNavigationShell({
               {mobileBottomNavItems.map((item) => {
                 const isActive = pathname === item.href;
                 const Icon = item.icon;
-                const mobileLabel =
-                  item.key === "student-profile" ? "Profile" : item.key === "student-targets" ? "Targets" : item.shortLabel;
 
                 return (
                   <Link
@@ -418,7 +449,7 @@ export function AppNavigationShell({
                     }`}
                   >
                     <Icon className="h-4 w-4" />
-                    {mobileLabel}
+                    {item.shortLabel}
                   </Link>
                 );
               })}

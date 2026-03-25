@@ -14,12 +14,14 @@ export function buildMagicLinkCallbackRedirectPath(
   const code = firstValue(searchParams.code);
   const tokenHash = firstValue(searchParams.token_hash);
   const type = firstValue(searchParams.type);
+  const claimToken = firstValue(searchParams.claim_token);
   if (!code && !tokenHash) return null;
 
   const next = new URLSearchParams();
   if (code) next.set("code", code);
   if (tokenHash) next.set("token_hash", tokenHash);
   if (type) next.set("type", type);
+  if (claimToken) next.set("claim_token", claimToken);
 
   return `/auth/callback?${next.toString()}`;
 }

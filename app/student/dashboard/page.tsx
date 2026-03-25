@@ -2,487 +2,547 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Badge } from "@/components/mock/ui/Badge";
-import { Card } from "@/components/mock/ui/Card";
+import { CapabilityRadar, type CapabilityRadarAxis } from "@/components/student/CapabilityRadar";
 
-type DashboardSnapshot = {
-  firstName: string;
-  artifactCount: number;
-  artifactTypeCount: number;
-  roleCount: number;
-  companyCount: number;
+type VerificationBreakdown = {
+  verified: number;
+  pending: number;
+  unverified: number;
 };
 
-type CtaTone = "default" | "artifact_primary" | "artifact_secondary";
-
-type MetricCard = {
+type DashboardAxis = {
+  capability_id: string;
   label: string;
-  value: string;
-  statusLabel: string;
-  statusClass: string;
-  body: string;
-  href: string | null;
-  cta: string | null;
-  ctaTone?: CtaTone;
+  capability_class: "soft_skill" | "role_capability" | "fallback";
+  covered: boolean;
+  supporting_evidence_ids: string[];
+  verification_breakdown: VerificationBreakdown;
 };
 
-type CoachRecommendation = {
-  id: string;
-  title: string;
-  detail: string;
-  href: string | null;
-  cta: string | null;
-  ctaTone?: CtaTone;
+type DashboardPayload = {
+  roles: string[];
+  axes: DashboardAxis[];
+  alerts?: {
+    extraction_in_progress: boolean;
+    extraction_status: {
+      resume: "extracting" | "succeeded" | "failed" | "unknown";
+      transcript: "extracting" | "succeeded" | "failed" | "unknown";
+    };
+    resume_email_mismatch: {
+      auth_email: string | null;
+      resume_email: string | null;
+      detected_at: string | null;
+      message: string;
+    } | null;
+  };
+  kpis: {
+    capability_coverage_percent: number;
+    verified_evidence_share: number;
+    pending_unverified_share: number;
+    last_updated_at: string | null;
+    evidence_count: number;
+    total_linked_evidence: number;
+  };
+  state: "no_evidence" | "partial_no_verification" | "full_low_trust" | "progressing";
+  primary_cta: { label: string; href: string };
+  secondary_cta: { label: string; href: string };
 };
 
-const skeletonBlockClassName = "animate-pulse rounded-lg bg-[#e4efe9] dark:bg-slate-700/70";
-
-const getDashboardCtaClassName = ({ tone = "default", compact = false, fullWidth = false }: { tone?: CtaTone; compact?: boolean; fullWidth?: boolean }) => {
-  const layoutClass = compact ? "h-8 px-3 text-[11px]" : "h-9 px-3 text-xs";
-  const widthClass = fullWidth ? "w-full justify-center" : "";
-  const baseClass = `inline-flex items-center rounded-xl border ${layoutClass} ${widthClass} font-semibold uppercase tracking-[0.08em] transition-colors`;
-
-  if (tone === "artifact_primary") {
-    return `${baseClass} border-[#0f6a4b] bg-[#117b56] text-white hover:bg-[#0f6a4b] dark:border-emerald-300 dark:bg-emerald-400 dark:text-[#05291d] dark:hover:bg-emerald-300`;
-  }
-
-  if (tone === "artifact_secondary") {
-    return `${baseClass} border-[#9fc3ef] bg-[#eaf3ff] text-[#1f4f7a] hover:bg-[#dcecff] dark:border-sky-400/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:bg-sky-500/30`;
-  }
-
-  return `${baseClass} border-[#bfd2ca] bg-white text-[#21453a] hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800`;
+type ProfilePayload = {
+  profile?: {
+    personal_info?: Record<string, unknown>;
+  };
 };
 
-const toRecord = (value: unknown): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-};
+type MetricTone = "neutral" | "success" | "warning" | "danger";
+type RadarTab = "soft" | "role";
+
+const skeletonClass = "animate-pulse rounded-xl bg-[#dde9e3] dark:bg-slate-700/70";
+
+const asPercent = (value: number): string => `${Math.round(value * 100)}%`;
 
 const asTrimmedString = (value: unknown): string => {
   if (typeof value !== "string") return "";
   return value.trim();
 };
 
-const toStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item) => typeof item === "string")
-    .map((item) => (item as string).trim())
-    .filter((item) => item.length > 0);
-};
-
-const deriveFirstName = (personalInfo: Record<string, unknown>): string => {
-  const firstName = asTrimmedString(personalInfo.first_name);
-  if (firstName.length > 0) return firstName;
+const resolveFirstName = (personalInfo: Record<string, unknown>): string | null => {
+  const explicitFirstName = asTrimmedString(personalInfo.first_name);
+  if (explicitFirstName.length > 0) return explicitFirstName;
 
   const fullName = asTrimmedString(personalInfo.full_name);
-  if (fullName.length > 0) return fullName.split(/\s+/).filter(Boolean)[0] ?? "Student";
+  if (fullName.length > 0) {
+    const firstToken = fullName.split(/\s+/).filter(Boolean)[0] ?? "";
+    if (firstToken.length > 0) return firstToken;
+  }
 
   const email = asTrimmedString(personalInfo.email);
-  if (email.length > 0) return email.split("@")[0]?.trim() ?? "Student";
+  if (email.length > 0) {
+    const local = email.split("@")[0]?.trim() ?? "";
+    if (local.length > 0) return local;
+  }
 
-  return "Student";
+  return null;
+};
+
+const formatTimestamp = (value: string | null): string => {
+  if (!value) return "No evidence yet";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "No evidence yet";
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const resolveVerifiedShareTone = (share: number): MetricTone => {
+  if (share >= 0.7) return "success";
+  if (share >= 0.4) return "warning";
+  return "danger";
+};
+
+const resolvePendingShareTone = (share: number): MetricTone => {
+  if (share <= 0.3) return "success";
+  if (share <= 0.6) return "warning";
+  return "danger";
+};
+
+const mapDashboardAxisToRadarAxis = (axis: DashboardAxis): CapabilityRadarAxis => {
+  const verified = axis.verification_breakdown.verified;
+  const pendingOrUnverified = axis.verification_breakdown.pending + axis.verification_breakdown.unverified;
+  const magnitude = axis.covered ? (verified > 0 ? 1 : pendingOrUnverified > 0 ? 0.65 : 0.5) : 0;
+  return {
+    id: axis.capability_id,
+    label: axis.label,
+    magnitude,
+  };
 };
 
 export default function StudentDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<DashboardSnapshot>({
-    firstName: "Student",
-    artifactCount: 0,
-    artifactTypeCount: 0,
-    roleCount: 0,
-    companyCount: 0
-  });
+  const [error, setError] = useState<string | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
+  const [firstName, setFirstName] = useState<string | null>(null);
+  const [isDismissingMismatch, setIsDismissingMismatch] = useState(false);
+  const [mobileRadarTab, setMobileRadarTab] = useState<RadarTab>("soft");
 
   useEffect(() => {
     let active = true;
-
-    const loadDashboardData = async () => {
+    const load = async () => {
       setIsLoading(true);
-      setLoadError(null);
+      setError(null);
       try {
-        const [profileResponse, artifactsResponse] = await Promise.all([
+        const [dashboardResponse, profileResponse] = await Promise.all([
+          fetch("/api/student/dashboard", { cache: "no-store" }),
           fetch("/api/student/profile", { cache: "no-store" }),
-          fetch("/api/student/artifacts", { cache: "no-store" })
         ]);
-
-        const profilePayload = (await profileResponse.json().catch(() => null)) as
-          | { ok: true; data?: { profile?: { personal_info?: Record<string, unknown> }; student_data?: Record<string, unknown> } }
+        const payload = (await dashboardResponse.json().catch(() => null)) as
+          | { ok: true; data?: { dashboard?: DashboardPayload } }
           | { ok: false; error?: string }
           | null;
-        const artifactsPayload = (await artifactsResponse.json().catch(() => null)) as
-          | { ok: true; data?: { artifacts?: Array<{ artifact_type?: string }> }; artifacts?: Array<{ artifact_type?: string }> }
-          | { ok: false; error?: string }
-          | null;
-
-        if (!profileResponse.ok || !artifactsResponse.ok || !profilePayload || !profilePayload.ok || !artifactsPayload || !artifactsPayload.ok) {
+        if (!dashboardResponse.ok || !payload || !payload.ok || !payload.data?.dashboard) {
           throw new Error("dashboard_load_failed");
         }
 
+        const profilePayload = (await profileResponse.json().catch(() => null)) as
+          | { ok: true; data?: ProfilePayload }
+          | { ok: false; error?: string }
+          | null;
+        const maybeFirstName = profilePayload?.ok
+          ? resolveFirstName(profilePayload.data?.profile?.personal_info ?? {})
+          : null;
+
         if (!active) return;
-
-        const personalInfo = toRecord(profilePayload.data?.profile?.personal_info);
-        const studentData = toRecord(profilePayload.data?.student_data);
-        const artifactRows = Array.isArray(artifactsPayload.data?.artifacts)
-          ? artifactsPayload.data?.artifacts ?? []
-          : Array.isArray(artifactsPayload.artifacts)
-            ? artifactsPayload.artifacts
-            : [];
-
-        const artifactTypes = new Set<string>();
-        for (const artifact of artifactRows) {
-          const type = asTrimmedString(artifact?.artifact_type);
-          if (type.length > 0) artifactTypes.add(type);
-        }
-
-        setSnapshot({
-          firstName: deriveFirstName(personalInfo),
-          artifactCount: artifactRows.length,
-          artifactTypeCount: artifactTypes.size,
-          roleCount: toStringArray(studentData.target_roles).length,
-          companyCount: toStringArray(studentData.target_companies).length
-        });
+        setDashboard(payload.data.dashboard);
+        setFirstName(maybeFirstName);
       } catch {
         if (!active) return;
-        setLoadError("Unable to load dashboard metrics right now.");
+        setError("Unable to load dashboard right now.");
       } finally {
         if (active) setIsLoading(false);
       }
     };
 
-    void loadDashboardData();
+    void load();
     return () => {
       active = false;
     };
   }, []);
 
-  const metricCards = useMemo<MetricCard[]>(() => {
-    const focusedCoachingMessage =
-      "Maintaining 3 or less will help you get better targeted capability coaching, great work!";
-    const broadCoachingMessage =
-      "Your capability coaching might be too broad, let's see if we can help you hone your approach.";
+  const dismissResumeMismatchWarning = async () => {
+    if (!dashboard?.alerts?.resume_email_mismatch || isDismissingMismatch) return;
+    setIsDismissingMismatch(true);
+    try {
+      const response = await fetch("/api/student/onboarding/signals", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "dismiss_resume_email_mismatch",
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+      if (!response.ok || !payload?.ok) throw new Error("dismiss_failed");
 
-    const hasNoRoles = snapshot.roleCount === 0;
-    const hasNoCompanies = snapshot.companyCount === 0;
-    const hasFocusedRoles = snapshot.roleCount > 0 && snapshot.roleCount <= 3;
-    const hasFocusedCompanies = snapshot.companyCount > 0 && snapshot.companyCount <= 3;
+      setDashboard((current) => {
+        if (!current?.alerts) return current;
+        return {
+          ...current,
+          alerts: {
+            ...current.alerts,
+            resume_email_mismatch: null,
+          },
+        };
+      });
+    } catch {
+      setError("Unable to dismiss this warning right now.");
+    } finally {
+      setIsDismissingMismatch(false);
+    }
+  };
 
-    return [
-      {
-        label: "Artifacts",
-        value: String(snapshot.artifactCount),
-        statusLabel: snapshot.artifactCount === 0 ? "Do now" : "In progress",
-        statusClass:
-          snapshot.artifactCount === 0
-            ? "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100"
-            : "bg-[#eef6ff] text-[#1f4f7a] dark:bg-sky-500/20 dark:text-sky-100",
-        body:
-          snapshot.artifactCount === 0
-            ? "Build your recruiter signal by adding your first artifact."
-            : "Keep adding fresh evidence so employers can track your growth over time.",
-        href: "/student/artifacts?openAddArtifact=true",
-        cta: "Add New Artifact",
-        ctaTone: "artifact_primary"
-      },
-      {
-        label: "Artifact Types",
-        value: String(snapshot.artifactTypeCount),
-        statusLabel: snapshot.artifactTypeCount >= 3 ? "On track" : "Do now",
-        statusClass:
-          snapshot.artifactTypeCount >= 3
-            ? "bg-[#eef6ff] text-[#1f4f7a] dark:bg-sky-500/20 dark:text-sky-100"
-            : "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100",
-        body: "A variety of artifact types helps employers know the range of your skills",
-        href: "/student/artifacts",
-        cta: "Open Artifact Repository",
-        ctaTone: "artifact_secondary"
-      },
-      {
-        label: "Target Roles",
-        value: String(snapshot.roleCount),
-        statusLabel: hasNoRoles ? "Do now" : hasFocusedRoles ? "Focused" : "Needs focus",
-        statusClass: hasNoRoles
-          ? "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100"
-          : hasFocusedRoles
-            ? "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100"
-            : "bg-[#fff5e8] text-[#7a4d20] dark:bg-amber-500/20 dark:text-amber-100",
-        body: hasNoRoles
-          ? "Select a few target roles so your capability coaching can stay relevant and actionable."
-          : hasFocusedRoles
-            ? focusedCoachingMessage
-            : broadCoachingMessage,
-        href: hasNoRoles ? "/student/targets" : hasFocusedRoles ? null : "/student/capability-coach",
-        cta: hasNoRoles ? "Open My Positions & Employers" : hasFocusedRoles ? null : "Open Capability Coach",
-        ctaTone: "default"
-      },
-      {
-        label: "Target Companies",
-        value: String(snapshot.companyCount),
-        statusLabel: hasNoCompanies ? "Do now" : hasFocusedCompanies ? "Focused" : "Needs focus",
-        statusClass: hasNoCompanies
-          ? "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100"
-          : hasFocusedCompanies
-            ? "bg-[#dcfff0] text-[#0a402d] dark:bg-emerald-500/20 dark:text-emerald-100"
-            : "bg-[#fff5e8] text-[#7a4d20] dark:bg-amber-500/20 dark:text-amber-100",
-        body: hasNoCompanies
-          ? "Select a few target employers so your capability coaching can be tailored to real hiring contexts."
-          : hasFocusedCompanies
-            ? focusedCoachingMessage
-            : broadCoachingMessage,
-        href: hasNoCompanies ? "/student/targets" : hasFocusedCompanies ? null : "/student/capability-coach",
-        cta: hasNoCompanies ? "Open My Positions & Employers" : hasFocusedCompanies ? null : "Open Capability Coach",
-        ctaTone: "default"
-      }
-    ];
-  }, [snapshot.artifactCount, snapshot.artifactTypeCount, snapshot.companyCount, snapshot.roleCount]);
+  const axes = useMemo(() => {
+    return (dashboard?.axes ?? []).filter((axis) => axis.capability_class !== "fallback");
+  }, [dashboard?.axes]);
+  const softSkillAxes = useMemo(() => {
+    return axes.filter((axis) => axis.capability_class === "soft_skill");
+  }, [axes]);
+  const roleSkillAxes = useMemo(() => {
+    return axes.filter((axis) => axis.capability_class === "role_capability");
+  }, [axes]);
+  const softSkillRadarAxes = useMemo<CapabilityRadarAxis[]>(() => softSkillAxes.map(mapDashboardAxisToRadarAxis), [softSkillAxes]);
+  const roleSkillRadarAxes = useMemo<CapabilityRadarAxis[]>(() => roleSkillAxes.map(mapDashboardAxisToRadarAxis), [roleSkillAxes]);
 
-  const draftCoachRecommendations = useMemo<CoachRecommendation[]>(() => {
-    const evidenceRecommendation: CoachRecommendation =
-      snapshot.artifactCount === 0
-        ? {
-            id: "coach-evidence-first",
-            title: "Start your evidence signal",
-            detail: "Add your first artifact so Personal Career Coach can calibrate recommendations to your real work.",
-            href: "/student/artifacts?openAddArtifact=true",
-            cta: "Add New Artifact",
-            ctaTone: "artifact_primary"
-          }
-        : snapshot.artifactTypeCount < 3
-          ? {
-              id: "coach-evidence-diversify",
-              title: "Diversify your evidence types",
-              detail: "A broader mix of artifact types will help your coach identify a wider range of strengths.",
-              href: "/student/artifacts",
-              cta: "Open Artifact Repository",
-              ctaTone: "artifact_secondary"
-            }
-          : {
-              id: "coach-evidence-refresh",
-              title: "Keep evidence current",
-              detail: "You have a strong evidence base. Add one new artifact this week to keep momentum visible.",
-              href: "/student/artifacts?openAddArtifact=true",
-              cta: "Add New Artifact",
-              ctaTone: "artifact_primary"
-            };
-
-    const targetingRecommendation: CoachRecommendation =
-      snapshot.roleCount === 0 || snapshot.companyCount === 0
-        ? {
-            id: "coach-targets-set",
-            title: "Set your role and employer targets",
-            detail: "Choose a few positions and employers so your coach can personalize advice to your hiring goals.",
-            href: "/student/targets",
-            cta: "Open My Positions & Employers",
-            ctaTone: "default"
-          }
-        : snapshot.roleCount > 3 || snapshot.companyCount > 3
-          ? {
-              id: "coach-targets-focus",
-              title: "Narrow your target scope",
-              detail: "Your coaching context is broad right now. Tightening to three or fewer targets improves precision.",
-              href: "/student/capability-coach",
-              cta: "Open Capability Coach",
-              ctaTone: "default"
-            }
-          : {
-              id: "coach-targets-healthy",
-              title: "Target scope looks healthy",
-              detail: "Your roles and employers are focused enough for high-quality coaching recommendations.",
-              href: null,
-              cta: null,
-              ctaTone: "default"
-            };
-
-    const planningRecommendation: CoachRecommendation = {
-      id: "coach-plan-preview",
-      title: "Preview Personal Career Coach",
-      detail:
-        "Capability Coach will soon deliver ranked weekly actions based on your artifacts, target scope, and skill progression.",
-      href: "/student/capability-coach",
-      cta: "View Capability Coach Preview",
-      ctaTone: "default"
-    };
-
-    return [evidenceRecommendation, targetingRecommendation, planningRecommendation];
-  }, [snapshot.artifactCount, snapshot.artifactTypeCount, snapshot.companyCount, snapshot.roleCount]);
+  const stateLabel = useMemo(() => {
+    const state = dashboard?.state;
+    if (state === "no_evidence") return "Add evidence to populate capability coverage.";
+    if (state === "partial_no_verification") return "Evidence found. Verify artifacts to improve trust labels.";
+    if (state === "full_low_trust") return "Coverage complete. Verification is the current priority.";
+    return "Keep your evidence profile current.";
+  }, [dashboard?.state]);
+  const noRolesSelected = !isLoading && (dashboard?.roles.length ?? 0) === 0;
+  const roleRadarEmpty = !isLoading && roleSkillRadarAxes.length === 0;
+  const verifiedShareTone = resolveVerifiedShareTone(dashboard?.kpis.verified_evidence_share ?? 0);
+  const pendingShareTone = resolvePendingShareTone(dashboard?.kpis.pending_unverified_share ?? 0);
 
   return (
-    <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
-      <section aria-labelledby="student-dashboard-title" className="w-full px-6 py-12 lg:px-8">
-        <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-slate-700 dark:bg-slate-900/75">
-          <header className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#4c6860] dark:text-slate-400">
-              Student Capability Dashboard
+    <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
+      <section className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[30px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
+        <header className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#4f6d64] dark:text-slate-400">Capability Dashboard</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl">
+            {`Hi ${firstName ?? "there"}, here's your hiring signal overview`}
+          </h1>
+          <p className="mt-3 text-sm leading-7 text-[#47635a] dark:text-slate-300">{stateLabel}</p>
+        </header>
+
+        {error ? (
+          <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-400/35 dark:bg-rose-500/10 dark:text-rose-200">
+            {error}
+          </p>
+        ) : null}
+        {!isLoading && dashboard?.alerts?.resume_email_mismatch ? (
+          <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+            <p className="font-semibold">Email mismatch warning</p>
+            <p className="mt-1">{dashboard.alerts.resume_email_mismatch.message}</p>
+            <p className="mt-1 text-xs">
+              Account email: {dashboard.alerts.resume_email_mismatch.auth_email ?? "Unknown"} · Resume email:{" "}
+              {dashboard.alerts.resume_email_mismatch.resume_email ?? "Unknown"}
             </p>
-            {isLoading ? (
-              <>
-                <div className={`${skeletonBlockClassName} mt-3 h-9 w-80 max-w-full`} />
-                <div className={`${skeletonBlockClassName} mt-3 h-4 w-full max-w-2xl`} />
-              </>
-            ) : (
-              <>
-                <h2 id="student-dashboard-title" className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl">
-                  Welcome back, {snapshot.firstName}
-                </h2>
-                <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
-                  Focus on the highest-impact next steps to strengthen your readiness and improve coaching quality.
-                </p>
-              </>
-            )}
-          </header>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {(isLoading
-              ? Array.from({ length: 4 }).map((_, index) => (
-                  <Card key={`metric-skeleton-${index}`} className="bg-white/95 p-4 dark:bg-slate-900/80">
-                    <div aria-hidden="true" className="animate-pulse">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className={`${skeletonBlockClassName} h-3 w-24`} />
-                        <div className={`${skeletonBlockClassName} h-5 w-16 rounded-full`} />
-                      </div>
-                      <div className={`${skeletonBlockClassName} mt-3 h-9 w-14`} />
-                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-4/5`} />
-                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-full`} />
-                      <div className={`${skeletonBlockClassName} mt-3 h-9 w-full`} />
-                    </div>
-                  </Card>
-                ))
-              : metricCards.map((metric) => (
-                  <Card
-                    key={metric.label}
-                    className="bg-white/95 p-4 dark:bg-slate-900/80"
-                    header={
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#38574d] dark:text-slate-300">{metric.label}</h3>
-                        <Badge className={metric.statusClass}>{metric.statusLabel}</Badge>
-                      </div>
-                    }
-                  >
-                    <p className="text-3xl font-semibold text-[#0f2b23] dark:text-slate-100">{metric.value}</p>
-                    <p className="mt-2 min-h-[5rem] text-xs leading-5 text-[#4c6860] dark:text-slate-300">{metric.body}</p>
-                    {metric.href && metric.cta ? (
-                      <div className="mt-3">
-                        <Link
-                          href={metric.href}
-                          className={getDashboardCtaClassName({ tone: metric.ctaTone, fullWidth: true })}
-                        >
-                          {metric.cta}
-                        </Link>
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-xs font-medium text-[#4c6860] dark:text-slate-300">No action needed right now.</p>
-                    )}
-                  </Card>
-                )))}
+            <button
+              type="button"
+              onClick={() => void dismissResumeMismatchWarning()}
+              disabled={isDismissingMismatch}
+              className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
+            >
+              {isDismissingMismatch ? "Dismissing..." : "Dismiss warning"}
+            </button>
           </div>
+        ) : null}
+        {!isLoading && dashboard?.alerts?.extraction_in_progress ? (
+          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-200">
+            <p className="font-semibold">Extraction in progress</p>
+            <p className="mt-1">
+              We are still processing your latest uploads. Your capability and trust metrics will update automatically.
+            </p>
+          </div>
+        ) : null}
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <Card
-              className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Personal Career Coach</h3>
-                  <Badge className="bg-[#fff5e8] text-[#7a4d20] dark:bg-amber-500/20 dark:text-amber-100">Draft recommendations</Badge>
-                </div>
-              }
-            >
-              {isLoading ? (
-                <div aria-hidden="true" className="flex flex-col gap-3">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <div key={`coach-draft-skeleton-${index}`} className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900">
-                      <div className={`${skeletonBlockClassName} h-3 w-2/3`} />
-                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-full`} />
-                      <div className={`${skeletonBlockClassName} mt-2 h-3 w-5/6`} />
-                      <div className={`${skeletonBlockClassName} mt-3 h-8 w-40`} />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {draftCoachRecommendations.map((recommendation) => (
-                    <div
-                      key={recommendation.id}
-                      className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900 flex flex-col justify-between"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-[#14372d] dark:text-slate-100">{recommendation.title}</p>
-                        <p className="mt-2 text-xs leading-5 text-[#4c6860] dark:text-slate-300">{recommendation.detail}</p>
-                      </div>
-                      {recommendation.href && recommendation.cta ? (
-                        <div className="mt-3">
-                          <Link
-                            href={recommendation.href}
-                            className={getDashboardCtaClassName({ tone: recommendation.ctaTone, compact: true })}
-                          >
-                            {recommendation.cta}
-                          </Link>
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-[11px] font-medium text-[#4c6860] dark:text-slate-300">No action needed right now.</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
+        <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+          {isLoading || !dashboard ? (
+            <>
+              <div className={`${skeletonClass} h-20`} />
+              <div className={`${skeletonClass} h-20`} />
+              <div className={`${skeletonClass} h-20`} />
+              <div className={`${skeletonClass} h-20`} />
+            </>
+          ) : (
+            <>
+              <MetricCard
+                label="Capability coverage"
+                value={`${dashboard.kpis.capability_coverage_percent}%`}
+                tone={noRolesSelected ? "warning" : "neutral"}
+                helperText={noRolesSelected ? "Baseline mode is capped at 30% until you select a role." : undefined}
+              />
+              <MetricCard
+                label="Verified evidence share"
+                value={asPercent(dashboard.kpis.verified_evidence_share)}
+                tone={verifiedShareTone}
+                cta={
+                  verifiedShareTone === "danger"
+                    ? { label: "Verify artifacts", href: "/student/artifacts?focus=verification" }
+                    : undefined
+                }
+              />
+              <MetricCard
+                label="Pending + unverified share"
+                value={asPercent(dashboard.kpis.pending_unverified_share)}
+                tone={pendingShareTone}
+                cta={
+                  pendingShareTone === "danger"
+                    ? { label: "Fix now", href: "/student/artifacts?focus=verification" }
+                    : undefined
+                }
+              />
+              <MetricCard label="Last updated" value={formatTimestamp(dashboard.kpis.last_updated_at)} />
+            </>
+          )}
+        </div>
 
-            <Card
-              className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Employer Spotlight</h3>
-                  <Badge className="bg-[#eef6ff] text-[#1f4f7a] dark:bg-sky-500/20 dark:text-sky-100">Sponsored matches</Badge>
-                </div>
-              }
-            >
-              <div className="flex flex-col gap-3">
-                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-4 dark:border-slate-700 dark:bg-slate-900 flex items-start gap-4">
-                  <div className="h-12 w-12 shrink-0 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xl dark:bg-indigo-900/50 dark:text-indigo-300">
-                    A
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-base font-semibold text-[#14372d] dark:text-slate-100">Acme Corp</h4>
-                    <p className="mt-1 text-xs leading-5 text-[#4c6860] dark:text-slate-300">
-                      Your capability vector is a high match for their Software Engineering roles. They are actively seeking students with your artifact signal.
-                    </p>
-                    <Link
-                      href="#"
-                      className="mt-3 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      View Openings
-                    </Link>
-                  </div>
-                </div>
+        <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <article className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Capability Radar</p>
+            <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">
+              Separate views for universal baseline skills and role-specific capability coverage.
+            </p>
 
-                <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-4 dark:border-slate-700 dark:bg-slate-900 flex items-start gap-4">
-                  <div className="h-12 w-12 shrink-0 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xl dark:bg-emerald-900/50 dark:text-emerald-300">
-                    G
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-base font-semibold text-[#14372d] dark:text-slate-100">Global Tech</h4>
-                    <p className="mt-1 text-xs leading-5 text-[#4c6860] dark:text-slate-300">
-                      Based on your recent Systems Architecture artifacts, you are a glowing match for our Summer Internship program.
-                    </p>
-                    <Link
-                      href="#"
-                      className="mt-3 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Learn More
-                    </Link>
-                  </div>
-                </div>
+            {!isLoading ? (
+              <div className="mt-3 inline-flex rounded-xl border border-[#cadad3] bg-[#f2f8f5] p-1 lg:hidden dark:border-slate-700 dark:bg-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setMobileRadarTab("soft")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
+                    mobileRadarTab === "soft"
+                      ? "bg-white text-[#12392f] shadow-sm dark:bg-slate-900 dark:text-slate-100"
+                      : "text-[#4f6d64] dark:text-slate-300"
+                  }`}
+                >
+                  Soft Skills
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobileRadarTab("role")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
+                    mobileRadarTab === "role"
+                      ? "bg-white text-[#12392f] shadow-sm dark:bg-slate-900 dark:text-slate-100"
+                      : "text-[#4f6d64] dark:text-slate-300"
+                  }`}
+                >
+                  Role Skills
+                </button>
               </div>
-            </Card>
-          </div>
+            ) : null}
 
-          {loadError ? (
-            <p className="mt-4 rounded-xl border border-[#cde0d8] bg-[#f4faf7] px-3 py-2 text-xs font-medium text-[#44645b] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-              {loadError}
+            <div className="mt-4 lg:hidden">
+              <CapabilityRadarPanel
+                title={mobileRadarTab === "soft" ? "Soft Skills Radar" : "Role Skills Radar"}
+                subtitle={
+                  mobileRadarTab === "soft"
+                    ? "Universal baseline capabilities tracked for all students."
+                    : "Role-required capabilities based on selected target roles."
+                }
+                axes={mobileRadarTab === "soft" ? softSkillRadarAxes : roleSkillRadarAxes}
+                isLoading={isLoading || !dashboard}
+                ariaLabel={mobileRadarTab === "soft" ? "Soft skills capability radar" : "Role skills capability radar"}
+                emptyMessage={
+                  mobileRadarTab === "role"
+                    ? noRolesSelected
+                      ? "Select at least one role to unlock role-skill tracking."
+                      : "No role capability mapping available yet for selected roles."
+                    : "No soft-skill evidence linked yet."
+                }
+                emptyCta={
+                  mobileRadarTab === "role"
+                    ? { label: "Select roles", href: "/student/targets" }
+                    : { label: "Add artifacts", href: "/student/artifacts?openAddArtifact=true" }
+                }
+              />
+            </div>
+
+            <div className="mt-4 hidden gap-4 lg:grid lg:grid-cols-2">
+              <CapabilityRadarPanel
+                title="Soft Skills Radar"
+                subtitle="Universal baseline capabilities tracked for all students."
+                axes={softSkillRadarAxes}
+                isLoading={isLoading || !dashboard}
+                ariaLabel="Soft skills capability radar"
+                emptyMessage="No soft-skill evidence linked yet."
+                emptyCta={{ label: "Add artifacts", href: "/student/artifacts?openAddArtifact=true" }}
+              />
+              <CapabilityRadarPanel
+                title="Role Skills Radar"
+                subtitle="Role-required capabilities based on selected target roles."
+                axes={roleSkillRadarAxes}
+                isLoading={isLoading || !dashboard}
+                ariaLabel="Role skills capability radar"
+                emptyMessage={
+                  noRolesSelected
+                    ? "Select at least one role to unlock role-skill tracking."
+                    : roleRadarEmpty
+                      ? "No role capability mapping available yet for selected roles."
+                      : "No role-skill evidence linked yet."
+                }
+                emptyCta={{ label: "Select roles", href: "/student/targets" }}
+              />
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Actions</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#102922] dark:text-slate-100">Strengthen your evidence signal</h2>
+            <p className="mt-2 text-sm text-[#466258] dark:text-slate-300">
+              Capabilities shown here are derived from linked artifacts and verification states.
             </p>
-          ) : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {isLoading || !dashboard ? (
+                <>
+                  <div className={`${skeletonClass} h-9 w-36`} />
+                  <div className={`${skeletonClass} h-9 w-44`} />
+                </>
+              ) : (
+                <>
+                  <Link
+                    href={dashboard.primary_cta.href}
+                    className="inline-flex h-9 items-center rounded-xl bg-[#117b56] px-4 text-xs font-semibold uppercase tracking-[0.08em] text-white transition-colors hover:bg-[#0f6a4b]"
+                  >
+                    {dashboard.primary_cta.label}
+                  </Link>
+                  <Link
+                    href={dashboard.secondary_cta.href}
+                    className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {dashboard.secondary_cta.label}
+                  </Link>
+                </>
+              )}
+            </div>
+
+            {!isLoading && dashboard ? (
+              <div className="mt-5 rounded-xl border border-[#d9e6df] bg-[#f7fcf9] p-3 dark:border-slate-700 dark:bg-slate-900">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
+                  Role context
+                </p>
+                <p className="mt-1 text-sm text-[#2f4f44] dark:text-slate-200">
+                  {dashboard.roles.length > 0 ? dashboard.roles.join(", ") : "No selected roles yet"}
+                </p>
+                <p className="mt-2 text-xs text-[#4f6d64] dark:text-slate-400">
+                  Evidence count: {dashboard.kpis.evidence_count}
+                </p>
+              </div>
+            ) : null}
+          </article>
         </div>
       </section>
     </main>
+  );
+}
+
+function CapabilityRadarPanel({
+  title,
+  subtitle,
+  axes,
+  isLoading,
+  ariaLabel,
+  emptyMessage,
+  emptyCta,
+}: {
+  title: string;
+  subtitle: string;
+  axes: CapabilityRadarAxis[];
+  isLoading: boolean;
+  ariaLabel: string;
+  emptyMessage: string;
+  emptyCta?: { label: string; href: string };
+}) {
+  return (
+    <section className="rounded-xl border border-[#d2e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900/70">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">{title}</p>
+      <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">{subtitle}</p>
+      <div className="mt-3 flex min-h-[350px] items-center justify-center overflow-visible">
+        {isLoading ? (
+          <div className={`${skeletonClass} h-[320px] w-[320px] rounded-full`} />
+        ) : axes.length > 0 ? (
+          <CapabilityRadar
+            axes={axes}
+            ariaLabel={ariaLabel}
+            className="h-[380px] w-full max-w-[520px]"
+            labelFontSize={13}
+          />
+        ) : (
+          <div className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+            <p>{emptyMessage}</p>
+            {emptyCta ? (
+              <Link
+                href={emptyCta.href}
+                className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
+              >
+                {emptyCta.label}
+              </Link>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  tone = "neutral",
+  helperText,
+  cta,
+}: {
+  label: string;
+  value: string;
+  tone?: MetricTone;
+  helperText?: string;
+  cta?: { label: string; href: string };
+}) {
+  const toneClasses =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 dark:border-emerald-400/30 dark:bg-emerald-500/10"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 dark:border-amber-400/35 dark:bg-amber-500/10"
+        : tone === "danger"
+          ? "border-rose-200 bg-rose-50 dark:border-rose-400/35 dark:bg-rose-500/10"
+          : "border-[#d2e1db] bg-white dark:border-slate-700 dark:bg-slate-900";
+  const valueClasses =
+    tone === "success"
+      ? "text-emerald-800 dark:text-emerald-200"
+      : tone === "warning"
+        ? "text-amber-800 dark:text-amber-200"
+        : tone === "danger"
+          ? "text-rose-800 dark:text-rose-200"
+          : "text-[#102922] dark:text-slate-100";
+
+  return (
+    <article className={`rounded-xl border p-3 ${toneClasses}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">{label}</p>
+      <p className={`mt-1 text-sm font-semibold ${valueClasses}`}>{value}</p>
+      {helperText ? <p className="mt-1 text-[11px] text-[#4f6d64] dark:text-slate-400">{helperText}</p> : null}
+      {cta ? (
+        <Link
+          href={cta.href}
+          className="mt-2 inline-flex rounded-lg border border-rose-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rose-700 transition-colors hover:bg-rose-100 dark:bg-transparent dark:text-rose-200 dark:hover:bg-rose-500/15"
+        >
+          {cta.label}
+        </Link>
+      ) : null}
+    </article>
   );
 }

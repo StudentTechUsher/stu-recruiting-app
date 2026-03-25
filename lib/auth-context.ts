@@ -111,13 +111,16 @@ const createMockSessionData = (h: Headers): { sessionUser: SessionUserSnapshot; 
   const requestedFullName = h.get("x-stu-full-name")?.trim() ?? "";
   const fallbackFullName = "Vin Jones";
   const fullName = requestedFullName || (requestedFirstName ? `${requestedFirstName} Dev` : fallbackFullName);
-  const firstName = requestedFirstName || fullName.split(/\s+/).filter(Boolean)[0] || "Vin";
+  const fullNameTokens = fullName.split(/\s+/).filter(Boolean);
+  const firstName = requestedFirstName || fullNameTokens[0] || "Vin";
+  const lastName = fullNameTokens.slice(1).join(" ");
 
   const profile: ProfileSnapshot = {
     id: userId,
     role: persona,
     personal_info: {
       first_name: firstName,
+      last_name: lastName,
       full_name: fullName,
       email: h.get("x-stu-email") ?? `${userId}@dev.local`
     },
@@ -146,6 +149,7 @@ const createMockSessionData = (h: Headers): { sessionUser: SessionUserSnapshot; 
       org_id: orgId,
       assignment_ids: assignmentIds,
       first_name: firstName,
+      last_name: lastName,
       full_name: fullName
     }
   };

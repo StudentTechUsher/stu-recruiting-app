@@ -31,6 +31,10 @@ type MaterializeSelection = {
 type ArtifactRow = {
   artifact_id: string;
   artifact_data: unknown;
+  file_refs?: unknown;
+  source_provenance?: unknown;
+  source_object_id?: string | null;
+  ingestion_run_id?: string | null;
 };
 
 const toSelectionArray = (value: unknown): MaterializeSelection[] => {
@@ -124,6 +128,7 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
         course_meta: courseRow.course_meta ?? {}
       };
 
+      const sourceObjectId = `transcript:${session.session_id}:${parsedCourseId}`;
       return {
         profile_id: auth.user_id,
         artifact_type: "coursework",
@@ -134,10 +139,20 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
           parsedCourseId,
           transcriptArtifactId: session.transcript_artifact_id
         }),
-        file_refs: normalizeSyllabusRefs(selection.syllabus_file_refs ?? [])
+        file_refs: normalizeSyllabusRefs(selection.syllabus_file_refs ?? []),
+        source_provenance: {
+          source: "transcript_parse",
+          transcript_session_id: session.session_id,
+          parsed_course_id: parsedCourseId,
+          transcript_artifact_id: session.transcript_artifact_id
+        },
+        source_object_id: sourceObjectId,
+        ingestion_run_id: new Date().toISOString(),
+        // Publish only after version + pointer writes succeed.
+        is_active: false
       };
     })
-    .filter((row): row is { profile_id: string; artifact_type: "coursework"; artifact_data: Record<string, unknown>; file_refs: Record<string, unknown>[] } => Boolean(row));
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
   if (rowsToInsert.length === 0) {
     return ok({
@@ -150,12 +165,60 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
   const { data: insertedRows } = await supabase
     .from("artifacts")
     .insert(rowsToInsert)
-    .select("artifact_id");
+    .select("artifact_id, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id");
+
+  const insertedArtifacts = (insertedRows ?? []) as ArtifactRow[];
+  for (const row of insertedArtifacts) {
+    const sourceProvenance =
+      typeof row.source_provenance === "object" && row.source_provenance !== null && !Array.isArray(row.source_provenance)
+        ? (row.source_provenance as Record<string, unknown>)
+        : {};
+    const artifactData =
+      typeof row.artifact_data === "object" && row.artifact_data !== null && !Array.isArray(row.artifact_data)
+        ? (row.artifact_data as Record<string, unknown>)
+        : {};
+    const verificationStatus = typeof artifactData.verification_status === "string" ? artifactData.verification_status : "verified";
+
+    const { data: versionRows, error: versionError } = await supabase
+      .from("artifact_versions")
+      .insert({
+        artifact_id: row.artifact_id,
+        profile_id: auth.user_id,
+        operation: "reextract",
+        artifact_type: "coursework",
+        artifact_data: artifactData,
+        file_refs: Array.isArray(row.file_refs) ? row.file_refs : [],
+        verification_status: verificationStatus,
+        source_provenance: sourceProvenance,
+        source_object_id: typeof row.source_object_id === "string" ? row.source_object_id : null,
+        ingestion_run_id: typeof row.ingestion_run_id === "string" ? row.ingestion_run_id : null
+      })
+      .select("version_id");
+
+    const versionId =
+      Array.isArray(versionRows) && versionRows.length > 0 && typeof (versionRows[0] as Record<string, unknown>).version_id === "string"
+        ? ((versionRows[0] as Record<string, unknown>).version_id as string)
+        : null;
+    if (!versionId || versionError) {
+      await supabase
+        .from("artifacts")
+        .delete()
+        .eq("artifact_id", row.artifact_id)
+        .eq("profile_id", auth.user_id);
+      continue;
+    }
+
+    await supabase
+      .from("artifacts")
+      .update({ active_version_id: versionId, is_active: true, deactivated_at: null })
+      .eq("artifact_id", row.artifact_id)
+      .eq("profile_id", auth.user_id);
+  }
 
   return ok({
     resource: "transcript_materialize",
-    created_count: (insertedRows ?? []).length,
+    created_count: insertedArtifacts.length,
     skipped_count: selectedParsedIds.length - rowsToInsert.length,
-    artifact_ids: (insertedRows ?? []).map((row) => (row as { artifact_id: string }).artifact_id)
+    artifact_ids: insertedArtifacts.map((row) => row.artifact_id)
   });
 }

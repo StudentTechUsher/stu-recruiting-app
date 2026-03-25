@@ -73,4 +73,31 @@ describe("upsertStudentExtractionMetadata", () => {
     expect(profileLinks.linkedin).toBe("https://www.linkedin.com/in/student-name");
     expect(profileLinks.kaggle).toBe("https://www.kaggle.com/student-name");
   });
+
+  it("stores confidence and run summary metadata on source log entries", async () => {
+    const { supabase, upsertMock } = createSupabaseMock({
+      source_extraction_log: {}
+    });
+
+    await upsertStudentExtractionMetadata({
+      supabase,
+      profileId: "student-1",
+      sourceKey: "github",
+      artifactCount: 0,
+      status: "succeeded",
+      identityConfidence: "medium",
+      warningCode: "github_linkedin_link_not_detected",
+      warningMessage: "LinkedIn URL was not detected in your GitHub profile.",
+      resultSummary: "No new artifacts found. Your profile is already up to date."
+    });
+
+    const payload = upsertMock.mock.calls[0]?.[0] as { student_data: Record<string, unknown> };
+    const sourceLog = payload.student_data.source_extraction_log as Record<string, unknown>;
+    const githubEntry = sourceLog.github as Record<string, unknown>;
+
+    expect(githubEntry.identity_confidence).toBe("medium");
+    expect(githubEntry.warning_code).toBe("github_linkedin_link_not_detected");
+    expect(githubEntry.warning_message).toBe("LinkedIn URL was not detected in your GitHub profile.");
+    expect(githubEntry.last_run_summary).toBe("No new artifacts found. Your profile is already up to date.");
+  });
 });

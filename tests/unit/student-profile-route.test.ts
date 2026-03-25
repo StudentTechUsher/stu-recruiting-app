@@ -20,6 +20,20 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
+  const profilesLimitMock = vi.fn().mockResolvedValue({
+    data: [
+      {
+        personal_info: {
+          first_name: "Jarom",
+          last_name: "M",
+          full_name: "Jarom M",
+          email: "jarom@school.edu",
+        },
+      },
+    ],
+  });
+  const profilesEqMock = vi.fn().mockReturnValue({ limit: profilesLimitMock });
+  const profilesSelectMock = vi.fn().mockReturnValue({ eq: profilesEqMock });
   const studentsLimitMock = vi.fn().mockResolvedValue({
     data: [{ student_data: existingStudentData }]
   });
@@ -38,6 +52,7 @@ const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
     }
     if (table === "profiles") {
       return {
+        select: profilesSelectMock,
         upsert: profilesUpsertMock
       };
     }

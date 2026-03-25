@@ -1259,7 +1259,7 @@ export const StudentOnboardingSignup = ({
                       <Badge className="mt-2">{baselineReady && goalsReady ? 'Ready' : 'Pending'}</Badge>
                     </div>
                     <div className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                      <p className="text-sm font-semibold text-[#133a30] dark:text-slate-100">Artifact Repository</p>
+                      <p className="text-sm font-semibold text-[#133a30] dark:text-slate-100">Evidence Profile</p>
                       <p className="mt-1 text-xs text-[#48635b] dark:text-slate-300">Needs at least two artifact signals.</p>
                       <Badge className="mt-2">{artifactsReady ? 'Ready' : 'Pending'}</Badge>
                     </div>

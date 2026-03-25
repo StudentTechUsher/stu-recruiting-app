@@ -9,6 +9,7 @@ import { parseOnboardingClientMetrics } from "@/lib/auth/onboarding-metrics";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { getProfileByUserId } from "@/lib/auth/profile";
 import { resolveAssignmentsFromUser, resolveOrgIdFromUser, resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
+import { notifyOnNewRolesForMapping } from "@/lib/capabilities/role-mapping-alerts";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import type { AuthContext, SessionUserSnapshot } from "@/lib/route-policy";
 import { getSupabaseConfig } from "@/lib/supabase/config";
@@ -16,6 +17,7 @@ import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cook
 import { buildDevAuthContext, resolveDevPersonaFromCookieHeader } from "@/lib/dev-auth";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
+type StudentRow = { student_data: unknown };
 
 const toUnauthenticatedContext = (): AuthContext => ({
   authenticated: false,
@@ -32,6 +34,32 @@ const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
 };
+
+const mergeRecords = (
+  base: Record<string, unknown>,
+  override: Record<string, unknown>
+): Record<string, unknown> => {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    const baseValue = merged[key];
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof baseValue === "object" &&
+      baseValue !== null &&
+      !Array.isArray(baseValue)
+    ) {
+      merged[key] = mergeRecords(baseValue as Record<string, unknown>, value as Record<string, unknown>);
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
+};
+
+const normalizeRoleName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 
 const resolveRequestAuthContext = async (req: Request): Promise<{
   context: AuthContext;
@@ -147,6 +175,22 @@ export async function POST(req: Request) {
   const referrerDataInput = toRecord(payloadRecord.referrer_data);
 
   if (supabase) {
+    let existingStudentData: Record<string, unknown> = {};
+    if (context.persona === "student") {
+      const { data: claimReviewRows } = (await supabase
+        .from("students")
+        .select("student_data")
+        .eq("profile_id", context.user_id)
+        .limit(1)) as { data: StudentRow[] | null };
+      existingStudentData = toRecord(claimReviewRows?.[0]?.student_data);
+      const claimReview = toRecord(existingStudentData.claim_review);
+      if (claimReview.status === "flagged_mismatch") {
+        const response = NextResponse.json({ ok: false, error: "claim_under_review" }, { status: 409 });
+        applyCookies(response);
+        return response;
+      }
+    }
+
     await supabase
       .from("profiles")
       .update({
@@ -156,7 +200,7 @@ export async function POST(req: Request) {
       .eq("id", context.user_id);
 
     if (context.persona === "student") {
-      const studentDataWithMetrics: Record<string, unknown> = { ...studentData };
+      const studentDataWithMetrics: Record<string, unknown> = mergeRecords(existingStudentData, studentData);
       if (onboardingClientMetrics) {
         studentDataWithMetrics.onboarding_metrics = {
           ...onboardingClientMetrics,
@@ -176,17 +220,46 @@ export async function POST(req: Request) {
 
       const roleNames = extractTargetRoleNames(studentData);
       if (roleNames.length > 0) {
-        await supabase.from("job_roles").upsert(
+        const jobRolesClient = supabase.from("job_roles") as unknown as {
+          select?: (columns: string) => Promise<{ data: Array<{ role_name: string | null }> | null; error?: unknown }>;
+          upsert: (
+            payload: Array<{ role_name: string }>,
+            options: { onConflict: string }
+          ) => Promise<{ error?: unknown }>;
+        };
+
+        let rolesToInsert = roleNames;
+        if (typeof jobRolesClient.select === "function") {
+          const { data: existingRoleRows } = await jobRolesClient.select("role_name");
+          const existingRoleSet = new Set(
+            (existingRoleRows ?? [])
+              .map((row) => normalizeRoleName(row.role_name ?? ""))
+              .filter((roleName) => roleName.length > 0)
+          );
+          rolesToInsert = roleNames.filter((roleName) => !existingRoleSet.has(normalizeRoleName(roleName)));
+        }
+
+        await jobRolesClient.upsert(
           roleNames.map((roleName) => ({
             role_name: roleName
           })),
           { onConflict: "role_name_normalized" }
         );
+
+        if (rolesToInsert.length > 0) {
+          await notifyOnNewRolesForMapping({
+            supabase,
+            roleNames: rolesToInsert,
+            detectedByProfileId: context.user_id,
+            sourceFlow: "student_onboarding",
+          });
+        }
       }
 
       await supabase.from("students").upsert(
         {
           profile_id: context.user_id,
+          claimed: true,
           student_data: studentDataWithMetrics
         },
         { onConflict: "profile_id" }

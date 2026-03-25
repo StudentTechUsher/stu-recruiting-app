@@ -4,7 +4,15 @@ import { NextResponse } from "next/server";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { getProfileByUserId } from "@/lib/auth/profile";
 import { resolvePersonaFromProfileOrUser } from "@/lib/auth/role";
+import { redeemClaimInviteToken } from "@/lib/candidates/claim-invite";
+import { createSupabaseCandidateIdentityStore } from "@/lib/candidates/identity";
+import { hashClaimInviteToken } from "@/lib/auth/claim-invite-token";
+import {
+  clearClaimSessionCookie,
+  resolveClaimSessionFromCookieHeader,
+} from "@/lib/auth/claim-session-cookie";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
@@ -37,6 +45,12 @@ const safeSignOut = async (supabase: { auth: { signOut: () => Promise<{ error: u
   }
 };
 
+const toTrimmedString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
 export async function GET(req: Request) {
   const config = getSupabaseConfig();
   if (!config) {
@@ -47,6 +61,7 @@ export async function GET(req: Request) {
   const code = requestUrl.searchParams.get("code");
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type");
+  const claimToken = requestUrl.searchParams.get("claim_token");
 
   const cookieAccumulator = buildCookieAccumulator();
 
@@ -108,6 +123,7 @@ export async function GET(req: Request) {
     const response = NextResponse.redirect(toLoginRedirect(req.url, "role_unassigned"), 303);
     cookieAccumulator.apply(response);
     clearMagicLinkIntentCookie(response);
+    clearClaimSessionCookie(response);
     return response;
   }
 
@@ -118,7 +134,48 @@ export async function GET(req: Request) {
     const response = NextResponse.redirect(mismatchLoginUrl, 303);
     cookieAccumulator.apply(response);
     clearMagicLinkIntentCookie(response);
+    clearClaimSessionCookie(response);
     return response;
+  }
+
+  let claimStatus: "claimed" | "idempotent" | "conflict" | "invalid" | null = null;
+  if (persona === "student" && claimToken && claimToken.trim().length > 0) {
+    const claimSession = resolveClaimSessionFromCookieHeader(req.headers.get("cookie"));
+    const expectedTokenHash = hashClaimInviteToken(claimToken);
+    const authenticatedEmail = toTrimmedString((user as Record<string, unknown>).email)?.toLowerCase() ?? null;
+    const claimSessionMatches =
+      claimSession &&
+      claimSession.token_hash === expectedTokenHash &&
+      authenticatedEmail &&
+      claimSession.email === authenticatedEmail;
+
+    if (!claimSessionMatches) {
+      claimStatus = "invalid";
+    } else {
+      const serviceRoleClient = getSupabaseServiceRoleClient();
+      if (serviceRoleClient) {
+        const store = createSupabaseCandidateIdentityStore(serviceRoleClient);
+        const claimResult = await redeemClaimInviteToken({
+          token: claimToken,
+          canonicalProfileId: user.id,
+          store,
+          supabase: serviceRoleClient,
+        });
+        if (claimResult.ok) {
+          claimStatus = claimResult.status;
+        } else if (
+          claimResult.error === "invalid_token" ||
+          claimResult.error === "token_expired" ||
+          claimResult.error === "invite_secret_missing"
+        ) {
+          claimStatus = "invalid";
+        } else if (claimResult.error === "claim_conflict") {
+          claimStatus = "conflict";
+        }
+      } else {
+        claimStatus = "invalid";
+      }
+    }
   }
 
   const redirectPath = resolvePostAuthRedirect({
@@ -127,8 +184,14 @@ export async function GET(req: Request) {
     studentViewReleaseFlags: defaultStudentViewReleaseFlags
   });
 
-  const response = NextResponse.redirect(new URL(redirectPath, req.url), 303);
+  const redirectUrl = new URL(redirectPath, req.url);
+  if (claimStatus) {
+    redirectUrl.searchParams.set("claim_status", claimStatus);
+  }
+
+  const response = NextResponse.redirect(redirectUrl, 303);
   cookieAccumulator.apply(response);
   clearMagicLinkIntentCookie(response);
+  clearClaimSessionCookie(response);
   return response;
 }

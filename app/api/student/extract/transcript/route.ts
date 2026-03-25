@@ -37,7 +37,7 @@ const parseStorageFileRef = (value: unknown): StorageFileRef | null => {
 
 export async function POST(req: Request) {
   const context = await getAuthContext();
-  if (!hasPersona(context, ["student"])) return forbidden();
+  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) return badRequest("supabase_unavailable");
@@ -64,6 +64,10 @@ export async function POST(req: Request) {
     .limit(1);
 
   const studentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
+  const claimReview = toRecord(studentData.claim_review);
+  if (claimReview.status === "flagged_mismatch") {
+    return badRequest("claim_under_review");
+  }
   const sourceExtractionLog = toRecord(studentData.source_extraction_log);
   const existingSourceEntry = toRecord(sourceExtractionLog.transcript);
   const previousFileRef = parseStorageFileRef(existingSourceEntry.storage_file_ref);

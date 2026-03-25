@@ -2,6 +2,8 @@ export type StudentViewReleaseKey =
   | "artifactRepository"
   | "capabilityDashboard"
   | "pathwayPlanner"
+  | "capabilityCoach"
+  | "networkingCoach"
   | "aiGuidance"
   | "interviewPrep"
   | "manageRoles";
@@ -11,10 +13,12 @@ export type StudentViewReleaseFlags = Record<StudentViewReleaseKey, boolean>;
 export const defaultStudentViewReleaseFlags: StudentViewReleaseFlags = {
   artifactRepository: true,
   capabilityDashboard: true,
-  pathwayPlanner: true,
+  pathwayPlanner: false,
+  capabilityCoach: false,
+  networkingCoach: false,
   aiGuidance: true,
-  interviewPrep: true,
-  manageRoles: true
+  interviewPrep: false,
+  manageRoles: true,
 };
 
 export type RecruiterViewReleaseKey = "candidateRelationshipManager";
@@ -42,18 +46,22 @@ export const studentViewReleaseRouteMap: Record<StudentViewReleaseKey, string> =
   artifactRepository: "/student/artifacts",
   capabilityDashboard: "/student/dashboard",
   pathwayPlanner: "/student/pathway",
+  capabilityCoach: "/student/capability-coach",
+  networkingCoach: "/student/networking-coach",
   aiGuidance: "/student/guidance",
   interviewPrep: "/student/interview-prep",
-  manageRoles: "/student/targets"
+  manageRoles: "/student/targets",
 };
 
 const studentRouteReleaseOrder: StudentViewReleaseKey[] = [
   "capabilityDashboard",
   "artifactRepository",
+  "manageRoles",
   "pathwayPlanner",
+  "capabilityCoach",
+  "networkingCoach",
   "aiGuidance",
   "interviewPrep",
-  "manageRoles"
 ];
 
 export const getFirstReleasedStudentRoute = (flags: StudentViewReleaseFlags): string => {

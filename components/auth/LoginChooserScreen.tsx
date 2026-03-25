@@ -18,7 +18,7 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
             className="rounded-2xl border border-[#bfd2ca] bg-[#f5faf7] p-4 transition-colors hover:bg-[#edf5f1]"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">Student</p>
-            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">Student magic link</p>
+            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">I&apos;m a student</p>
             <p className="mt-1 text-xs text-[#476a5d]">Use your campus email to receive a secure sign-in link.</p>
           </Link>
 
@@ -27,7 +27,7 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
             className="rounded-2xl border border-[#bfd2ca] bg-[#f5faf7] p-4 transition-colors hover:bg-[#edf5f1]"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">Recruiter</p>
-            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">Recruiter magic link</p>
+            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">I&apos;m a recruiter</p>
             <p className="mt-1 text-xs text-[#476a5d]">Use your work email to request recruiter access.</p>
           </Link>
 
@@ -36,7 +36,7 @@ export function LoginChooserScreen({ devIdentitiesEnabled }: LoginChooserScreenP
             className="rounded-2xl border border-[#bfd2ca] bg-[#f5faf7] p-4 transition-colors hover:bg-[#edf5f1]"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">Referrer</p>
-            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">Referrer magic link</p>
+            <p className="mt-1 text-lg font-semibold text-[#0a1f1a]">I&apos;m a referrer</p>
             <p className="mt-1 text-xs text-[#476a5d]">Use your email to submit endorsements for student candidates.</p>
           </Link>
         </div>

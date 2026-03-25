@@ -20,8 +20,8 @@ const placeholderPlaybook = [
 export default function StudentNetworkingCoachPage() {
   return (
     <main className="min-h-screen text-[#0a1f1a] dark:text-slate-100">
-      <section aria-labelledby="student-networking-coach-title" className="w-full px-6 py-12 lg:px-8">
-        <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-slate-700 dark:bg-slate-900/75">
+      <section aria-labelledby="student-networking-coach-title" className="w-full px-4 py-6 lg:px-8 lg:py-12">
+        <div className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[32px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
           <header className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#4c6860] dark:text-slate-400">Networking coach</p>
             <h2

@@ -25,6 +25,15 @@ type ArtifactDraft = {
 type SourceLogKey = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
 type StorageFileRef = { bucket: string; path: string; kind?: string };
 type SourceExtractionStatus = "extracting" | "succeeded" | "failed";
+export type SourceOwnershipConfidence = "high" | "medium" | "low";
+
+export type ExternalSourceExtractionResult = {
+  artifacts: ArtifactDraft[];
+  confidence: SourceOwnershipConfidence;
+  warningCode: string | null;
+  warningMessage: string | null;
+  requiresConfirmation: boolean;
+};
 
 type QueryResult<T = unknown> = PromiseLike<{ data: T; error: unknown }>;
 
@@ -416,38 +425,46 @@ const extractLinkedinSlug = (value: string): string | null => {
   }
 };
 
-const isLikelyPersonNameMatch = ({
+const assessNameMatchConfidence = ({
   expectedName,
   candidateName,
   candidateHandle
 }: {
-  expectedName: string;
+  expectedName: string | null;
   candidateName: string | null;
   candidateHandle?: string | null;
-}): boolean => {
-  const expectedTokens = toNameTokens(expectedName);
-  if (expectedTokens.length === 0) return true;
+}): SourceOwnershipConfidence => {
+  const normalizedExpectedName = toTrimmedString(expectedName);
+  if (!normalizedExpectedName) return "high";
+
+  const expectedTokens = toNameTokens(normalizedExpectedName);
+  if (expectedTokens.length === 0) return "high";
 
   const candidateTokens = new Set<string>();
   for (const token of toNameTokens(candidateName ?? "")) candidateTokens.add(token);
   for (const token of toNameTokens(candidateHandle ?? "")) candidateTokens.add(token);
 
+  if (candidateTokens.size === 0) return "low";
+
   const expectedFirst = expectedTokens[0];
   const expectedLast = expectedTokens[expectedTokens.length - 1];
   const overlapCount = expectedTokens.filter((token) => candidateTokens.has(token)).length;
-
   const joinedCandidate = Array.from(candidateTokens).join("");
   const firstMatch =
     candidateTokens.has(expectedFirst) ||
-    expectedFirst.length >= 3 && joinedCandidate.includes(expectedFirst.slice(0, 3));
+    (expectedFirst.length >= 3 && joinedCandidate.includes(expectedFirst.slice(0, 3)));
   const lastMatch =
     candidateTokens.has(expectedLast) ||
-    expectedLast.length >= 4 && joinedCandidate.includes(expectedLast.slice(0, 4));
+    (expectedLast.length >= 4 && joinedCandidate.includes(expectedLast.slice(0, 4)));
 
-  if (expectedTokens.length === 1) return firstMatch || overlapCount >= 1;
-  if (firstMatch && lastMatch) return true;
-  if (overlapCount >= 2) return true;
-  return false;
+  if (expectedTokens.length === 1) {
+    if (firstMatch || overlapCount >= 1) return "high";
+    return "low";
+  }
+
+  if ((firstMatch && lastMatch) || overlapCount >= 2) return "high";
+  if (firstMatch || lastMatch || overlapCount >= 1) return "medium";
+  return "low";
 };
 
 const extractLinkedinDisplayNameFromHtml = (html: string): string | null => {
@@ -1032,11 +1049,13 @@ export async function extractArtifactsFromDocument({
 
 export async function extractArtifactsFromLinkedin({
   profileUrl,
-  expectedStudentName
+  expectedStudentName,
+  allowLowConfidence = false
 }: {
   profileUrl: string;
   expectedStudentName?: string | null;
-}): Promise<ArtifactDraft[]> {
+  allowLowConfidence?: boolean;
+}): Promise<ExternalSourceExtractionResult> {
   const { status, html } = await fetchLinkedinPage(profileUrl);
   if (!html.trim()) {
     throw new Error(`linkedin_fetch_failed:status_${status || "unknown"}:empty_response`);
@@ -1045,12 +1064,35 @@ export async function extractArtifactsFromLinkedin({
   const linkedInDisplayName = extractLinkedinDisplayNameFromHtml(html);
   const linkedInSlug = extractLinkedinSlug(profileUrl);
   const linkedInSlugName = linkedInSlug ? linkedInSlug.replace(/[-_.]+/g, " ") : null;
-  if (expectedStudentName && !isLikelyPersonNameMatch({ expectedName: expectedStudentName, candidateName: linkedInDisplayName, candidateHandle: linkedInSlugName })) {
-    throw new Error("linkedin_profile_name_mismatch");
+  const confidence = assessNameMatchConfidence({
+    expectedName: expectedStudentName ?? null,
+    candidateName: linkedInDisplayName,
+    candidateHandle: linkedInSlugName
+  });
+  const warningCode =
+    confidence === "medium"
+      ? "linkedin_name_match_medium_confidence"
+      : confidence === "low"
+        ? "linkedin_name_match_low_confidence"
+        : null;
+  const warningMessage =
+    confidence === "medium"
+      ? "LinkedIn profile match is not fully certain. Extraction will continue with a warning."
+      : confidence === "low"
+        ? "We couldn't confidently match this LinkedIn profile to your name."
+        : null;
+  if (confidence === "low" && !allowLowConfidence) {
+    return {
+      artifacts: [],
+      confidence,
+      warningCode,
+      warningMessage,
+      requiresConfirmation: true
+    };
   }
 
   const scrapedText = stripHtmlToText(html).slice(0, 100_000);
-  return callOpenAIExtraction({
+  const artifacts = await callOpenAIExtraction({
     sourceKind: "linkedin",
     systemPrompt:
       "Extract student artifacts from a LinkedIn profile capture. " +
@@ -1065,6 +1107,13 @@ export async function extractArtifactsFromLinkedin({
       { type: "input_text", text: `Scraped page text:\n${scrapedText}` }
     ]
   });
+  return {
+    artifacts,
+    confidence,
+    warningCode,
+    warningMessage,
+    requiresConfirmation: false
+  };
 }
 
 export async function extractArtifactsFromKaggle({
@@ -1099,12 +1148,14 @@ export async function extractArtifactsFromKaggle({
 export async function extractArtifactsFromGithub({
   githubUsername,
   expectedStudentName,
-  requiredLinkedinUrl
+  requiredLinkedinUrl,
+  allowLowConfidence = false
 }: {
   githubUsername: string;
   expectedStudentName?: string | null;
   requiredLinkedinUrl?: string | null;
-}): Promise<ArtifactDraft[]> {
+  allowLowConfidence?: boolean;
+}): Promise<ExternalSourceExtractionResult> {
   const githubToken = toTrimmedString(process.env.GITHUB_TOKEN);
   const profilePayload = await fetchGithubJson({
     path: `/users/${encodeURIComponent(githubUsername)}`,
@@ -1115,13 +1166,41 @@ export async function extractArtifactsFromGithub({
   const profileBlogUrl = toTrimmedString(profile.blog);
   const profileBio = toTrimmedString(profile.bio);
 
-  if (expectedStudentName && !isLikelyPersonNameMatch({ expectedName: expectedStudentName, candidateName: profileName, candidateHandle: githubUsername })) {
-    throw new Error("github_profile_name_mismatch");
-  }
-
   const requiredLinkedin = toTrimmedString(requiredLinkedinUrl);
-  if (requiredLinkedin && !containsLinkedinUrl({ requiredLinkedinUrl: requiredLinkedin, profileBlogUrl, profileBio })) {
-    throw new Error("github_linkedin_link_required");
+  const hasRequiredLinkedinLink = !requiredLinkedin
+    ? true
+    : containsLinkedinUrl({ requiredLinkedinUrl: requiredLinkedin, profileBlogUrl, profileBio });
+  const nameConfidence = assessNameMatchConfidence({
+    expectedName: expectedStudentName ?? null,
+    candidateName: profileName,
+    candidateHandle: githubUsername
+  });
+  const confidence: SourceOwnershipConfidence =
+    nameConfidence === "low" ? "low" : hasRequiredLinkedinLink && nameConfidence === "high" ? "high" : "medium";
+  const warningCode =
+    confidence === "low"
+      ? "github_name_match_low_confidence"
+      : !hasRequiredLinkedinLink
+        ? "github_linkedin_link_not_detected"
+        : nameConfidence === "medium"
+          ? "github_name_match_medium_confidence"
+          : null;
+  const warningMessage =
+    confidence === "low"
+      ? "We couldn't confidently match this GitHub profile to your name."
+      : !hasRequiredLinkedinLink
+        ? "We could not detect your LinkedIn profile URL in your GitHub profile. Extraction can continue with caution."
+        : nameConfidence === "medium"
+          ? "GitHub profile match is not fully certain. Extraction will continue with a warning."
+          : null;
+  if (confidence === "low" && !allowLowConfidence) {
+    return {
+      artifacts: [],
+      confidence,
+      warningCode,
+      warningMessage,
+      requiresConfirmation: true
+    };
   }
 
   const reposPayload = await fetchGithubJson({
@@ -1157,7 +1236,7 @@ export async function extractArtifactsFromGithub({
     });
   }
 
-  return callOpenAIExtraction({
+  const artifacts = await callOpenAIExtraction({
     sourceKind: "github",
     systemPrompt:
       "Extract capability artifacts from GitHub profile and repository metadata. " +
@@ -1177,44 +1256,109 @@ export async function extractArtifactsFromGithub({
       }
     ]
   });
+  return {
+    artifacts,
+    confidence,
+    warningCode,
+    warningMessage,
+    requiresConfirmation: false
+  };
 }
 
 export async function persistExtractedArtifacts({
   supabase,
   profileId,
   artifacts,
-  fileRef
+  fileRef,
+  sourceProvenance
 }: {
   supabase: SupabaseClientLike;
   profileId: string;
   artifacts: ArtifactDraft[];
   fileRef?: Record<string, unknown> | null;
+  sourceProvenance?: Record<string, unknown>;
 }): Promise<ArtifactDraft[]> {
   if (artifacts.length === 0) return [];
 
   const insertedArtifacts: ArtifactDraft[] = [];
+  const ingestionRunId = new Date().toISOString();
   for (const artifact of artifacts) {
     const artifactFingerprint = buildArtifactFingerprint(artifact);
+    const mergedSourceProvenance = fileRef
+      ? {
+          source: toTrimmedString(fileRef.kind) ?? "extraction",
+          file_ref: normalizeFileRef(fileRef),
+          ...(sourceProvenance ?? {})
+        }
+      : { ...(sourceProvenance ?? {}) };
+    const sourceObjectId =
+      fileRef && toTrimmedString(fileRef.bucket) && toTrimmedString(fileRef.path)
+        ? `${toTrimmedString(fileRef.bucket)}:${toTrimmedString(fileRef.path)}`
+        : null;
     const rowToInsert = {
       profile_id: profileId,
       artifact_type: artifact.artifact_type,
       artifact_data: artifact.artifact_data,
       artifact_fingerprint: artifactFingerprint,
-      file_refs: fileRef ? [fileRef] : []
+      file_refs: fileRef ? [fileRef] : [],
+      source_provenance: mergedSourceProvenance,
+      source_object_id: sourceObjectId,
+      ingestion_run_id: ingestionRunId,
+      // Keep inactive until version + pointer writes succeed.
+      is_active: false,
     };
 
     const { data, error } = await supabase
       .from("artifacts")
       .insert([rowToInsert])
-      .select("artifact_type, artifact_data");
+      .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id");
 
     if (!error) {
       const insertedRow = Array.isArray(data) ? toRecord(data[0]) : {};
+      const insertedArtifactId = toTrimmedString(insertedRow.artifact_id);
       const type = toTrimmedString(insertedRow.artifact_type);
-      if (type && allowedArtifactTypeSet.has(type)) {
+      if (insertedArtifactId && type && allowedArtifactTypeSet.has(type)) {
+        const versionInsert = await supabase
+          .from("artifact_versions")
+          .insert({
+            artifact_id: insertedArtifactId,
+            profile_id: profileId,
+            operation: "reextract",
+            artifact_type: type,
+            artifact_data: toRecord(insertedRow.artifact_data),
+            file_refs: Array.isArray(insertedRow.file_refs) ? insertedRow.file_refs : [],
+            verification_status: toTrimmedString(toRecord(insertedRow.artifact_data).verification_status) ?? "unverified",
+            source_provenance: toRecord(insertedRow.source_provenance),
+            source_object_id: toTrimmedString(insertedRow.source_object_id),
+            ingestion_run_id: toTrimmedString(insertedRow.ingestion_run_id),
+            artifact_fingerprint: artifactFingerprint,
+          })
+          .select("version_id");
+
+        const versionData = Array.isArray(versionInsert.data) ? toRecord(versionInsert.data[0]) : {};
+        const versionId = toTrimmedString(versionData.version_id);
+        if (versionInsert.error || !versionId) {
+          throw new Error(`artifact_version_persist_failed:${JSON.stringify(versionInsert.error).slice(0, 260)}`);
+        }
+
+        const activationResult = await (supabase
+          .from("artifacts")
+          .update({
+            active_version_id: versionId,
+            is_active: true,
+            deactivated_at: null,
+          }) as unknown as {
+          eq: (column: string, value: string) => QueryResult<unknown>;
+        })
+          .eq("artifact_id", insertedArtifactId);
+
+        if (activationResult.error) {
+          throw new Error(`artifact_activation_failed:${JSON.stringify(activationResult.error).slice(0, 260)}`);
+        }
+
         insertedArtifacts.push({
           artifact_type: type as ArtifactType,
-          artifact_data: toRecord(insertedRow.artifact_data)
+          artifact_data: toRecord(insertedRow.artifact_data),
         });
       }
       continue;
@@ -1225,11 +1369,9 @@ export async function persistExtractedArtifacts({
       throw new Error(`artifact_persist_failed:${JSON.stringify(error).slice(0, 260)}`);
     }
 
-    if (!fileRef) continue;
-
     const existingArtifactQuery = await (supabase
       .from("artifacts")
-      .select("artifact_id, file_refs") as unknown as {
+      .select("artifact_id, artifact_data, file_refs, source_provenance, source_object_id, active_version_id") as unknown as {
       eq: (column: string, value: string) => {
         eq: (column: string, value: string) => {
           limit: (count: number) => QueryResult<unknown>;
@@ -1245,20 +1387,82 @@ export async function persistExtractedArtifacts({
     const existingArtifactId = toTrimmedString(existingArtifact.artifact_id);
     if (!existingArtifactId) continue;
 
-    const mergedFileRefs = mergeFileRefs({
-      existingFileRefs: existingArtifact.file_refs,
-      nextFileRef: fileRef
-    });
+    const mergedFileRefs =
+      fileRef === null || fileRef === undefined
+        ? (Array.isArray(existingArtifact.file_refs) ? existingArtifact.file_refs : [])
+        : mergeFileRefs({
+            existingFileRefs: existingArtifact.file_refs,
+            nextFileRef: fileRef,
+          });
+
+    const existingData = toRecord(existingArtifact.artifact_data);
+    const existingSourceObjectId = toTrimmedString(existingArtifact.source_object_id);
+    const isEquivalent =
+      JSON.stringify(existingData) === JSON.stringify(artifact.artifact_data) &&
+      existingSourceObjectId === sourceObjectId;
+
+    if (isEquivalent) {
+      const updateExistingResult = await (supabase
+        .from("artifacts")
+        .update({
+          file_refs: mergedFileRefs,
+          source_provenance: mergedSourceProvenance,
+          source_object_id: sourceObjectId,
+          ingestion_run_id: ingestionRunId,
+          is_active: true,
+          deactivated_at: null,
+        }) as unknown as {
+        eq: (column: string, value: string) => QueryResult<unknown>;
+      })
+        .eq("artifact_id", existingArtifactId);
+
+      if (updateExistingResult.error) {
+        throw new Error(`artifact_link_existing_source_failed:${JSON.stringify(updateExistingResult.error).slice(0, 260)}`);
+      }
+      continue;
+    }
+
+    const versionInsert = await supabase
+      .from("artifact_versions")
+      .insert({
+        artifact_id: existingArtifactId,
+        profile_id: profileId,
+        operation: "reextract",
+        artifact_type: artifact.artifact_type,
+        artifact_data: artifact.artifact_data,
+        file_refs: mergedFileRefs,
+        verification_status: toTrimmedString(toRecord(artifact.artifact_data).verification_status) ?? "unverified",
+            source_provenance: mergedSourceProvenance,
+        source_object_id: sourceObjectId,
+        ingestion_run_id: ingestionRunId,
+        artifact_fingerprint: artifactFingerprint,
+      })
+      .select("version_id");
+
+    const versionData = Array.isArray(versionInsert.data) ? toRecord(versionInsert.data[0]) : {};
+    const versionId = toTrimmedString(versionData.version_id);
+    if (versionInsert.error || !versionId) {
+      throw new Error(`artifact_version_persist_failed:${JSON.stringify(versionInsert.error).slice(0, 260)}`);
+    }
 
     const updateResult = await (supabase
       .from("artifacts")
-      .update({ file_refs: mergedFileRefs }) as unknown as {
+      .update({
+        artifact_data: artifact.artifact_data,
+        file_refs: mergedFileRefs,
+        source_provenance: mergedSourceProvenance,
+        source_object_id: sourceObjectId,
+        ingestion_run_id: ingestionRunId,
+        active_version_id: versionId,
+        is_active: true,
+        deactivated_at: null,
+      }) as unknown as {
       eq: (column: string, value: string) => QueryResult<unknown>;
     })
       .eq("artifact_id", existingArtifactId);
 
     if (updateResult.error) {
-      throw new Error(`artifact_link_existing_source_failed:${JSON.stringify(updateResult.error).slice(0, 260)}`);
+      throw new Error(`artifact_update_existing_source_failed:${JSON.stringify(updateResult.error).slice(0, 260)}`);
     }
   }
 
@@ -1275,7 +1479,11 @@ export async function upsertStudentExtractionMetadata({
   extractedFrom,
   extractedFromFilename,
   profileLinks,
-  storageFileRef
+  storageFileRef,
+  identityConfidence,
+  warningCode,
+  warningMessage,
+  resultSummary
 }: {
   supabase: SupabaseClientLike;
   profileId: string;
@@ -1287,6 +1495,10 @@ export async function upsertStudentExtractionMetadata({
   extractedFromFilename?: string | null;
   profileLinks?: Record<string, string | null>;
   storageFileRef?: StorageFileRef | null;
+  identityConfidence?: SourceOwnershipConfidence | null;
+  warningCode?: string | null;
+  warningMessage?: string | null;
+  resultSummary?: string | null;
 }) {
   const { data: rows } = await supabase
     .from("students")
@@ -1308,9 +1520,18 @@ export async function upsertStudentExtractionMetadata({
   const normalizedFrom = toTrimmedString(extractedFrom);
   const normalizedFilename = toTrimmedString(extractedFromFilename);
   const normalizedErrorMessage = toTrimmedString(errorMessage);
+  const normalizedWarningCode = toTrimmedString(warningCode);
+  const normalizedWarningMessage = toTrimmedString(warningMessage);
+  const normalizedResultSummary = toTrimmedString(resultSummary);
+  if (identityConfidence === "high" || identityConfidence === "medium" || identityConfidence === "low") {
+    nextLogEntry.identity_confidence = identityConfidence;
+  }
   if (normalizedFrom) nextLogEntry.extracted_from = normalizedFrom;
   if (normalizedFilename) nextLogEntry.extracted_from_filename = normalizedFilename;
   if (normalizedErrorMessage) nextLogEntry.error_message = normalizedErrorMessage;
+  if (normalizedWarningCode) nextLogEntry.warning_code = normalizedWarningCode;
+  if (normalizedWarningMessage) nextLogEntry.warning_message = normalizedWarningMessage;
+  if (normalizedResultSummary) nextLogEntry.last_run_summary = normalizedResultSummary;
   if (storageFileRef?.bucket && storageFileRef?.path) {
     nextLogEntry.storage_file_ref = {
       bucket: storageFileRef.bucket,

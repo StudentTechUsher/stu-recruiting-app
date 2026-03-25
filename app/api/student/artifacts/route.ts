@@ -9,8 +9,27 @@ type ArtifactRow = {
   artifact_type: string;
   artifact_data: unknown;
   file_refs: unknown;
+  source_provenance: unknown;
+  source_object_id: string | null;
+  ingestion_run_id: string | null;
+  active_version_id: string | null;
+  is_active: boolean | null;
   created_at: string;
   updated_at: string;
+};
+
+type ArtifactVersionRow = {
+  version_id: string;
+  artifact_id: string;
+  operation: "legacy_seed" | "manual_create" | "replace" | "reextract" | "deactivate";
+  artifact_type: string;
+  artifact_data: unknown;
+  file_refs: unknown;
+  verification_status: string | null;
+  source_provenance: unknown;
+  source_object_id: string | null;
+  ingestion_run_id: string | null;
+  created_at: string;
 };
 
 type StudentDataRow = {
@@ -39,7 +58,7 @@ const allowedArtifactTypes = new Set([
   "competition",
   "research",
   "employment",
-  "test"
+  "test",
 ]);
 
 const editableArtifactDataKeys = new Set([
@@ -78,7 +97,7 @@ const editableArtifactDataKeys = new Set([
   "score",
   "verification_status",
   "verification_method",
-  "verification_source"
+  "verification_source",
 ]);
 
 const toRecord = (value: unknown): Record<string, unknown> => {
@@ -97,6 +116,12 @@ const toFileRefs = (value: unknown): Record<string, unknown>[] => {
   return value
     .filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry))
     .map((entry) => entry as Record<string, unknown>);
+};
+
+const toVerificationStatus = (artifactData: Record<string, unknown>): "verified" | "pending" | "unverified" => {
+  const normalized = toTrimmedString(artifactData.verification_status)?.toLowerCase();
+  if (normalized === "verified" || normalized === "pending" || normalized === "unverified") return normalized;
+  return "unverified";
 };
 
 const getArtifactsClient = async (sessionSource: "mock" | "supabase" | "none" | undefined) => {
@@ -125,11 +150,12 @@ const buildDevFallbackArtifacts = (profileId: string) => {
         course_title: "Algorithms",
         verification_status: "verified",
         verification_method: "transcript_parse",
-        verification_source: "transcript_pdf"
+        verification_source: "transcript_pdf",
       },
       file_refs: [],
       created_at: iso(72),
-      updated_at: iso(72)
+      updated_at: iso(72),
+      provenance_versions: [],
     },
     {
       artifact_id: `dev-sample-unverified-${profileId}`,
@@ -143,12 +169,13 @@ const buildDevFallbackArtifacts = (profileId: string) => {
         project_demo_link: "https://github.com/sample/churn-prediction",
         verification_status: "unverified",
         verification_method: "linkedin_extraction",
-        verification_source: "linkedin_profile"
+        verification_source: "linkedin_profile",
       },
       file_refs: [],
       created_at: iso(24),
-      updated_at: iso(24)
-    }
+      updated_at: iso(24),
+      provenance_versions: [],
+    },
   ];
 };
 
@@ -170,7 +197,7 @@ const isTranscriptBackedCoursework = (artifactData: Record<string, unknown>): bo
 
 const withCourseworkVerificationMetadata = ({
   artifactData,
-  transcriptBacked
+  transcriptBacked,
 }: {
   artifactData: Record<string, unknown>;
   transcriptBacked: boolean;
@@ -179,7 +206,7 @@ const withCourseworkVerificationMetadata = ({
     return {
       ...artifactData,
       verification_status: "verified",
-      verification_method: "transcript_parse"
+      verification_method: "transcript_parse",
     };
   }
 
@@ -187,7 +214,7 @@ const withCourseworkVerificationMetadata = ({
     ...artifactData,
     verification_status: "pending",
     verification_method: "syllabus_upload",
-    verification_source: "manual_coursework_submission"
+    verification_source: "manual_coursework_submission",
   };
 };
 
@@ -212,7 +239,10 @@ const toEditableArtifactUpdatesRecord = (value: unknown): Record<string, unknown
     }
 
     if (key === "tags" && Array.isArray(rawValue)) {
-      const tags = rawValue.filter((item) => typeof item === "string").map((item) => (item as string).trim()).filter(Boolean);
+      const tags = rawValue
+        .filter((item) => typeof item === "string")
+        .map((item) => (item as string).trim())
+        .filter(Boolean);
       updates[key] = tags.length > 0 ? tags : null;
       continue;
     }
@@ -221,9 +251,54 @@ const toEditableArtifactUpdatesRecord = (value: unknown): Record<string, unknown
   return updates;
 };
 
+const createArtifactVersion = async ({
+  supabase,
+  artifactId,
+  profileId,
+  operation,
+  artifactType,
+  artifactData,
+  fileRefs,
+  sourceProvenance,
+  sourceObjectId,
+  ingestionRunId,
+}: {
+  supabase: Awaited<ReturnType<typeof getArtifactsClient>>;
+  artifactId: string;
+  profileId: string;
+  operation: "manual_create" | "replace" | "reextract" | "deactivate";
+  artifactType: string;
+  artifactData: Record<string, unknown>;
+  fileRefs: Record<string, unknown>[];
+  sourceProvenance: Record<string, unknown>;
+  sourceObjectId: string | null;
+  ingestionRunId: string | null;
+}) => {
+  if (!supabase) throw new Error("supabase_unavailable");
+  const { data, error } = await supabase
+    .from("artifact_versions")
+    .insert({
+      artifact_id: artifactId,
+      profile_id: profileId,
+      operation,
+      artifact_type: artifactType,
+      artifact_data: artifactData,
+      file_refs: fileRefs,
+      verification_status: toVerificationStatus(artifactData),
+      source_provenance: sourceProvenance,
+      source_object_id: sourceObjectId,
+      ingestion_run_id: ingestionRunId,
+    })
+    .select("version_id")
+    .single<{ version_id: string }>();
+
+  if (error || !data?.version_id) throw new Error("artifact_version_create_failed");
+  return data.version_id;
+};
+
 export async function GET() {
   const context = await getAuthContext();
-  if (!hasPersona(context, ["student"])) return forbidden();
+  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
 
   const supabase = await getArtifactsClient(context.session_source);
   if (!supabase) {
@@ -231,14 +306,14 @@ export async function GET() {
       resource: "artifacts",
       profile_id: context.user_id,
       artifacts: [],
-      session_source: context.session_source ?? "none"
+      session_source: context.session_source ?? "none",
     });
   }
 
   const [{ data }, { data: sessionRows }, { data: studentRows }] = (await Promise.all([
     supabase
       .from("artifacts")
-      .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
+      .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id, active_version_id, is_active, created_at, updated_at")
       .eq("profile_id", context.user_id)
       .order("updated_at", { ascending: false }),
     supabase
@@ -247,25 +322,62 @@ export async function GET() {
       .eq("profile_id", context.user_id)
       .order("created_at", { ascending: false })
       .limit(1),
-    supabase
-      .from("students")
-      .select("student_data")
-      .eq("profile_id", context.user_id)
-      .limit(1)
+    supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
   ])) as [{ data: ArtifactRow[] | null }, { data: TranscriptSessionRow[] | null }, { data: StudentDataRow[] | null }];
 
-  const artifacts = (data ?? []).map((row) => ({
-    artifact_id: row.artifact_id,
-    artifact_type: row.artifact_type,
-    artifact_data: row.artifact_data,
-    file_refs: row.file_refs,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }));
+  const activeRows = (data ?? []).filter((row) => row.is_active !== false);
+  const artifactIds = activeRows.map((row) => row.artifact_id);
+
+  const versionsQuery =
+    artifactIds.length > 0
+      ? await (supabase
+          .from("artifact_versions")
+          .select("version_id, artifact_id, operation, artifact_type, artifact_data, file_refs, verification_status, source_provenance, source_object_id, ingestion_run_id, created_at")
+          .in("artifact_id", artifactIds)
+          .order("created_at", { ascending: false })) as { data: ArtifactVersionRow[] | null }
+      : ({ data: [] } as { data: ArtifactVersionRow[] | null });
+
+  const versionsByArtifactId = new Map<string, ArtifactVersionRow[]>();
+  for (const versionRow of versionsQuery.data ?? []) {
+    const existing = versionsByArtifactId.get(versionRow.artifact_id) ?? [];
+    existing.push(versionRow);
+    versionsByArtifactId.set(versionRow.artifact_id, existing);
+  }
+
+  const artifacts = activeRows.map((row) => {
+    const versions = versionsByArtifactId.get(row.artifact_id) ?? [];
+    const provenanceVersions = versions
+      .filter((version) => version.version_id !== row.active_version_id)
+      .map((version) => ({
+        version_id: version.version_id,
+        operation: version.operation,
+        artifact_data: version.artifact_data,
+        file_refs: version.file_refs,
+        verification_status: version.verification_status,
+        source_provenance: version.source_provenance,
+        source_object_id: version.source_object_id,
+        ingestion_run_id: version.ingestion_run_id,
+        created_at: version.created_at,
+      }));
+
+    return {
+      artifact_id: row.artifact_id,
+      artifact_type: row.artifact_type,
+      artifact_data: row.artifact_data,
+      file_refs: row.file_refs,
+      source_provenance: row.source_provenance,
+      source_object_id: row.source_object_id,
+      ingestion_run_id: row.ingestion_run_id,
+      active_version_id: row.active_version_id,
+      version_count: versions.length,
+      provenance_versions: provenanceVersions,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  });
+
   const artifactsWithFallback =
-    artifacts.length === 0 && context.session_source === "mock"
-      ? buildDevFallbackArtifacts(context.user_id)
-      : artifacts;
+    artifacts.length === 0 && context.session_source === "mock" ? buildDevFallbackArtifacts(context.user_id) : artifacts;
 
   const studentData = toRecord((studentRows ?? [])[0]?.student_data);
   const sourceExtractionLog = toRecord(studentData.source_extraction_log);
@@ -290,7 +402,7 @@ export async function GET() {
     latest_transcript_session: sessionRows?.[0] ?? null,
     source_extraction_log: sourceExtractionLog,
     profile_links: profileLinks,
-    session_source: context.session_source ?? "none"
+    session_source: context.session_source ?? "none",
   });
 }
 
@@ -323,7 +435,9 @@ export async function POST(req: Request) {
     artifactType === "coursework"
       ? withCourseworkVerificationMetadata({ artifactData, transcriptBacked: transcriptBackedCoursework })
       : artifactData;
-  const now = new Date().toISOString();
+  const sourceProvenance = toRecord(payloadRecord.source_provenance ?? artifactDataToPersist.provenance);
+  const sourceObjectId = toTrimmedString(payloadRecord.source_object_id ?? sourceProvenance.source_object_id);
+  const ingestionRunId = toTrimmedString(payloadRecord.ingestion_run_id ?? sourceProvenance.ingestion_run_id);
 
   const { data: inserted, error } = await supabase
     .from("artifacts")
@@ -331,22 +445,48 @@ export async function POST(req: Request) {
       profile_id: context.user_id,
       artifact_type: artifactType,
       artifact_data: artifactDataToPersist,
-      file_refs: fileRefs
+      file_refs: fileRefs,
+      source_provenance: sourceProvenance,
+      source_object_id: sourceObjectId,
+      ingestion_run_id: ingestionRunId,
+      is_active: true,
     })
-    .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
+    .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id, active_version_id, is_active, created_at, updated_at")
     .single<ArtifactRow>();
 
   if (error || !inserted) return badRequest("artifact_create_failed");
 
-  return ok({
-    resource: "artifacts",
-    artifact: {
-      ...inserted
-    },
-    status: "created",
-    session_source: context.session_source ?? "none",
-    created_at: now
-  });
+  try {
+    const versionId = await createArtifactVersion({
+      supabase,
+      artifactId: inserted.artifact_id,
+      profileId: context.user_id,
+      operation: "manual_create",
+      artifactType,
+      artifactData: toRecord(inserted.artifact_data),
+      fileRefs: toFileRefs(inserted.file_refs),
+      sourceProvenance: toRecord(inserted.source_provenance),
+      sourceObjectId: inserted.source_object_id,
+      ingestionRunId: inserted.ingestion_run_id,
+    });
+
+    await supabase.from("artifacts").update({ active_version_id: versionId }).eq("artifact_id", inserted.artifact_id);
+
+    return ok({
+      resource: "artifacts",
+      artifact: {
+        ...inserted,
+        active_version_id: versionId,
+        version_count: 1,
+        provenance_versions: [],
+      },
+      status: "created",
+      session_source: context.session_source ?? "none",
+    });
+  } catch {
+    await supabase.from("artifacts").delete().eq("artifact_id", inserted.artifact_id).eq("profile_id", context.user_id);
+    return badRequest("artifact_create_failed");
+  }
 }
 
 export async function PATCH(req: Request) {
@@ -369,15 +509,15 @@ export async function PATCH(req: Request) {
 
   const { data: existing, error: existingError } = await supabase
     .from("artifacts")
-    .select("artifact_id, artifact_type, artifact_data, file_refs")
+    .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id, active_version_id, is_active")
     .eq("artifact_id", artifactId)
     .eq("profile_id", context.user_id)
-    .single<{ artifact_id: string; artifact_type: string; artifact_data: unknown; file_refs: unknown }>();
+    .single<ArtifactRow>();
 
   if (existingError || !existing) return badRequest("artifact_not_found");
 
   let nextArtifactData = {
-    ...toRecord(existing.artifact_data)
+    ...toRecord(existing.artifact_data),
   };
 
   for (const [key, value] of Object.entries(updates)) {
@@ -396,35 +536,67 @@ export async function PATCH(req: Request) {
     }
     nextArtifactData = withCourseworkVerificationMetadata({
       artifactData: nextArtifactData,
-      transcriptBacked: transcriptBackedCoursework
+      transcriptBacked: transcriptBackedCoursework,
     });
   }
 
-  const updatePayload: Record<string, unknown> = {
-    artifact_data: nextArtifactData
-  };
-  if (fileRefs.length > 0) {
-    updatePayload.file_refs = fileRefs;
+  const sourceProvenance =
+    Object.prototype.hasOwnProperty.call(payloadRecord, "source_provenance")
+      ? toRecord(payloadRecord.source_provenance)
+      : toRecord(existing.source_provenance);
+  const sourceObjectId =
+    Object.prototype.hasOwnProperty.call(payloadRecord, "source_object_id")
+      ? toTrimmedString(payloadRecord.source_object_id)
+      : toTrimmedString(existing.source_object_id);
+  const ingestionRunId =
+    Object.prototype.hasOwnProperty.call(payloadRecord, "ingestion_run_id")
+      ? toTrimmedString(payloadRecord.ingestion_run_id)
+      : toTrimmedString(existing.ingestion_run_id);
+
+  try {
+    const versionId = await createArtifactVersion({
+      supabase,
+      artifactId,
+      profileId: context.user_id,
+      operation: "replace",
+      artifactType: existing.artifact_type,
+      artifactData: nextArtifactData,
+      fileRefs: nextFileRefs,
+      sourceProvenance,
+      sourceObjectId,
+      ingestionRunId,
+    });
+
+    const { data: updated, error: updateError } = await supabase
+      .from("artifacts")
+      .update({
+        artifact_data: nextArtifactData,
+        file_refs: nextFileRefs,
+        source_provenance: sourceProvenance,
+        source_object_id: sourceObjectId,
+        ingestion_run_id: ingestionRunId,
+        is_active: true,
+        deactivated_at: null,
+        active_version_id: versionId,
+      })
+      .eq("artifact_id", artifactId)
+      .eq("profile_id", context.user_id)
+      .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id, active_version_id, is_active, created_at, updated_at")
+      .single<ArtifactRow>();
+
+    if (updateError || !updated) return badRequest("artifact_update_failed");
+
+    return ok({
+      resource: "artifacts",
+      artifact: {
+        ...updated,
+      },
+      status: "updated",
+      session_source: context.session_source ?? "none",
+    });
+  } catch {
+    return badRequest("artifact_update_failed");
   }
-
-  const { data: updated, error: updateError } = await supabase
-    .from("artifacts")
-    .update(updatePayload)
-    .eq("artifact_id", artifactId)
-    .eq("profile_id", context.user_id)
-    .select("artifact_id, artifact_type, artifact_data, file_refs, created_at, updated_at")
-    .single<ArtifactRow>();
-
-  if (updateError || !updated) return badRequest("artifact_update_failed");
-
-  return ok({
-    resource: "artifacts",
-    artifact: {
-      ...updated
-    },
-    status: "updated",
-    session_source: context.session_source ?? "none"
-  });
 }
 
 export async function DELETE(req: Request) {
@@ -443,25 +615,46 @@ export async function DELETE(req: Request) {
 
   const { data: existing, error: existingError } = await supabase
     .from("artifacts")
-    .select("artifact_id")
+    .select("artifact_id, artifact_type, artifact_data, file_refs, source_provenance, source_object_id, ingestion_run_id")
     .eq("artifact_id", artifactId)
     .eq("profile_id", context.user_id)
-    .single<{ artifact_id: string }>();
+    .single<ArtifactRow>();
 
   if (existingError || !existing) return badRequest("artifact_not_found");
 
-  const { error: deleteError } = await supabase
+  try {
+    await createArtifactVersion({
+      supabase,
+      artifactId,
+      profileId: context.user_id,
+      operation: "deactivate",
+      artifactType: existing.artifact_type,
+      artifactData: toRecord(existing.artifact_data),
+      fileRefs: toFileRefs(existing.file_refs),
+      sourceProvenance: toRecord(existing.source_provenance),
+      sourceObjectId: toTrimmedString(existing.source_object_id),
+      ingestionRunId: toTrimmedString(existing.ingestion_run_id),
+    });
+  } catch {
+    return badRequest("artifact_remove_failed");
+  }
+
+  const { error: deactivateError } = await supabase
     .from("artifacts")
-    .delete()
+    .update({
+      is_active: false,
+      deactivated_at: new Date().toISOString(),
+      active_version_id: null,
+    })
     .eq("artifact_id", artifactId)
     .eq("profile_id", context.user_id);
 
-  if (deleteError) return badRequest("artifact_delete_failed");
+  if (deactivateError) return badRequest("artifact_remove_failed");
 
   return ok({
     resource: "artifacts",
     artifact_id: artifactId,
-    status: "deleted",
-    session_source: context.session_source ?? "none"
+    status: "removed",
+    session_source: context.session_source ?? "none",
   });
 }

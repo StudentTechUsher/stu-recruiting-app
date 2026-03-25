@@ -23,6 +23,7 @@ type MagicLinkLoginScreenProps = {
   loadingLabel: string;
   errorMessages?: Record<string, string>;
   initialError?: string | null;
+  additionalPayload?: Record<string, string>;
 };
 
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
@@ -54,7 +55,8 @@ export function MagicLinkLoginScreen({
   submitLabel,
   loadingLabel,
   errorMessages = {},
-  initialError = null
+  initialError = null,
+  additionalPayload = {}
 }: MagicLinkLoginScreenProps) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,7 +97,10 @@ export function MagicLinkLoginScreen({
         headers: {
           "content-type": "application/json"
         },
-        body: JSON.stringify({ email: normalizedEmailValue })
+        body: JSON.stringify({
+          email: normalizedEmailValue,
+          ...additionalPayload,
+        })
       });
 
       const data = (await response.json().catch(() => null)) as MagicLinkResponse | null;

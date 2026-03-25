@@ -5,8 +5,8 @@ import { StudentArtifactRepository } from "@/components/mock/StudentArtifactRepo
 
 function ArtifactRepositoryPageFallback() {
   return (
-    <section aria-hidden="true" className="w-full px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-      <div className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 dark:border-slate-700 dark:bg-slate-900/75">
+    <section aria-hidden="true" className="w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
+      <div className="rounded-none border-0 bg-transparent p-0 lg:rounded-[32px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
         <div className="animate-pulse">
           <div className="h-4 w-40 rounded bg-[#e4efe9] dark:bg-slate-700" />
           <div className="mt-3 h-8 w-72 max-w-full rounded bg-[#e4efe9] dark:bg-slate-700" />

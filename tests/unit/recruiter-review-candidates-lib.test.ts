@@ -138,13 +138,24 @@ describe("review candidates service mock evidence", () => {
           return {
             select: () => ({
               limit: async () => ({
-                data: [
-                  {
-                    profile_id: "profile-sam",
-                    email: "sam.r@example.com",
-                    profiles: [{ personal_info: { email: "sam.r@example.com" } }],
-                  },
-                ],
+                data: [],
+              }),
+            }),
+          };
+        }
+
+        if (table === "profiles") {
+          return {
+            select: () => ({
+              eq: () => ({
+                limit: async () => ({
+                  data: [
+                    {
+                      id: "profile-sam",
+                      personal_info: { email: "sam.r@example.com" },
+                    },
+                  ],
+                }),
               }),
             }),
           };
@@ -213,6 +224,84 @@ describe("review candidates service mock evidence", () => {
 
     expect(totalEvidence).toBeGreaterThanOrEqual(6);
     expect(sam?.capability_summary.length ?? 0).toBeGreaterThanOrEqual(5);
+  });
+
+  it("keeps candidate unresolved but linked when profile email matches and identity resolution fails", async () => {
+    getSupabaseServiceRoleClientMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "students") {
+          return {
+            select: () => ({
+              limit: async () => ({
+                data: [],
+              }),
+            }),
+          };
+        }
+
+        if (table === "profiles") {
+          return {
+            select: () => ({
+              eq: () => ({
+                limit: async () => ({
+                  data: [
+                    {
+                      id: "profile-sam",
+                      personal_info: { email: "sam.r@example.com" },
+                    },
+                  ],
+                }),
+              }),
+            }),
+          };
+        }
+
+        if (table === "artifacts") {
+          return {
+            select: () => ({
+              in: async () => ({ data: [] }),
+            }),
+          };
+        }
+
+        return {
+          select: () => ({
+            limit: async () => ({ data: [] }),
+          }),
+        };
+      },
+    });
+
+    fetchATSPipelineForOrgMock.mockResolvedValue({
+      provider: "greenhouse",
+      result: {
+        source: "greenhouse",
+        candidates: [
+          makeCandidate({
+            ats_id: "sam-app-2",
+            full_name: "Sam Robinson",
+            email: "sam.r@example.com",
+            raw: {
+              source: "greenhouse_sqlite_dev",
+              candidate_id: 1019,
+              first_name: "Sam",
+            },
+          }),
+        ],
+        total: 1,
+        page: 1,
+        has_more: false,
+      },
+    });
+    resolveCandidateForIngestionMock.mockRejectedValue(new Error("identity resolution failed"));
+
+    const list = await listRecruiterReviewCandidates({ orgId: "org-1" });
+    expect(list.candidates).toHaveLength(1);
+    const sam = list.candidates[0];
+    expect(sam?.candidate_id).toBeNull();
+    expect(sam?.identity_state).toBe("unresolved");
+    expect(sam?.identity_source).toBe("ats_linked");
+    expect(sam?.identity_reason).toBe("identity_resolution_failed");
   });
 
   it("keeps unresolved non-mock candidates on application-scoped fallback evidence", async () => {

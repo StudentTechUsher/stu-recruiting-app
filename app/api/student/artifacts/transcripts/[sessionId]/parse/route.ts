@@ -148,19 +148,49 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
       course_count: parseResult.courses.length,
       parsed_at: new Date().toISOString()
     };
+    const nextArtifactData = {
+      ...existingArtifactData,
+      status: "parsed",
+      parsed_snapshot: {
+        model: session.parser_model,
+        summary: parseSummary,
+        courses: parseResult.courses
+      }
+    };
+
+    const { data: versionRows, error: versionError } = await supabase
+      .from("artifact_versions")
+      .insert({
+        artifact_id: session.transcript_artifact_id,
+        profile_id: auth.user_id,
+        operation: "replace",
+        artifact_type: "transcript",
+        artifact_data: nextArtifactData,
+        file_refs: Array.isArray(artifact.file_refs) ? artifact.file_refs : [],
+        verification_status: "unverified",
+        source_provenance: {
+          source: "transcript_parse",
+          transcript_session_id: session.session_id
+        },
+        source_object_id: `transcript:${session.session_id}`,
+        ingestion_run_id: new Date().toISOString()
+      })
+      .select("version_id");
+    const versionId =
+      Array.isArray(versionRows) && versionRows.length > 0 && typeof (versionRows[0] as Record<string, unknown>).version_id === "string"
+        ? ((versionRows[0] as Record<string, unknown>).version_id as string)
+        : null;
+    if (!versionId || versionError) {
+      throw new Error("transcript_version_persist_failed");
+    }
 
     await supabase
       .from("artifacts")
       .update({
-        artifact_data: {
-          ...existingArtifactData,
-          status: "parsed",
-          parsed_snapshot: {
-            model: session.parser_model,
-            summary: parseSummary,
-            courses: parseResult.courses
-          }
-        }
+        artifact_data: nextArtifactData,
+        active_version_id: versionId,
+        is_active: true,
+        deactivated_at: null
       })
       .eq("artifact_id", session.transcript_artifact_id)
       .eq("profile_id", auth.user_id);

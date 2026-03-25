@@ -29,6 +29,9 @@ const createInMemoryStore = (): CandidateIdentityStore & {
     async findCandidateByNormalizedEmail(normalizedEmail) {
       return candidates.find((candidate) => candidate.normalized_email === normalizedEmail) ?? null;
     },
+    async findCandidateById(candidateId) {
+      return candidates.find((candidate) => candidate.candidate_id === candidateId) ?? null;
+    },
     async createCandidateProfile(input) {
       const row: CandidateProfileRecord = {
         candidate_id: `cand-${candidates.length + 1}`,

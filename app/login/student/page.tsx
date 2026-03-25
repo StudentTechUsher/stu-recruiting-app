@@ -16,6 +16,8 @@ export default async function StudentLoginPage({
   if (callbackRedirectPath) {
     redirect(callbackRedirectPath);
   }
+  const claimTokenParam = resolvedSearchParams.claim_token;
+  const claimToken = typeof claimTokenParam === "string" && claimTokenParam.trim().length > 0 ? claimTokenParam.trim() : null;
 
   const sessionCheckEnabled = isSessionCheckEnabled();
 
@@ -32,5 +34,5 @@ export default async function StudentLoginPage({
     }
   }
 
-  return <StudentMagicLinkLoginScreen sessionCheckEnabled={sessionCheckEnabled} />;
+  return <StudentMagicLinkLoginScreen sessionCheckEnabled={sessionCheckEnabled} claimToken={claimToken} />;
 }

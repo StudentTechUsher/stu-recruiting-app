@@ -96,13 +96,15 @@ export const buildDevAuthContext = (persona: Persona): AuthContext => {
         : persona === "referrer"
           ? "Dev Referrer"
           : "Dev Admin";
+  const fullNameTokens = fullName.split(/\s+/).filter(Boolean);
+  const firstName = fullNameTokens[0] ?? "Dev";
+  const lastName = fullNameTokens.slice(1).join(" ");
   const email =
     persona === "student"
       ? devStudentEmail
       : persona === "recruiter"
         ? devRecruiterIdentity.email
         : `${userId}@dev.local`;
-  const firstName = fullName.split(/\s+/)[0] ?? "Dev";
   const recruiterMetadata = persona === "recruiter" ? { recruiter_id: devRecruiterIdentity.recruiterId } : {};
 
   const profile: ProfileSnapshot = {
@@ -110,6 +112,7 @@ export const buildDevAuthContext = (persona: Persona): AuthContext => {
     role: persona,
     personal_info: {
       first_name: firstName,
+      last_name: lastName,
       full_name: fullName,
       email
     },
@@ -139,6 +142,7 @@ export const buildDevAuthContext = (persona: Persona): AuthContext => {
       org_id: orgId,
       assignment_ids: assignmentIds,
       first_name: firstName,
+      last_name: lastName,
       full_name: fullName,
       ...recruiterMetadata
     }

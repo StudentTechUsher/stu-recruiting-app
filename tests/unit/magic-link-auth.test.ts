@@ -5,11 +5,10 @@ import { POST as referrerMagicLinkPost } from "@/app/api/auth/login/referrer/rou
 import { isExpectedUnauthenticatedAuthError, isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 import { resetMagicLinkThrottleStateForTests } from "@/lib/auth/magic-link-throttle";
 
-const { createServerClientMock, getSupabaseConfigMock, getAuthAppUrlMock, isAllowedStudentEmailMock } = vi.hoisted(() => ({
+const { createServerClientMock, getSupabaseConfigMock, getAuthAppUrlMock } = vi.hoisted(() => ({
   createServerClientMock: vi.fn(),
   getSupabaseConfigMock: vi.fn(),
-  getAuthAppUrlMock: vi.fn(),
-  isAllowedStudentEmailMock: vi.fn()
+  getAuthAppUrlMock: vi.fn()
 }));
 
 vi.mock("@supabase/ssr", () => ({
@@ -19,10 +18,6 @@ vi.mock("@supabase/ssr", () => ({
 vi.mock("@/lib/supabase/config", () => ({
   getSupabaseConfig: getSupabaseConfigMock,
   getAuthAppUrl: getAuthAppUrlMock
-}));
-
-vi.mock("@/lib/auth/student-email-policy", () => ({
-  isAllowedStudentEmail: isAllowedStudentEmailMock
 }));
 
 const makeRequest = (pathname: string, body: unknown) =>
@@ -42,7 +37,6 @@ describe("student magic-link auth route", () => {
       anonKey: "anon-key"
     });
     getAuthAppUrlMock.mockReturnValue("https://app.example.com");
-    isAllowedStudentEmailMock.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -74,17 +68,6 @@ describe("student magic-link auth route", () => {
         }
       }
     });
-  });
-
-  it("returns 400 when student email domain policy fails", async () => {
-    isAllowedStudentEmailMock.mockReturnValue(false);
-
-    const response = await studentMagicLinkPost(makeRequest("/api/auth/login/student", { email: "student@gmail.com" }));
-    const payload = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(payload).toEqual({ ok: false, error: "invalid_student_email_domain" });
-    expect(createServerClientMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 when Supabase config is missing", async () => {

@@ -3,21 +3,26 @@ import { createServerClient } from "@supabase/ssr";
 import { z } from "zod";
 import { getSupabaseConfig, getAuthAppUrl } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
-import { isAllowedStudentEmail } from "@/lib/auth/student-email-policy";
 import { consumeMagicLinkThrottle } from "@/lib/auth/magic-link-throttle";
 import { applyMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
+import { applyClaimSessionCookie, clearClaimSessionCookie } from "@/lib/auth/claim-session-cookie";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
 const magicLinkSchema = z.object({
-  email: z.string().email()
+  email: z.string().email(),
+  claim_token: z.string().trim().min(16).max(4096).optional(),
 });
 const MAGIC_LINK_RETRY_AFTER_SECONDS = 60;
 
-const getCallbackUrl = (req: Request) => {
+const getCallbackUrl = (req: Request, claimToken?: string | null) => {
   const explicit = getAuthAppUrl();
   const origin = explicit ?? new URL(req.url).origin;
-  return new URL("/auth/callback", origin).toString();
+  const callbackUrl = new URL("/auth/callback", origin);
+  if (claimToken && claimToken.trim().length > 0) {
+    callbackUrl.searchParams.set("claim_token", claimToken.trim());
+  }
+  return callbackUrl.toString();
 };
 
 const inferMagicLinkErrorCode = (message: string) => {
@@ -35,10 +40,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 });
   }
 
-  if (!isAllowedStudentEmail(parsed.data.email)) {
-    return NextResponse.json({ ok: false, error: "invalid_student_email_domain" }, { status: 400 });
-  }
-
   const throttleResult = consumeMagicLinkThrottle({ email: parsed.data.email, request: req });
   if (throttleResult.throttled) {
     const response = NextResponse.json({
@@ -50,6 +51,15 @@ export async function POST(req: Request) {
     response.headers.set("x-stu-login-email", parsed.data.email);
     response.headers.set("x-stu-persona", "student");
     applyMagicLinkIntentCookie(response, "student");
+    if (parsed.data.claim_token) {
+      applyClaimSessionCookie({
+        response,
+        claimToken: parsed.data.claim_token,
+        email: parsed.data.email,
+      });
+    } else {
+      clearClaimSessionCookie(response);
+    }
     return response;
   }
 
@@ -74,7 +84,7 @@ export async function POST(req: Request) {
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data.email,
     options: {
-      emailRedirectTo: getCallbackUrl(req),
+      emailRedirectTo: getCallbackUrl(req, parsed.data.claim_token ?? null),
       shouldCreateUser: true,
       data: {
         role: "student",
@@ -103,6 +113,15 @@ export async function POST(req: Request) {
       response.headers.set("x-stu-login-email", parsed.data.email);
       response.headers.set("x-stu-persona", "student");
       applyMagicLinkIntentCookie(response, "student");
+      if (parsed.data.claim_token) {
+        applyClaimSessionCookie({
+          response,
+          claimToken: parsed.data.claim_token,
+          email: parsed.data.email,
+        });
+      } else {
+        clearClaimSessionCookie(response);
+      }
       return response;
     }
 
@@ -127,5 +146,14 @@ export async function POST(req: Request) {
   response.headers.set("x-stu-login-email", parsed.data.email);
   response.headers.set("x-stu-persona", "student");
   applyMagicLinkIntentCookie(response, "student");
+  if (parsed.data.claim_token) {
+    applyClaimSessionCookie({
+      response,
+      claimToken: parsed.data.claim_token,
+      email: parsed.data.email,
+    });
+  } else {
+    clearClaimSessionCookie(response);
+  }
   return response;
 }
