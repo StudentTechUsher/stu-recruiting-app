@@ -24,3 +24,6 @@ coverage/
 
 # dev SQLite DB
 .greenhouse-dev.db
+
+# Sentry Config File
+.env.sentry-build-plugin

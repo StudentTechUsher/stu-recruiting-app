@@ -96,6 +96,10 @@ export async function POST(req: Request) {
       error,
       provider: "supabase"
     });
-    throw error;
+    return finalize({
+      response: NextResponse.json({ ok: false, error: "unexpected_exception" }, { status: 500 }),
+      outcome: "failure",
+      errorCode: "unexpected_exception"
+    });
   }
 }

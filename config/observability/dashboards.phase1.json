@@ -1,0 +1,209 @@
+{
+  "config_id": "OBS-DASH-CONFIG-001",
+  "version": "1.0",
+  "dashboards": [
+    {
+      "dashboard_id": "DASH-API-001",
+      "name": "API Reliability Overview",
+      "owner_role": "Backend Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-API-001",
+          "panel_name": "API Success Ratio",
+          "query_intent": "Track 30d availability ratio for core API routes.",
+          "query_template": "1 - (sum(stu_api_server_errors_total) / sum(stu_api_requests_total))",
+          "linked_metrics": [
+            "stu_api_requests_total",
+            "stu_api_server_errors_total"
+          ],
+          "linked_slo_id": "SLO-API-AVAIL-001"
+        },
+        {
+          "panel_id": "PANEL-API-002",
+          "panel_name": "5XX Rate by Route Template",
+          "query_intent": "Detect concentrated 5xx regressions by route_template.",
+          "query_template": "sum(stu_api_server_errors_total{route_template=*}) / sum(stu_api_requests_total{route_template=*})",
+          "linked_metrics": [
+            "stu_api_server_errors_total",
+            "stu_api_requests_total"
+          ],
+          "linked_slo_id": null
+        },
+        {
+          "panel_id": "PANEL-API-003",
+          "panel_name": "Unexpected Error Events (Sentry)",
+          "query_intent": "Monitor unexpected exception volume by release and route_template.",
+          "query_template": "count(sentry.issue_events{error_class=unexpected_exception})",
+          "linked_metrics": [
+            "sentry_issue_events_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    },
+    {
+      "dashboard_id": "DASH-AUTH-001",
+      "name": "Auth and Session Health",
+      "owner_role": "Backend Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-AUTH-001",
+          "panel_name": "Magic Link Success Ratio",
+          "query_intent": "Track 30d auth initiation reliability by persona.",
+          "query_template": "sum(stu_auth_magic_link_sent_total) / sum(stu_auth_magic_link_attempt_total)",
+          "linked_metrics": [
+            "stu_auth_magic_link_sent_total",
+            "stu_auth_magic_link_attempt_total"
+          ],
+          "linked_slo_id": "SLO-AUTH-LOGIN-001"
+        },
+        {
+          "panel_id": "PANEL-AUTH-002",
+          "panel_name": "Magic Link Failures by Error Code",
+          "query_intent": "Identify failure clusters and top error_code contributors.",
+          "query_template": "sum(stu_auth_magic_link_failed_total{error_code=*}) by error_code",
+          "linked_metrics": [
+            "stu_auth_magic_link_failed_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    },
+    {
+      "dashboard_id": "DASH-EXTRACT-001",
+      "name": "Artifact Extraction and Parsing",
+      "owner_role": "Backend Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-EXTRACT-001",
+          "panel_name": "Resume Extraction Success Ratio",
+          "query_intent": "Track extraction reliability and detect outages quickly.",
+          "query_template": "sum(stu_extract_resume_success_total) / sum(stu_extract_resume_attempt_total)",
+          "linked_metrics": [
+            "stu_extract_resume_success_total",
+            "stu_extract_resume_attempt_total"
+          ],
+          "linked_slo_id": "SLO-EXTRACT-RESUME-001"
+        },
+        {
+          "panel_id": "PANEL-EXTRACT-002",
+          "panel_name": "Resume Extraction Failures by Error Code",
+          "query_intent": "Break down extraction failures by dependency and error_code.",
+          "query_template": "sum(stu_extract_resume_failed_total{error_code=*}) by error_code",
+          "linked_metrics": [
+            "stu_extract_resume_failed_total"
+          ],
+          "linked_slo_id": null
+        },
+        {
+          "panel_id": "PANEL-EXTRACT-003",
+          "panel_name": "Transcript Parse Success Ratio",
+          "query_intent": "Track parser reliability over 30d.",
+          "query_template": "sum(stu_transcript_parse_success_total) / sum(stu_transcript_parse_attempt_total)",
+          "linked_metrics": [
+            "stu_transcript_parse_success_total",
+            "stu_transcript_parse_attempt_total"
+          ],
+          "linked_slo_id": "SLO-TRANSCRIPT-PARSE-001"
+        },
+        {
+          "panel_id": "PANEL-EXTRACT-004",
+          "panel_name": "Transcript Sessions Stuck Processing",
+          "query_intent": "Count sessions in processing state for >20m.",
+          "query_template": "count(db.transcript_parse_sessions{status=processing, age_minutes>20})",
+          "linked_metrics": [
+            "stu_transcript_processing_stuck_count"
+          ],
+          "linked_slo_id": null
+        },
+        {
+          "panel_id": "PANEL-EXTRACT-005",
+          "panel_name": "OpenAI Extraction Failure Ratio",
+          "query_intent": "Monitor OpenAI dependency reliability for extraction operations.",
+          "query_template": "sum(stu_openai_extract_failed_total) / sum(stu_openai_extract_attempt_total)",
+          "linked_metrics": [
+            "stu_openai_extract_failed_total",
+            "stu_openai_extract_attempt_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    },
+    {
+      "dashboard_id": "DASH-ATS-001",
+      "name": "ATS Integration Reliability",
+      "owner_role": "Backend Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-ATS-001",
+          "panel_name": "Greenhouse Pipeline Success Ratio",
+          "query_intent": "Track Greenhouse reliability for pipeline and jobs sync.",
+          "query_template": "sum(stu_ats_greenhouse_success_total) / sum(stu_ats_greenhouse_attempt_total)",
+          "linked_metrics": [
+            "stu_ats_greenhouse_success_total",
+            "stu_ats_greenhouse_attempt_total"
+          ],
+          "linked_slo_id": "SLO-ATS-PIPELINE-001"
+        },
+        {
+          "panel_id": "PANEL-ATS-002",
+          "panel_name": "Lever Pipeline Success Ratio",
+          "query_intent": "Track Lever dependency reliability for recruiter pipeline.",
+          "query_template": "sum(stu_ats_lever_success_total) / sum(stu_ats_lever_attempt_total)",
+          "linked_metrics": [
+            "stu_ats_lever_success_total",
+            "stu_ats_lever_attempt_total"
+          ],
+          "linked_slo_id": null
+        },
+        {
+          "panel_id": "PANEL-ATS-004",
+          "panel_name": "CRM Write Failure Ratio",
+          "query_intent": "Monitor recruiter CRM write path reliability.",
+          "query_template": "sum(stu_crm_write_failed_total) / sum(stu_crm_write_attempt_total)",
+          "linked_metrics": [
+            "stu_crm_write_failed_total",
+            "stu_crm_write_attempt_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    },
+    {
+      "dashboard_id": "DASH-AI-001",
+      "name": "AI Quota and Dependency Health",
+      "owner_role": "Platform Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-AI-001",
+          "panel_name": "Quota RPC Fallback Ratio",
+          "query_intent": "Detect excessive memory fallback in AI quota checks.",
+          "query_template": "sum(stu_ai_quota_source_memory_total) / sum(stu_ai_quota_decisions_total)",
+          "linked_metrics": [
+            "stu_ai_quota_source_memory_total",
+            "stu_ai_quota_decisions_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    },
+    {
+      "dashboard_id": "DASH-STORAGE-001",
+      "name": "Upload and Storage Reliability",
+      "owner_role": "Backend Engineer",
+      "panels": [
+        {
+          "panel_id": "PANEL-STORAGE-001",
+          "panel_name": "Storage Upload Failure Ratio",
+          "query_intent": "Track storage upload reliability by route_template and bucket.",
+          "query_template": "sum(stu_storage_upload_failed_total) / sum(stu_storage_upload_attempt_total)",
+          "linked_metrics": [
+            "stu_storage_upload_failed_total",
+            "stu_storage_upload_attempt_total"
+          ],
+          "linked_slo_id": null
+        }
+      ]
+    }
+  ]
+}

@@ -8,11 +8,15 @@
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
+    "observability:check-changed-api": "node scripts/observability/check-changed-api-observability.mjs",
+    "observability:validate-config": "node scripts/observability/validate-phase1-config.mjs",
+    "observability:guard": "npm run observability:check-changed-api && npm run observability:validate-config",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "playwright test"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.46.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
     "better-sqlite3": "^12.8.0",

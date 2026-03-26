@@ -204,6 +204,11 @@ export async function POST(req: Request) {
       error,
       provider: "supabase"
     });
-    throw error;
+    return finalize({
+      response: NextResponse.json({ ok: false, error: "unexpected_exception" }, { status: 500 }),
+      eventName: "stu.auth.magic_link.send.failure",
+      outcome: "failure",
+      errorCode: "unexpected_exception"
+    });
   }
 }

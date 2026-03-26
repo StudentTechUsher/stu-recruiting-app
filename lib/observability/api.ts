@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captureApiUnexpectedException } from "@/lib/observability/sentry";
 
 export type ObsOutcome = "success" | "failure" | "timeout" | "retry" | "dropped";
 export type ObsSeverity = "debug" | "info" | "warn" | "error" | "fatal";
@@ -208,6 +209,20 @@ export const logApiUnexpectedError = ({
   details?: Record<string, unknown>;
 }) => {
   const errorDetails = toErrorDetails(error);
+  captureApiUnexpectedException({
+    context: {
+      requestId: context.requestId,
+      routeTemplate: context.routeTemplate,
+      method: context.method,
+      component: context.component,
+      operation: context.operation
+    },
+    eventName,
+    error,
+    provider,
+    details
+  });
+
   emit({
     ...buildBaseEvent({
       context,

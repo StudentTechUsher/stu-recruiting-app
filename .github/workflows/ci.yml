@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_smoke:
+        description: Run smoke tests
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  guard-and-build:
+    name: Guard and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run observability guard
+        run: npm run observability:guard
+
+      - name: Build
+        run: npm run build
+        env:
+          ENABLE_SESSION_CHECK: "false"
+          NEXT_PUBLIC_ENABLE_SESSION_CHECK: "false"
+          ENABLE_DEV_IDENTITIES: "true"
+
+  smoke-tests:
+    name: Smoke Tests
+    needs: guard-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_smoke == 'true')
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: npm run test:smoke
+        env:
+          ENABLE_SESSION_CHECK: "false"
+          NEXT_PUBLIC_ENABLE_SESSION_CHECK: "false"
+          ENABLE_DEV_IDENTITIES: "true"
+          CI: "true"

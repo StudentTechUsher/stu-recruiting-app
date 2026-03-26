@@ -1,0 +1,301 @@
+{
+  "config_id": "OBS-ALERT-CONFIG-001",
+  "version": "1.0",
+  "defaults": {
+    "business_hours_response": true,
+    "sev1_paging_24x7": true,
+    "sev2_after_hours_paging_allowed": false
+  },
+  "alerts": [
+    {
+      "alert_id": "ALRT-API-5XX-RATE-HIGH",
+      "severity": "Sev1",
+      "aggregation_window": "5m",
+      "sustain_period": "10m",
+      "threshold_formula": "server_error_count / request_count > 0.10",
+      "ratio_rule": {
+        "numerator": "server_error_count",
+        "denominator": "request_count",
+        "window": "5m",
+        "minimum_denominator_volume": "request_count >= 100"
+      },
+      "minimum_sample_volume": "request_count >= 100",
+      "deduplication_key": "env+service+route_template",
+      "auto_close_condition": "server_error_count / request_count <= 0.03 for 15m",
+      "paging_eligibility": "24x7",
+      "data_source_type": "metric",
+      "runbook_id": "RB-API-5XX-001",
+      "dashboard_panel_ids": [
+        "PANEL-API-001",
+        "PANEL-API-002"
+      ]
+    },
+    {
+      "alert_id": "ALRT-AUTH-MAGIC-LINK-FAILURE-SPIKE",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "magic_link_failed / magic_link_attempted > 0.08",
+      "ratio_rule": {
+        "numerator": "magic_link_failed",
+        "denominator": "magic_link_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "magic_link_attempted >= 50"
+      },
+      "minimum_sample_volume": "magic_link_attempted >= 50",
+      "deduplication_key": "env+persona+route_template+error_code",
+      "auto_close_condition": "magic_link_failed / magic_link_attempted <= 0.03 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-AUTH-MAGIC-LINK-001",
+      "dashboard_panel_ids": [
+        "PANEL-AUTH-001",
+        "PANEL-AUTH-002"
+      ]
+    },
+    {
+      "alert_id": "ALRT-EXTRACT-RESUME-FAILURE-RATE",
+      "severity": "Sev2",
+      "severity_override": "Sev1 if resume_extract_success == 0 for 15m with attempted >= 25",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "resume_extract_failed / resume_extract_attempted > 0.10",
+      "ratio_rule": {
+        "numerator": "resume_extract_failed",
+        "denominator": "resume_extract_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "resume_extract_attempted >= 25"
+      },
+      "minimum_sample_volume": "resume_extract_attempted >= 25",
+      "deduplication_key": "env+route_template+outcome",
+      "auto_close_condition": "resume_extract_failed / resume_extract_attempted <= 0.04 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-EXTRACT-RESUME-001",
+      "dashboard_panel_ids": [
+        "PANEL-EXTRACT-001",
+        "PANEL-EXTRACT-002"
+      ]
+    },
+    {
+      "alert_id": "ALRT-EXTRACT-RESUME-ZERO-SUCCESS",
+      "severity": "Sev1",
+      "aggregation_window": "15m",
+      "sustain_period": "15m",
+      "threshold_formula": "resume_extract_success == 0 AND resume_extract_attempted >= 20",
+      "minimum_sample_volume": "resume_extract_attempted >= 20",
+      "deduplication_key": "env+route_template",
+      "auto_close_condition": "resume_extract_success >= 1 in 10m",
+      "paging_eligibility": "24x7",
+      "data_source_type": "metric",
+      "runbook_id": "RB-EXTRACT-RESUME-001",
+      "dashboard_panel_ids": [
+        "PANEL-EXTRACT-001"
+      ]
+    },
+    {
+      "alert_id": "ALRT-TRANSCRIPT-PARSE-FAILED-RATE",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "parse_failed / parse_attempted > 0.12",
+      "ratio_rule": {
+        "numerator": "parse_failed",
+        "denominator": "parse_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "parse_attempted >= 20"
+      },
+      "minimum_sample_volume": "parse_attempted >= 20",
+      "deduplication_key": "env+route_template+parser_model",
+      "auto_close_condition": "parse_failed / parse_attempted <= 0.05 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-TRANSCRIPT-PARSE-001",
+      "dashboard_panel_ids": [
+        "PANEL-EXTRACT-003"
+      ]
+    },
+    {
+      "alert_id": "ALRT-TRANSCRIPT-PARSE-STUCK-PROCESSING",
+      "severity": "Sev1",
+      "aggregation_window": "10m",
+      "sustain_period": "15m",
+      "threshold_formula": "count(status='processing' AND age_minutes>20) >= 5",
+      "minimum_sample_volume": "session_count >= 5",
+      "deduplication_key": "env+parser_model",
+      "auto_close_condition": "count(status='processing' AND age_minutes>20) < 2 for 10m",
+      "paging_eligibility": "24x7",
+      "data_source_type": "db-derived",
+      "runbook_id": "RB-TRANSCRIPT-STUCK-001",
+      "dashboard_panel_ids": [
+        "PANEL-EXTRACT-004"
+      ]
+    },
+    {
+      "alert_id": "ALRT-ATS-GREENHOUSE-ERROR-SPIKE",
+      "severity": "Sev2",
+      "severity_override": "Sev1 if greenhouse_success == 0 for 15m with attempted >= 20",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "greenhouse_failed / greenhouse_attempted > 0.15",
+      "ratio_rule": {
+        "numerator": "greenhouse_failed",
+        "denominator": "greenhouse_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "greenhouse_attempted >= 30"
+      },
+      "minimum_sample_volume": "greenhouse_attempted >= 30",
+      "deduplication_key": "env+provider+route_template+error_code",
+      "auto_close_condition": "greenhouse_failed / greenhouse_attempted <= 0.05 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-ATS-GREENHOUSE-001",
+      "dashboard_panel_ids": [
+        "PANEL-ATS-001"
+      ]
+    },
+    {
+      "alert_id": "ALRT-ATS-GREENHOUSE-OUTAGE",
+      "severity": "Sev1",
+      "aggregation_window": "15m",
+      "sustain_period": "15m",
+      "threshold_formula": "greenhouse_success == 0 AND greenhouse_attempted >= 20",
+      "minimum_sample_volume": "greenhouse_attempted >= 20",
+      "deduplication_key": "env+provider",
+      "auto_close_condition": "greenhouse_success >= 1 in 10m",
+      "paging_eligibility": "24x7",
+      "data_source_type": "metric",
+      "runbook_id": "RB-ATS-GREENHOUSE-001",
+      "dashboard_panel_ids": [
+        "PANEL-ATS-001"
+      ]
+    },
+    {
+      "alert_id": "ALRT-ATS-LEVER-ERROR-SPIKE",
+      "severity": "Sev2",
+      "severity_override": "Sev1 if lever_success == 0 for 15m with attempted >= 20",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "lever_failed / lever_attempted > 0.15",
+      "ratio_rule": {
+        "numerator": "lever_failed",
+        "denominator": "lever_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "lever_attempted >= 20"
+      },
+      "minimum_sample_volume": "lever_attempted >= 20",
+      "deduplication_key": "env+provider+route_template+error_code",
+      "auto_close_condition": "lever_failed / lever_attempted <= 0.05 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-ATS-LEVER-001",
+      "dashboard_panel_ids": [
+        "PANEL-ATS-002"
+      ]
+    },
+    {
+      "alert_id": "ALRT-OPENAI-EXTRACTION-FAILURE-SPIKE",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "openai_failed / openai_attempted > 0.10",
+      "ratio_rule": {
+        "numerator": "openai_failed",
+        "denominator": "openai_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "openai_attempted >= 30"
+      },
+      "minimum_sample_volume": "openai_attempted >= 30",
+      "deduplication_key": "env+provider+operation+error_code",
+      "auto_close_condition": "openai_failed / openai_attempted <= 0.03 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-OPENAI-DEPENDENCY-001",
+      "dashboard_panel_ids": [
+        "PANEL-EXTRACT-005"
+      ]
+    },
+    {
+      "alert_id": "ALRT-STORAGE-UPLOAD-FAILURE-SPIKE",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "storage_upload_failed / storage_upload_attempted > 0.08",
+      "ratio_rule": {
+        "numerator": "storage_upload_failed",
+        "denominator": "storage_upload_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "storage_upload_attempted >= 30"
+      },
+      "minimum_sample_volume": "storage_upload_attempted >= 30",
+      "deduplication_key": "env+bucket+route_template",
+      "auto_close_condition": "storage_upload_failed / storage_upload_attempted <= 0.03 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-STORAGE-UPLOAD-001",
+      "dashboard_panel_ids": [
+        "PANEL-STORAGE-001"
+      ]
+    },
+    {
+      "alert_id": "ALRT-CRM-WRITE-FAILURE",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "crm_write_failed / crm_write_attempted > 0.10",
+      "ratio_rule": {
+        "numerator": "crm_write_failed",
+        "denominator": "crm_write_attempted",
+        "window": "15m",
+        "minimum_denominator_volume": "crm_write_attempted >= 20"
+      },
+      "minimum_sample_volume": "crm_write_attempted >= 20",
+      "deduplication_key": "env+route_template+error_code",
+      "auto_close_condition": "crm_write_failed / crm_write_attempted <= 0.03 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "metric",
+      "runbook_id": "RB-CRM-WRITE-001",
+      "dashboard_panel_ids": [
+        "PANEL-ATS-004"
+      ]
+    },
+    {
+      "alert_id": "ALRT-AI-QUOTA-RPC-FALLBACK-SPIKE",
+      "severity": "Sev3",
+      "aggregation_window": "30m",
+      "sustain_period": "20m",
+      "threshold_formula": "quota_source_memory / quota_decisions_total > 0.20",
+      "ratio_rule": {
+        "numerator": "quota_source_memory",
+        "denominator": "quota_decisions_total",
+        "window": "30m",
+        "minimum_denominator_volume": "quota_decisions_total >= 50"
+      },
+      "minimum_sample_volume": "quota_decisions_total >= 50",
+      "deduplication_key": "env+feature_key",
+      "auto_close_condition": "quota_source_memory / quota_decisions_total <= 0.05 for 60m",
+      "paging_eligibility": "none",
+      "data_source_type": "log-derived",
+      "runbook_id": "RB-AI-QUOTA-FALLBACK-001",
+      "dashboard_panel_ids": [
+        "PANEL-AI-001"
+      ]
+    },
+    {
+      "alert_id": "ALRT-SENTRY-UNEXPECTED-ERROR-VOLUME",
+      "severity": "Sev2",
+      "aggregation_window": "15m",
+      "sustain_period": "10m",
+      "threshold_formula": "unexpected_error_events >= 40",
+      "minimum_sample_volume": "none",
+      "deduplication_key": "env+service+issue_fingerprint",
+      "auto_close_condition": "unexpected_error_events < 10 for 30m",
+      "paging_eligibility": "business_hours_only",
+      "data_source_type": "sentry",
+      "runbook_id": "RB-SENTRY-ERROR-001",
+      "dashboard_panel_ids": [
+        "PANEL-API-003"
+      ]
+    }
+  ]
+}

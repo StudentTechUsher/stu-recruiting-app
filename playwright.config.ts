@@ -9,7 +9,7 @@ export default defineConfig({
     baseURL
   },
   webServer: {
-    command: "ENABLE_SESSION_CHECK=false NEXT_PUBLIC_ENABLE_SESSION_CHECK=false pnpm dev --port 3000",
+    command: "ENABLE_SESSION_CHECK=false NEXT_PUBLIC_ENABLE_SESSION_CHECK=false npm run dev -- --port 3000",
     url: baseURL,
     reuseExistingServer: false,
     timeout: 60_000

@@ -1,0 +1,73 @@
+{
+  "config_id": "OBS-ROUTING-001",
+  "version": "1.0",
+  "environment_scope": [
+    "preview",
+    "production"
+  ],
+  "business_hours_timezone": "America/Denver",
+  "delivery_boundary": "Docs/spec and ticket-ready routing configuration only. Provisioning is manual in this phase.",
+  "severity_policy": {
+    "default_response_mode": "business_hours",
+    "sev1": {
+      "interruption_policy": "24x7",
+      "paging_eligibility": "always",
+      "channels": [
+        "slack:#stu-incidents",
+        "email:engineering-incident-list"
+      ]
+    },
+    "sev2": {
+      "interruption_policy": "business_hours_only",
+      "paging_eligibility": "never_after_hours",
+      "reclassification_path": "sev2_to_sev1_blast_radius",
+      "channels": [
+        "slack:#stu-incidents",
+        "email:engineering-incident-list"
+      ]
+    },
+    "sev3": {
+      "interruption_policy": "business_hours_only",
+      "paging_eligibility": "none",
+      "channels": [
+        "slack:#stu-observability"
+      ]
+    },
+    "sev4": {
+      "interruption_policy": "none",
+      "paging_eligibility": "none",
+      "channels": [
+        "slack:#stu-observability"
+      ]
+    }
+  },
+  "blast_radius_reclassification_rules": [
+    {
+      "rule_id": "BLAST-001",
+      "description": "Dependency success drops to zero for 15m with minimum sample volume met.",
+      "applies_to": [
+        "ALRT-EXTRACT-RESUME-FAILURE-RATE",
+        "ALRT-ATS-GREENHOUSE-ERROR-SPIKE",
+        "ALRT-ATS-LEVER-ERROR-SPIKE"
+      ],
+      "reclassify_to": "Sev1"
+    },
+    {
+      "rule_id": "BLAST-002",
+      "description": "Magic-link success ratio below 0.50 for 15m across student and recruiter personas.",
+      "applies_to": [
+        "ALRT-AUTH-MAGIC-LINK-FAILURE-SPIKE"
+      ],
+      "reclassify_to": "Sev1"
+    }
+  ],
+  "deduplication_policy": {
+    "group_by": [
+      "env",
+      "service",
+      "alert_id",
+      "deduplication_key"
+    ],
+    "reopen_behavior": "reopen_on_same_key_after_auto_close"
+  }
+}
