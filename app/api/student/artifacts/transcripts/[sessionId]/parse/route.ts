@@ -5,6 +5,12 @@ import { consumeAIFeatureQuota } from "@/lib/ai/feature-quota";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { extractTextFromPdfBuffer } from "@/lib/transcript/pdf-text";
 import { parseTranscriptTextWithOpenAI } from "@/lib/transcript/openai-parser";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  logApiRequestResult,
+  logApiRequestStart
+} from "@/lib/observability/api";
 
 type SessionRow = {
   session_id: string;
@@ -53,11 +59,55 @@ const normalizeError = (error: unknown): Record<string, unknown> => {
 };
 
 export async function POST(_req: Request, context: { params: Promise<{ sessionId: string }> }) {
+  const obs = createApiObsContext({
+    request: _req,
+    routeTemplate: "/api/student/artifacts/transcripts/[sessionId]/parse",
+    component: "transcript",
+    operation: "transcript_parse"
+  });
+  logApiRequestStart(obs);
+
+  const finalize = ({
+    response,
+    outcome,
+    errorCode,
+    details
+  }: {
+    response: Response;
+    outcome: "success" | "failure" | "timeout" | "retry" | "dropped";
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    logApiRequestResult({
+      context: obs,
+      statusCode: response.status,
+      eventName: `stu.transcript.parse.run.${outcome}`,
+      outcome,
+      errorCode,
+      provider: "openai",
+      details
+    });
+    return response;
+  };
+
   const auth = await getAuthContext();
-  if (!hasPersona(auth, ["student"])) return forbidden();
+  if (!hasPersona(auth, ["student"])) {
+    return finalize({
+      response: forbidden(),
+      outcome: "failure",
+      errorCode: "forbidden"
+    });
+  }
 
   const supabase = await getSupabaseServerClient();
-  if (!supabase) return badRequest("supabase_unavailable");
+  if (!supabase) {
+    return finalize({
+      response: badRequest("supabase_unavailable"),
+      outcome: "failure",
+      errorCode: "supabase_unavailable"
+    });
+  }
 
   const { sessionId } = await context.params;
 
@@ -67,8 +117,20 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
     .eq("session_id", sessionId)
     .single<SessionRow>();
 
-  if (!session || session.profile_id !== auth.user_id) return forbidden();
-  if (session.status === "processing") return badRequest("transcript_parse_already_processing");
+  if (!session || session.profile_id !== auth.user_id) {
+    return finalize({
+      response: forbidden(),
+      outcome: "failure",
+      errorCode: "forbidden"
+    });
+  }
+  if (session.status === "processing") {
+    return finalize({
+      response: badRequest("transcript_parse_already_processing"),
+      outcome: "failure",
+      errorCode: "transcript_parse_already_processing"
+    });
+  }
 
   const quota = await consumeAIFeatureQuota({
     userId: auth.user_id,
@@ -76,7 +138,8 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
     supabase
   });
   if (!quota.allowed) {
-    return Response.json(
+    return finalize({
+      response: Response.json(
       {
         ok: false,
         error: "ai_feature_quota_exceeded",
@@ -85,7 +148,11 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
         max_uses: quota.maxUses
       },
       { status: 429 }
-    );
+      ),
+      outcome: "failure",
+      errorCode: "ai_feature_quota_exceeded",
+      details: { feature: "transcript_parse" }
+    });
   }
 
   await supabase
@@ -205,11 +272,15 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
       .eq("session_id", session.session_id)
       .eq("profile_id", auth.user_id);
 
-    return ok({
+    return finalize({
+      response: ok({
       resource: "transcript_parse",
       session_id: session.session_id,
       status: "parsed",
       parse_summary: parseSummary
+      }),
+      outcome: "success",
+      details: { session_id: session.session_id }
     });
   } catch (error) {
     const parseError = normalizeError(error);
@@ -222,6 +293,13 @@ export async function POST(_req: Request, context: { params: Promise<{ sessionId
       .eq("session_id", session.session_id)
       .eq("profile_id", auth.user_id);
 
-    return badRequest("transcript_parse_failed");
+    return finalize({
+      response: badRequest("transcript_parse_failed"),
+      outcome: "failure",
+      errorCode: "transcript_parse_failed",
+      details: {
+        error_message: typeof parseError.message === "string" ? parseError.message : "unknown_error"
+      }
+    });
   }
 }

@@ -5,6 +5,13 @@ import { getSupabaseConfig, getAuthAppUrl } from "@/lib/supabase/config";
 import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cookie-adapter";
 import { consumeMagicLinkThrottle } from "@/lib/auth/magic-link-throttle";
 import { applyMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  logApiRequestResult,
+  logApiRequestStart,
+  logApiUnexpectedError
+} from "@/lib/observability/api";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -27,100 +34,176 @@ const inferMagicLinkErrorCode = (message: string) => {
 };
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  const parsed = magicLinkSchema.safeParse(body);
+  const obs = createApiObsContext({
+    request: req,
+    routeTemplate: "/api/auth/login/referrer",
+    component: "auth",
+    operation: "referrer_magic_link_login"
+  });
+  logApiRequestStart(obs);
 
-  if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 });
-  }
-
-  const throttleResult = consumeMagicLinkThrottle({ email: parsed.data.email, request: req });
-  if (throttleResult.throttled) {
-    const response = NextResponse.json({
-      ok: true,
-      throttled: true,
-      retryAfterSeconds: throttleResult.retryAfterSeconds
+  const finalize = ({
+    response,
+    eventName,
+    outcome,
+    errorCode,
+    details
+  }: {
+    response: NextResponse;
+    eventName: string;
+    outcome: "success" | "failure" | "timeout" | "retry" | "dropped";
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    logApiRequestResult({
+      context: obs,
+      statusCode: response.status,
+      eventName,
+      outcome,
+      errorCode,
+      persona: "referrer",
+      details
     });
-    response.headers.set("retry-after", String(throttleResult.retryAfterSeconds));
-    response.headers.set("x-stu-login-email", parsed.data.email);
-    response.headers.set("x-stu-persona", "referrer");
-    applyMagicLinkIntentCookie(response, "referrer");
     return response;
-  }
+  };
 
-  const config = getSupabaseConfig();
-  if (!config) {
-    return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
-  }
+  try {
+    const body = await req.json().catch(() => null);
+    const parsed = magicLinkSchema.safeParse(body);
 
-  const cookieAccumulator = buildCookieAccumulator();
-
-  const supabase = createServerClient(config.url, config.anonKey, {
-    cookies: {
-      getAll() {
-        return parseRequestCookies(req.headers.get("cookie"));
-      },
-      setAll(cookiesToSet: SupabaseCookie[]) {
-        cookieAccumulator.push(cookiesToSet);
-      }
+    if (!parsed.success) {
+      return finalize({
+        response: NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 }),
+        eventName: "stu.auth.magic_link.send.failure",
+        outcome: "failure",
+        errorCode: "invalid_email"
+      });
     }
-  });
 
-  const { error } = await supabase.auth.signInWithOtp({
-    email: parsed.data.email,
-    options: {
-      emailRedirectTo: getCallbackUrl(req),
-      shouldCreateUser: true,
-      data: {
-        role: "referrer",
-        stu_persona: "referrer"
-      }
+    const throttleResult = consumeMagicLinkThrottle({ email: parsed.data.email, request: req });
+    if (throttleResult.throttled) {
+      const response = NextResponse.json({
+        ok: true,
+        throttled: true,
+        retryAfterSeconds: throttleResult.retryAfterSeconds
+      });
+      response.headers.set("retry-after", String(throttleResult.retryAfterSeconds));
+      response.headers.set("x-stu-login-email", parsed.data.email);
+      response.headers.set("x-stu-persona", "referrer");
+      applyMagicLinkIntentCookie(response, "referrer");
+      return finalize({
+        response,
+        eventName: "stu.auth.magic_link.send.retry",
+        outcome: "retry",
+        errorCode: "magic_link_rate_limited",
+        details: { throttled: true }
+      });
     }
-  });
 
-  if (error) {
-    const status = typeof error.status === "number" ? error.status : 400;
-    const errorMessage = typeof error.message === "string" ? error.message : "unknown_supabase_error";
-    const errorCode = inferMagicLinkErrorCode(errorMessage);
+    const config = getSupabaseConfig();
+    if (!config) {
+      return finalize({
+        response: NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 }),
+        eventName: "stu.auth.magic_link.send.failure",
+        outcome: "failure",
+        errorCode: "supabase_not_configured"
+      });
+    }
 
-    if (errorCode === "magic_link_rate_limited" || status === 429) {
-      console.warn("referrer_magic_link_rate_limited", {
+    const cookieAccumulator = buildCookieAccumulator();
+
+    const supabase = createServerClient(config.url, config.anonKey, {
+      cookies: {
+        getAll() {
+          return parseRequestCookies(req.headers.get("cookie"));
+        },
+        setAll(cookiesToSet: SupabaseCookie[]) {
+          cookieAccumulator.push(cookiesToSet);
+        }
+      }
+    });
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: parsed.data.email,
+      options: {
+        emailRedirectTo: getCallbackUrl(req),
+        shouldCreateUser: true,
+        data: {
+          role: "referrer",
+          stu_persona: "referrer"
+        }
+      }
+    });
+
+    if (error) {
+      const status = typeof error.status === "number" ? error.status : 400;
+      const errorMessage = typeof error.message === "string" ? error.message : "unknown_supabase_error";
+      const errorCode = inferMagicLinkErrorCode(errorMessage);
+
+      if (errorCode === "magic_link_rate_limited" || status === 429) {
+        console.warn("referrer_magic_link_rate_limited", {
+          status,
+          message: errorMessage
+        });
+
+        const response = NextResponse.json({
+          ok: true,
+          throttled: true,
+          retryAfterSeconds: MAGIC_LINK_RETRY_AFTER_SECONDS
+        });
+        response.headers.set("retry-after", String(MAGIC_LINK_RETRY_AFTER_SECONDS));
+        response.headers.set("x-stu-login-email", parsed.data.email);
+        response.headers.set("x-stu-persona", "referrer");
+        applyMagicLinkIntentCookie(response, "referrer");
+        return finalize({
+          response,
+          eventName: "stu.auth.magic_link.send.retry",
+          outcome: "retry",
+          errorCode,
+          details: { throttled: true, status }
+        });
+      }
+
+      console.error("referrer_magic_link_send_failed", {
+        errorCode,
         status,
         message: errorMessage
       });
 
-      const response = NextResponse.json({
-        ok: true,
-        throttled: true,
-        retryAfterSeconds: MAGIC_LINK_RETRY_AFTER_SECONDS
+      return finalize({
+        response: NextResponse.json(
+          {
+            ok: false,
+            error: errorCode,
+            details: process.env.NODE_ENV === "development" ? errorMessage : undefined
+          },
+          { status }
+        ),
+        eventName: "stu.auth.magic_link.send.failure",
+        outcome: "failure",
+        errorCode,
+        details: { status }
       });
-      response.headers.set("retry-after", String(MAGIC_LINK_RETRY_AFTER_SECONDS));
-      response.headers.set("x-stu-login-email", parsed.data.email);
-      response.headers.set("x-stu-persona", "referrer");
-      applyMagicLinkIntentCookie(response, "referrer");
-      return response;
     }
 
-    console.error("referrer_magic_link_send_failed", {
-      errorCode,
-      status,
-      message: errorMessage
+    const response = NextResponse.json({ ok: true });
+    cookieAccumulator.apply(response);
+    response.headers.set("x-stu-login-email", parsed.data.email);
+    response.headers.set("x-stu-persona", "referrer");
+    applyMagicLinkIntentCookie(response, "referrer");
+    return finalize({
+      response,
+      eventName: "stu.auth.magic_link.send.success",
+      outcome: "success"
     });
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: errorCode,
-        details: process.env.NODE_ENV === "development" ? errorMessage : undefined
-      },
-      { status }
-    );
+  } catch (error) {
+    logApiUnexpectedError({
+      context: obs,
+      eventName: "stu.auth.magic_link.send.failure",
+      error,
+      provider: "supabase"
+    });
+    throw error;
   }
-
-  const response = NextResponse.json({ ok: true });
-  cookieAccumulator.apply(response);
-  response.headers.set("x-stu-login-email", parsed.data.email);
-  response.headers.set("x-stu-persona", "referrer");
-  applyMagicLinkIntentCookie(response, "referrer");
-  return response;
 }

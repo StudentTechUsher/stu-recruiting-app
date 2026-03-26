@@ -5,6 +5,13 @@ import { buildCookieAccumulator, parseRequestCookies } from "@/lib/supabase/cook
 import { isRefreshTokenNotFoundError } from "@/lib/supabase/auth-session";
 import { clearDevIdentityCookie } from "@/lib/dev-auth";
 import { clearMagicLinkIntentCookie } from "@/lib/auth/magic-link-intent";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  logApiRequestResult,
+  logApiRequestStart,
+  logApiUnexpectedError
+} from "@/lib/observability/api";
 
 type SupabaseCookie = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -22,29 +29,73 @@ const safeSignOut = async (supabase: { auth: { signOut: () => Promise<{ error: u
 };
 
 export async function POST(req: Request) {
-  const response = NextResponse.redirect(new URL("/", req.url), 303);
-  clearDevIdentityCookie(response);
-  clearMagicLinkIntentCookie(response);
-  const config = getSupabaseConfig();
-
-  if (!config) {
-    return response;
-  }
-
-  const cookieAccumulator = buildCookieAccumulator();
-
-  const supabase = createServerClient(config.url, config.anonKey, {
-    cookies: {
-      getAll() {
-        return parseRequestCookies(req.headers.get("cookie"));
-      },
-      setAll(cookiesToSet: SupabaseCookie[]) {
-        cookieAccumulator.push(cookiesToSet);
-      }
-    }
+  const obs = createApiObsContext({
+    request: req,
+    routeTemplate: "/api/auth/logout",
+    component: "auth",
+    operation: "logout"
   });
+  logApiRequestStart(obs);
 
-  await safeSignOut(supabase);
-  cookieAccumulator.apply(response);
-  return response;
+  const finalize = ({
+    response,
+    outcome,
+    errorCode
+  }: {
+    response: NextResponse;
+    outcome: "success" | "failure";
+    errorCode?: string;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    logApiRequestResult({
+      context: obs,
+      statusCode: response.status,
+      eventName: `stu.auth.logout.${outcome}`,
+      outcome,
+      errorCode
+    });
+    return response;
+  };
+
+  try {
+    const response = NextResponse.redirect(new URL("/", req.url), 303);
+    clearDevIdentityCookie(response);
+    clearMagicLinkIntentCookie(response);
+    const config = getSupabaseConfig();
+
+    if (!config) {
+      return finalize({
+        response,
+        outcome: "success"
+      });
+    }
+
+    const cookieAccumulator = buildCookieAccumulator();
+
+    const supabase = createServerClient(config.url, config.anonKey, {
+      cookies: {
+        getAll() {
+          return parseRequestCookies(req.headers.get("cookie"));
+        },
+        setAll(cookiesToSet: SupabaseCookie[]) {
+          cookieAccumulator.push(cookiesToSet);
+        }
+      }
+    });
+
+    await safeSignOut(supabase);
+    cookieAccumulator.apply(response);
+    return finalize({
+      response,
+      outcome: "success"
+    });
+  } catch (error) {
+    logApiUnexpectedError({
+      context: obs,
+      eventName: "stu.auth.logout.failure",
+      error,
+      provider: "supabase"
+    });
+    throw error;
+  }
 }

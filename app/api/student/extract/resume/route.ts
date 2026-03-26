@@ -8,6 +8,12 @@ import {
   upsertStudentExtractionMetadata
 } from "@/lib/artifacts/extraction";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  logApiRequestResult,
+  logApiRequestStart
+} from "@/lib/observability/api";
 
 type StorageFileRef = {
   bucket: string;
@@ -225,27 +231,86 @@ const deactivateSupersededResumeArtifacts = async ({
 };
 
 export async function POST(req: Request) {
+  const obs = createApiObsContext({
+    request: req,
+    routeTemplate: "/api/student/extract/resume",
+    component: "student_artifacts",
+    operation: "resume_extract"
+  });
+  logApiRequestStart(obs);
+
+  const finalize = ({
+    response,
+    outcome,
+    errorCode,
+    details
+  }: {
+    response: Response;
+    outcome: "success" | "failure" | "timeout" | "retry" | "dropped";
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    logApiRequestResult({
+      context: obs,
+      statusCode: response.status,
+      eventName: `stu.extract.resume.run.${outcome}`,
+      outcome,
+      errorCode,
+      provider: "openai",
+      persona: "student",
+      details
+    });
+    return response;
+  };
+
   const context = await getAuthContext();
-  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
+  if (!hasPersona(context, ["student"], { requireOnboarding: false })) {
+    return finalize({
+      response: forbidden(),
+      outcome: "failure",
+      errorCode: "forbidden"
+    });
+  }
 
   const supabase = await getSupabaseServerClient();
-  if (!supabase) return badRequest("supabase_unavailable");
+  if (!supabase) {
+    return finalize({
+      response: badRequest("supabase_unavailable"),
+      outcome: "failure",
+      errorCode: "supabase_unavailable"
+    });
+  }
   const extractionSupabase = supabase as unknown as SupabaseClientLike;
 
   let formData: FormData;
   try {
     formData = await req.formData();
   } catch {
-    return badRequest("invalid_form_data");
+    return finalize({
+      response: badRequest("invalid_form_data"),
+      outcome: "failure",
+      errorCode: "invalid_form_data"
+    });
   }
 
   const file = formData.get("file") as File | null;
-  if (!file) return badRequest("file_required");
+  if (!file) {
+    return finalize({
+      response: badRequest("file_required"),
+      outcome: "failure",
+      errorCode: "file_required"
+    });
+  }
   const flow = toTrimmedString(formData.get("flow"));
   const isOnboardingFlow = flow === "onboarding";
 
   if (!file.name.endsWith('.pdf') && !file.name.endsWith('.docx')) {
-    return badRequest("unsupported_file_type");
+    return finalize({
+      response: badRequest("unsupported_file_type"),
+      outcome: "failure",
+      errorCode: "unsupported_file_type"
+    });
   }
 
   const { data: studentRows } = await supabase
@@ -257,7 +322,11 @@ export async function POST(req: Request) {
   const studentData = toRecord((studentRows as Array<{ student_data: unknown }> | null)?.[0]?.student_data);
   const claimReview = toRecord(studentData.claim_review);
   if (claimReview.status === "flagged_mismatch") {
-    return badRequest("claim_under_review");
+    return finalize({
+      response: badRequest("claim_under_review"),
+      outcome: "failure",
+      errorCode: "claim_under_review"
+    });
   }
   const sourceExtractionLog = toRecord(studentData.source_extraction_log);
   const existingSourceEntry = toRecord(sourceExtractionLog.resume);
@@ -272,7 +341,12 @@ export async function POST(req: Request) {
 
   if (uploadError) {
     console.error("Storage upload failed:", uploadError);
-    return badRequest("failed_to_upload_document");
+    return finalize({
+      response: badRequest("failed_to_upload_document"),
+      outcome: "failure",
+      errorCode: "failed_to_upload_document",
+      details: { provider: "supabase_storage" }
+    });
   }
 
   if (previousFileRef && previousFileRef.path !== filePath) {
@@ -358,7 +432,8 @@ export async function POST(req: Request) {
       fileName: file.name,
     });
 
-    return ok({
+    return finalize({
+      response: ok({
       resource: "artifacts_extraction",
       status: "success",
       data: {
@@ -369,6 +444,9 @@ export async function POST(req: Request) {
         },
       },
       session_source: context.session_source ?? "none"
+      }),
+      outcome: "success",
+      details: { artifact_count: persistedArtifacts.length }
     });
   } catch (extractError) {
     console.error("Resume extraction failed:", extractError);
@@ -404,7 +482,8 @@ export async function POST(req: Request) {
     }));
 
     if (isOnboardingFlow) {
-      return ok({
+      return finalize({
+        response: ok({
         resource: "artifacts_extraction",
         status: "accepted_with_extraction_failed",
         data: {
@@ -415,8 +494,16 @@ export async function POST(req: Request) {
           },
         },
         session_source: context.session_source ?? "none",
+        }),
+        outcome: "dropped",
+        errorCode: "document_extraction_failed",
+        details: { accepted_with_extraction_failed: true }
       });
     }
-    return badRequest("document_extraction_failed");
+    return finalize({
+      response: badRequest("document_extraction_failed"),
+      outcome: "failure",
+      errorCode: "document_extraction_failed"
+    });
   }
 }

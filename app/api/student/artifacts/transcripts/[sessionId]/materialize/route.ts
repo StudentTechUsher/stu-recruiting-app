@@ -3,6 +3,12 @@ import { getAuthContext } from "@/lib/auth-context";
 import { hasPersona } from "@/lib/authorization";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { buildCourseworkArtifactData, type TranscriptCourse } from "@/lib/transcript/intake";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  logApiRequestResult,
+  logApiRequestStart
+} from "@/lib/observability/api";
 
 type SessionRow = {
   session_id: string;
@@ -57,16 +63,65 @@ const normalizeSyllabusRefs = (value: unknown[]): Record<string, unknown>[] =>
     .map((entry) => entry as Record<string, unknown>);
 
 export async function POST(req: Request, context: { params: Promise<{ sessionId: string }> }) {
+  const obs = createApiObsContext({
+    request: req,
+    routeTemplate: "/api/student/artifacts/transcripts/[sessionId]/materialize",
+    component: "transcript",
+    operation: "transcript_materialize"
+  });
+  logApiRequestStart(obs);
+
+  const finalize = ({
+    response,
+    outcome,
+    errorCode,
+    details
+  }: {
+    response: Response;
+    outcome: "success" | "failure" | "timeout" | "retry" | "dropped";
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    logApiRequestResult({
+      context: obs,
+      statusCode: response.status,
+      eventName: `stu.transcript.materialize.run.${outcome}`,
+      outcome,
+      errorCode,
+      details
+    });
+    return response;
+  };
+
   const auth = await getAuthContext();
-  if (!hasPersona(auth, ["student"])) return forbidden();
+  if (!hasPersona(auth, ["student"])) {
+    return finalize({
+      response: forbidden(),
+      outcome: "failure",
+      errorCode: "forbidden"
+    });
+  }
 
   const supabase = await getSupabaseServerClient();
-  if (!supabase) return badRequest("supabase_unavailable");
+  if (!supabase) {
+    return finalize({
+      response: badRequest("supabase_unavailable"),
+      outcome: "failure",
+      errorCode: "supabase_unavailable"
+    });
+  }
 
   const { sessionId } = await context.params;
   const body = await req.json().catch(() => ({}));
   const selections = toSelectionArray((body as Record<string, unknown>).selections);
-  if (selections.length === 0) return badRequest("materialize_selections_required");
+  if (selections.length === 0) {
+    return finalize({
+      response: badRequest("materialize_selections_required"),
+      outcome: "failure",
+      errorCode: "materialize_selections_required"
+    });
+  }
 
   const { data: session } = await supabase
     .from("transcript_parse_sessions")
@@ -74,8 +129,20 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
     .eq("session_id", sessionId)
     .single<SessionRow>();
 
-  if (!session || session.profile_id !== auth.user_id) return forbidden();
-  if (session.status !== "parsed") return badRequest("transcript_session_not_parsed");
+  if (!session || session.profile_id !== auth.user_id) {
+    return finalize({
+      response: forbidden(),
+      outcome: "failure",
+      errorCode: "forbidden"
+    });
+  }
+  if (session.status !== "parsed") {
+    return finalize({
+      response: badRequest("transcript_session_not_parsed"),
+      outcome: "failure",
+      errorCode: "transcript_session_not_parsed"
+    });
+  }
 
   const parsedCourseIds = Array.from(new Set(selections.map((selection) => selection.parsed_course_id)));
   const { data: parsedRows } = await supabase
@@ -85,13 +152,25 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
     .in("parsed_course_id", parsedCourseIds);
 
   const parsedCourses = (parsedRows ?? []) as ParsedCourseRow[];
-  if (parsedCourses.length === 0) return badRequest("transcript_courses_not_found");
+  if (parsedCourses.length === 0) {
+    return finalize({
+      response: badRequest("transcript_courses_not_found"),
+      outcome: "failure",
+      errorCode: "transcript_courses_not_found"
+    });
+  }
 
   const parsedById = new Map(parsedCourses.map((course) => [course.parsed_course_id, course]));
   const selectionsById = new Map(selections.map((selection) => [selection.parsed_course_id, selection]));
 
   const selectedParsedIds = parsedCourseIds.filter((id) => parsedById.has(id) && selectionsById.has(id));
-  if (selectedParsedIds.length === 0) return badRequest("materialize_selections_invalid");
+  if (selectedParsedIds.length === 0) {
+    return finalize({
+      response: badRequest("materialize_selections_invalid"),
+      outcome: "failure",
+      errorCode: "materialize_selections_invalid"
+    });
+  }
 
   const { data: existingArtifacts } = await supabase
     .from("artifacts")
@@ -155,10 +234,14 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
   if (rowsToInsert.length === 0) {
-    return ok({
+    return finalize({
+      response: ok({
       resource: "transcript_materialize",
       created_count: 0,
       skipped_count: selectedParsedIds.length
+      }),
+      outcome: "success",
+      details: { created_count: 0, skipped_count: selectedParsedIds.length }
     });
   }
 
@@ -215,10 +298,17 @@ export async function POST(req: Request, context: { params: Promise<{ sessionId:
       .eq("profile_id", auth.user_id);
   }
 
-  return ok({
+  return finalize({
+    response: ok({
     resource: "transcript_materialize",
     created_count: insertedArtifacts.length,
     skipped_count: selectedParsedIds.length - rowsToInsert.length,
     artifact_ids: insertedArtifacts.map((row) => row.artifact_id)
+    }),
+    outcome: "success",
+    details: {
+      created_count: insertedArtifacts.length,
+      skipped_count: selectedParsedIds.length - rowsToInsert.length
+    }
   });
 }
