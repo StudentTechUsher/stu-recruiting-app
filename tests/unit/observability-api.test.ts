@@ -8,6 +8,8 @@ const {
   setTagMock,
   setContextMock,
   setLevelMock,
+  metricsCountMock,
+  metricsDistributionMock,
 } = vi.hoisted(() => ({
   captureApiUnexpectedExceptionMock: vi.fn(),
   resolveSentryEnabledMock: vi.fn(),
@@ -16,6 +18,8 @@ const {
   setTagMock: vi.fn(),
   setContextMock: vi.fn(),
   setLevelMock: vi.fn(),
+  metricsCountMock: vi.fn(),
+  metricsDistributionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/observability/sentry", () => ({
@@ -26,6 +30,10 @@ vi.mock("@/lib/observability/sentry", () => ({
 vi.mock("@sentry/nextjs", () => ({
   captureMessage: captureMessageMock,
   withScope: withScopeMock,
+  metrics: {
+    count: metricsCountMock,
+    distribution: metricsDistributionMock,
+  },
 }));
 
 import {
@@ -96,6 +104,16 @@ describe("observability api helpers", () => {
     });
 
     expect(captureMessageMock).toHaveBeenCalledWith("student.profile_saved", "info");
+    expect(metricsCountMock).toHaveBeenCalledWith(
+      "stu.obs.events_total",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          event_name: "student.profile_saved",
+          outcome: "success",
+        }),
+      })
+    );
     expect(setTagMock).toHaveBeenCalledWith("request_id", "req-profile-1");
     expect(setTagMock).toHaveBeenCalledWith("trace_id", TRACE_ID);
     expect(setTagMock).toHaveBeenCalledWith("persona", "student");
@@ -129,6 +147,16 @@ describe("observability api helpers", () => {
 
     expect(sentryEventId).toBe("sentry-evt-1");
     expect(captureMessageMock).toHaveBeenCalledWith("student.profile_save.unexpected", "error");
+    expect(metricsCountMock).toHaveBeenCalledWith(
+      "stu.obs.events_total",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          event_name: "student.profile_save.unexpected",
+          outcome: "unexpected_failure",
+        }),
+      })
+    );
     expect(setContextMock).toHaveBeenCalledWith(
       "observability_event",
       expect.objectContaining({

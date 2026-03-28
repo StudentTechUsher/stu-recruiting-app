@@ -184,6 +184,25 @@ const emit = (event: ObsEvent): string | undefined => {
   if (!resolveSentryEnabled("server")) return undefined;
   const level = toSentryLevel(event.severity);
 
+  const metricAttributes: Record<string, string> = {
+    event_name: event.event_name,
+    outcome: event.outcome,
+    component: event.component,
+    operation: event.operation
+  };
+  if (event.persona) metricAttributes.persona = event.persona;
+  if (event.route_template) metricAttributes.route = event.route_template;
+  if (event.provider) metricAttributes.provider = event.provider;
+  if (event.error_code) metricAttributes.error_code = event.error_code;
+
+  Sentry.metrics.count("stu.obs.events_total", 1, { attributes: metricAttributes });
+  if (typeof event.duration_ms === "number" && Number.isFinite(event.duration_ms)) {
+    Sentry.metrics.distribution("stu.obs.duration_ms", event.duration_ms, { attributes: metricAttributes });
+  }
+  if (event.event_name.startsWith("student.") || event.event_name.startsWith("recruiter.") || event.event_name.startsWith("auth.")) {
+    Sentry.metrics.count("stu.product.events_total", 1, { attributes: metricAttributes });
+  }
+
   return Sentry.withScope((scope) => {
     scope.setLevel(level);
     scope.setTag("event_name", event.event_name);
