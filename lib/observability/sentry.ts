@@ -14,6 +14,16 @@ type ApiExceptionContext = {
   method: string;
   component: string;
   operation: string;
+  persona?: string;
+  orgId?: string;
+};
+
+type SentryObsTagsInput = {
+  route: string;
+  persona?: string;
+  org_id?: string;
+  request_id: string;
+  outcome?: string;
 };
 
 const SENTRY_SERVICE_NAME = "stu-recruiting-app";
@@ -136,6 +146,12 @@ const isCriticalTransaction = (name: string | undefined): boolean => {
   return CRITICAL_TRANSACTION_MATCHES.some((match) => name.includes(match));
 };
 
+const safeString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+};
+
 export const resolveSentryDsn = (target: RuntimeTarget): string | undefined => {
   const publicDsn = parseOptionalEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);
   if (target === "client") return publicDsn;
@@ -203,6 +219,76 @@ export const scrubSentryBreadcrumb = (breadcrumb: Breadcrumb): Breadcrumb => {
   return breadcrumb;
 };
 
+const applySentryObsTags = (
+  scope: {
+    setTag: (key: string, value: string) => void;
+  },
+  input: SentryObsTagsInput
+) => {
+  scope.setTag("service", SENTRY_SERVICE_NAME);
+  scope.setTag("route", input.route);
+  scope.setTag("route_template", input.route);
+  scope.setTag("request_id", input.request_id);
+  if (input.persona) scope.setTag("persona", input.persona);
+  if (input.org_id) scope.setTag("org_id", input.org_id);
+  if (input.outcome) scope.setTag("outcome", input.outcome);
+};
+
+export const setSentryObsTags = (input: SentryObsTagsInput) => {
+  if (!resolveSentryEnabled("server")) return;
+  Sentry.setTag("service", SENTRY_SERVICE_NAME);
+  Sentry.setTag("route", input.route);
+  Sentry.setTag("route_template", input.route);
+  Sentry.setTag("request_id", input.request_id);
+  if (input.persona) Sentry.setTag("persona", input.persona);
+  if (input.org_id) Sentry.setTag("org_id", input.org_id);
+  if (input.outcome) Sentry.setTag("outcome", input.outcome);
+};
+
+export const captureServerExceptionWithId = (
+  error: unknown,
+  context: Record<string, unknown>
+): string | undefined => {
+  if (!resolveSentryEnabled("server")) return undefined;
+
+  return Sentry.withScope((scope) => {
+    const route = safeString(context.route) ?? safeString(context.route_template) ?? "unknown_route";
+    const requestId = safeString(context.request_id) ?? "unknown_request";
+
+    applySentryObsTags(scope, {
+      route,
+      request_id: requestId,
+      persona: safeString(context.persona),
+      org_id: safeString(context.org_id),
+      outcome: safeString(context.outcome)
+    });
+
+    const eventName = safeString(context.event_name);
+    const component = safeString(context.component);
+    const operation = safeString(context.operation);
+    const provider = safeString(context.provider);
+    const method = safeString(context.method);
+
+    if (eventName) scope.setTag("event_name", eventName);
+    if (component) scope.setTag("component", component);
+    if (operation) scope.setTag("operation", operation);
+    if (provider) scope.setTag("provider", provider);
+
+    const details = isObject(context.details) ? sanitizeRecord(context.details) : undefined;
+    scope.setContext("observability", sanitizeRecord(context));
+    scope.setContext("api", {
+      method,
+      route_template: route,
+      operation: operation ?? "unknown_operation"
+    });
+    if (details) {
+      scope.setContext("details", details);
+    }
+
+    return Sentry.captureException(error);
+  });
+};
+
 export const captureApiUnexpectedException = ({
   context,
   eventName,
@@ -215,30 +301,19 @@ export const captureApiUnexpectedException = ({
   error: unknown;
   provider?: string;
   details?: Record<string, unknown>;
-}) => {
-  if (!resolveSentryEnabled("server")) return;
-
-  Sentry.withScope((scope) => {
-    scope.setTag("service", SENTRY_SERVICE_NAME);
-    scope.setTag("route_template", context.routeTemplate);
-    scope.setTag("component", context.component);
-    scope.setTag("operation", context.operation);
-    scope.setTag("outcome", "failure");
-    scope.setTag("error_class", "unexpected_exception");
-    scope.setTag("event_name", eventName);
-    scope.setTag("request_id", context.requestId);
-    if (provider) {
-      scope.setTag("provider", provider);
-    }
-    scope.setContext("api", {
-      method: context.method,
-      route_template: context.routeTemplate,
-      operation: context.operation
-    });
-    if (details) {
-      scope.setContext("details", sanitizeRecord(details));
-    }
-
-    Sentry.captureException(error);
+}): string | undefined =>
+  captureServerExceptionWithId(error, {
+    event_name: eventName,
+    route: context.routeTemplate,
+    route_template: context.routeTemplate,
+    request_id: context.requestId,
+    method: context.method,
+    component: context.component,
+    operation: context.operation,
+    provider,
+    persona: context.persona,
+    org_id: context.orgId,
+    outcome: "unexpected_failure",
+    error_class: "unexpected_exception",
+    details
   });
-};

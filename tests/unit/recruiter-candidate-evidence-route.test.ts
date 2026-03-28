@@ -10,6 +10,20 @@ const {
   hasPersonaMock: vi.fn(),
   getRecruiterReviewCandidateEvidenceMock: vi.fn(),
 }));
+let infoSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+const getEventNames = (spy: ReturnType<typeof vi.spyOn>) =>
+  spy.mock.calls
+    .map((entry: unknown[]) => {
+      try {
+        const payload = JSON.parse(String(entry[0])) as { event_name?: string };
+        return payload.event_name;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value: unknown): value is string => typeof value === "string");
 
 vi.mock("@/lib/auth-context", () => ({
   getAuthContext: getAuthContextMock,
@@ -26,6 +40,9 @@ vi.mock("@/lib/recruiter/review-candidates", () => ({
 describe("recruiter candidate evidence route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     getAuthContextMock.mockResolvedValue({
       authenticated: true,
       user_id: "recruiter-1",
@@ -60,6 +77,7 @@ describe("recruiter candidate evidence route", () => {
     expect(payload.ok).toBe(true);
     expect(payload.data.resource).toBe("review_candidate_evidence");
     expect(payload.data.detail.application_id).toBe("app-1");
+    expect(getEventNames(infoSpy)).toContain("recruiter.candidate_profile_opened");
   });
 
   it("returns bad request when application is missing", async () => {
@@ -70,5 +88,6 @@ describe("recruiter candidate evidence route", () => {
 
     expect(response.status).toBe(400);
     expect(payload).toEqual({ ok: false, error: "invalid_application_id" });
+    expect(getEventNames(warnSpy)).toContain("recruiter.candidate_profile_opened.failed");
   });
 });

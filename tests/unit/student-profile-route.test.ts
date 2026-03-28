@@ -6,6 +6,20 @@ const { getAuthContextMock, hasPersonaMock, getSupabaseServerClientMock } = vi.h
   hasPersonaMock: vi.fn(),
   getSupabaseServerClientMock: vi.fn()
 }));
+let infoSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+const getEventNames = (spy: ReturnType<typeof vi.spyOn>) =>
+  spy.mock.calls
+    .map((entry: unknown[]) => {
+      try {
+        const payload = JSON.parse(String(entry[0])) as { event_name?: string };
+        return payload.event_name;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value: unknown): value is string => typeof value === "string");
 
 vi.mock("@/lib/auth-context", () => ({
   getAuthContext: getAuthContextMock
@@ -69,6 +83,9 @@ const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
 describe("student profile route nested link merge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     hasPersonaMock.mockReturnValue(true);
     getAuthContextMock.mockResolvedValue({
       authenticated: true,
@@ -119,6 +136,9 @@ describe("student profile route nested link merge", () => {
     expect(profileLinks.github).toBe("https://github.com/existing-user");
     expect(profileLinks.linkedin).toBe("https://www.linkedin.com/in/new-user");
     expect(profilesUpsertMock).toHaveBeenCalled();
+
+    const infoEvents = getEventNames(infoSpy);
+    expect(infoEvents).toContain("student.profile_saved");
   });
 
   it("only clears the targeted key when empty string is explicitly submitted", async () => {
@@ -188,5 +208,8 @@ describe("student profile route nested link merge", () => {
     expect(response.status).toBe(400);
     const payload = await response.json();
     expect(payload).toEqual({ ok: false, error: "profile_save_failed" });
+
+    const warningEvents = getEventNames(warnSpy);
+    expect(warningEvents).toContain("student.profile_saved.failed");
   });
 });

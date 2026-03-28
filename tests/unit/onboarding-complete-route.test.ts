@@ -6,6 +6,20 @@ const { createServerClientMock, getSupabaseConfigMock, getProfileByUserIdMock } 
   getSupabaseConfigMock: vi.fn(),
   getProfileByUserIdMock: vi.fn()
 }));
+let infoSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+const getEventNames = (spy: ReturnType<typeof vi.spyOn>) =>
+  spy.mock.calls
+    .map((entry: unknown[]) => {
+      try {
+        const payload = JSON.parse(String(entry[0])) as { event_name?: string };
+        return payload.event_name;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value: unknown): value is string => typeof value === "string");
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: createServerClientMock
@@ -121,6 +135,9 @@ const buildSupabaseMockWithClaimReviewFlag = () => {
 describe("onboarding complete route metrics persistence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     getSupabaseConfigMock.mockReturnValue({
       url: "https://supabase.example.com",
       anonKey: "anon-key"
@@ -169,6 +186,9 @@ describe("onboarding complete route metrics persistence", () => {
     expect(metrics.submitted_at).toBe("2026-03-19T12:00:45.000Z");
     expect(metrics.duration_ms).toBe(45000);
     expect(typeof metrics.completed_at).toBe("string");
+
+    const infoEvents = getEventNames(infoSpy);
+    expect(infoEvents).toContain("student.onboarding_completed");
   });
 
   it("ignores malformed client metrics payload", async () => {
@@ -223,6 +243,9 @@ describe("onboarding complete route metrics persistence", () => {
     expect(response.status).toBe(409);
     expect(payload).toEqual({ ok: false, error: "claim_under_review" });
     expect(studentsUpsertMock).not.toHaveBeenCalled();
+
+    const warningEvents = getEventNames(warnSpy);
+    expect(warningEvents).toContain("student.onboarding_completed.failed");
   });
 
   it("preserves source extraction linkage metadata when onboarding completes", async () => {

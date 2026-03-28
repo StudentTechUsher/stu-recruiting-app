@@ -7,6 +7,13 @@ import { extractTargetCompanyNames, extractTargetRoleNames } from "@/lib/auth/on
 import { notifyOnNewRolesForMapping } from "@/lib/capabilities/role-mapping-alerts";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveOptionSelections } from "@/lib/text/fuzzy-option-match";
+import {
+  attachRequestIdHeader,
+  createApiObsContext,
+  recordProductMetric,
+  toActorSurrogate,
+  type ObsOutcome
+} from "@/lib/observability/api";
 
 type StudentRow = { student_data: unknown };
 type ProfilePersonalInfoRow = { personal_info: unknown };
@@ -37,6 +44,7 @@ type SupabaseStorageClient = {
 };
 
 const AVATAR_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
+const OBS_ROUTE = "/api/student/profile";
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
@@ -315,187 +323,411 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const context = await getAuthContext();
-  if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
+  const obs = createApiObsContext({
+    request: req,
+    routeTemplate: OBS_ROUTE,
+    component: "student_profile",
+    operation: "save"
+  });
+  obs.recordStart({
+    eventName: "student.profile_save.start",
+    persona: "student"
+  });
 
-  const payload = await req.json().catch(() => null);
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return badRequest("invalid_payload");
-  }
-
-  const payloadRecord = toRecord(payload);
-  const personalInfoInput = toRecord(payloadRecord.personal_info);
-  const studentDataInput = toRecord(payloadRecord.student_data);
-  let existingPersonalInfo = toRecord(context.profile?.personal_info);
-  let existingStudentData: Record<string, unknown> = {};
-
-  const supabase = await getSupabaseServerClient();
-  if (supabase) {
-    const [{ data: existingProfileRows }, { data: existingStudentRows }] = (await Promise.all([
-      supabase.from("profiles").select("personal_info").eq("id", context.user_id).limit(1),
-      supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
-    ])) as [{ data: ProfilePersonalInfoRow[] | null }, { data: StudentRow[] | null }];
-
-    const persistedProfilePersonalInfo = toRecord(existingProfileRows?.[0]?.personal_info);
-    if (isNonEmptyRecord(persistedProfilePersonalInfo)) {
-      existingPersonalInfo = persistedProfilePersonalInfo;
-    }
-    existingStudentData = toRecord(existingStudentRows?.[0]?.student_data);
-  }
-
-  const firstName = asTrimmedString(personalInfoInput.first_name) ?? asTrimmedString(existingPersonalInfo.first_name);
-  const lastName = asTrimmedString(personalInfoInput.last_name) ?? asTrimmedString(existingPersonalInfo.last_name);
-  const derivedFullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-  const fullName =
-    asTrimmedString(personalInfoInput.full_name) ??
-    (derivedFullName.length > 0 ? derivedFullName : asTrimmedString(existingPersonalInfo.full_name));
-  const email =
-    asTrimmedString(context.session_user?.email) ??
-    asTrimmedString(personalInfoInput.email) ??
-    asTrimmedString(existingPersonalInfo.email);
-
-  const profilePersonalInfo: Record<string, unknown> = {
-    ...existingPersonalInfo
-  };
-  if (firstName) profilePersonalInfo.first_name = firstName;
-  if (lastName) profilePersonalInfo.last_name = lastName;
-  if (fullName) profilePersonalInfo.full_name = fullName;
-  if (email) profilePersonalInfo.email = email;
-
-  const hasAvatarFileRefInput = hasOwn(personalInfoInput, "avatar_file_ref") || hasOwn(personalInfoInput, "avatarFileRef");
-  if (hasAvatarFileRefInput) {
-    const rawAvatarFileRef = personalInfoInput.avatar_file_ref ?? personalInfoInput.avatarFileRef;
-    if (rawAvatarFileRef === null) {
-      delete profilePersonalInfo.avatar_file_ref;
-      delete profilePersonalInfo.avatar_url;
-    } else {
-      const rawAvatarFileRefRecord = toRecord(rawAvatarFileRef);
-      const parsedAvatarFileRef = parseAvatarFileRef(rawAvatarFileRef);
-      if (!parsedAvatarFileRef) return badRequest("invalid_avatar_file_ref");
-      profilePersonalInfo.avatar_file_ref = {
-        ...rawAvatarFileRefRecord,
-        bucket: parsedAvatarFileRef.bucket,
-        path: parsedAvatarFileRef.path
-      };
-    }
-  }
-
-  const hasTargetRolesInput = Object.prototype.hasOwnProperty.call(studentDataInput, "target_roles");
-  const hasTargetCompaniesInput = Object.prototype.hasOwnProperty.call(studentDataInput, "target_companies");
-
-  let targetRoles = hasTargetRolesInput
-    ? extractTargetRoleNames(studentDataInput)
-    : extractTargetRoleNames(existingStudentData);
-  let targetCompanies = hasTargetCompaniesInput
-    ? extractTargetCompanyNames(studentDataInput)
-    : extractTargetCompanyNames(existingStudentData);
-
-  let rolesToInsert: string[] = [];
-  let companiesToInsert: string[] = [];
-
-  if (supabase && hasTargetRolesInput) {
-    const { data: roleRows } = (await supabase
-      .from("job_roles")
-      .select("role_name")
-      .order("role_name", { ascending: true })) as { data: RoleRow[] | null };
-
-    const existingRoleOptions = buildOptionList(
-      (roleRows ?? []).map((row) => row.role_name ?? ""),
-      []
-    );
-    const resolved = resolveOptionSelections(targetRoles, existingRoleOptions);
-    targetRoles = resolved.resolvedSelections;
-    rolesToInsert = resolved.newEntries;
-  }
-
-  if (supabase && hasTargetCompaniesInput) {
-    const { data: companyRows } = (await supabase
-      .from("companies")
-      .select("company_name")
-      .order("company_name", { ascending: true })) as { data: CompanyRow[] | null };
-
-    const existingCompanyOptions = buildOptionList(
-      (companyRows ?? []).map((row) => row.company_name ?? ""),
-      []
-    );
-    const resolved = resolveOptionSelections(targetCompanies, existingCompanyOptions);
-    targetCompanies = resolved.resolvedSelections;
-    companiesToInsert = resolved.newEntries;
-  }
-
-  const studentData: Record<string, unknown> = {
-    ...existingStudentData,
-    ...studentDataInput,
-    profile_links: hasOwn(studentDataInput, "profile_links")
-      ? mergeProfileLinks({
-          existingLinks: toRecord(existingStudentData.profile_links),
-          incomingLinks: toRecord(studentDataInput.profile_links)
-        })
-      : toRecord(existingStudentData.profile_links),
-    artifact_profile_links: hasOwn(studentDataInput, "artifact_profile_links")
-      ? mergeProfileLinks({
-          existingLinks: toRecord(existingStudentData.artifact_profile_links),
-          incomingLinks: toRecord(studentDataInput.artifact_profile_links)
-        })
-      : toRecord(existingStudentData.artifact_profile_links),
-    target_roles: targetRoles,
-    target_companies: targetCompanies
+  const finalize = ({
+    response,
+    outcome,
+    errorCode,
+    persona,
+    orgId,
+    actorIdSurrogate,
+    details,
+    sentryEventId
+  }: {
+    response: Response;
+    outcome: ObsOutcome;
+    errorCode?: string;
+    persona?: string;
+    orgId?: string;
+    actorIdSurrogate?: string;
+    details?: Record<string, unknown>;
+    sentryEventId?: string;
+  }) => {
+    attachRequestIdHeader(response, obs.requestId);
+    obs.recordResult({
+      statusCode: response.status,
+      eventName: "student.profile_save.result",
+      outcome,
+      errorCode,
+      persona,
+      orgId,
+      actorIdSurrogate,
+      sentryEventId,
+      details
+    });
+    return response;
   };
 
-  if (supabase) {
-    const { error: profileUpsertError } = (await supabase.from("profiles").upsert(
-      {
-        id: context.user_id,
-        role: "student",
-        personal_info: profilePersonalInfo
-      },
-      { onConflict: "id" }
-    )) as { error: unknown };
-    if (profileUpsertError) return badRequest("profile_save_failed");
-
-    const { error: studentUpsertError } = (await supabase.from("students").upsert(
-      {
-        profile_id: context.user_id,
-        student_data: studentData
-      },
-      { onConflict: "profile_id" }
-    )) as { error: unknown };
-    if (studentUpsertError) return badRequest("student_profile_save_failed");
-
-    if (rolesToInsert.length > 0) {
-      const { error: roleUpsertError } = (await supabase.from("job_roles").upsert(
-        rolesToInsert.map((roleName) => ({ role_name: roleName })),
-        { onConflict: "role_name_normalized" }
-      )) as { error: unknown };
-      if (roleUpsertError) return badRequest("role_option_save_failed");
-
-      await notifyOnNewRolesForMapping({
-        supabase,
-        roleNames: rolesToInsert,
-        detectedByProfileId: context.user_id,
-        sourceFlow: "student_profile_update",
+  try {
+    const context = await getAuthContext();
+    const persona = context.persona;
+    const orgId = asTrimmedString(context.org_id) ?? undefined;
+    const actorIdSurrogate = toActorSurrogate(context.user_id);
+    if (!hasPersona(context, ["student"], { requireOnboarding: false })) {
+      const response = forbidden();
+      recordProductMetric(obs, "student.profile_saved.failed", {
+        outcome: "handled_failure",
+        statusCode: response.status,
+        persona,
+        orgId,
+        actorIdSurrogate,
+        errorCode: "forbidden"
+      });
+      return finalize({
+        response,
+        outcome: "handled_failure",
+        errorCode: "forbidden",
+        persona,
+        orgId,
+        actorIdSurrogate
       });
     }
 
-    if (companiesToInsert.length > 0) {
-      const { error: companyUpsertError } = (await supabase.from("companies").upsert(
-        companiesToInsert.map((companyName) => ({ company_name: companyName })),
-        { onConflict: "company_name_normalized" }
-      )) as { error: unknown };
-      if (companyUpsertError) return badRequest("company_option_save_failed");
+    const payload = await req.json().catch(() => null);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      const response = badRequest("invalid_payload");
+      recordProductMetric(obs, "student.profile_saved.failed", {
+        outcome: "handled_failure",
+        statusCode: response.status,
+        persona,
+        orgId,
+        actorIdSurrogate,
+        errorCode: "invalid_payload"
+      });
+      return finalize({
+        response,
+        outcome: "handled_failure",
+        errorCode: "invalid_payload",
+        persona,
+        orgId,
+        actorIdSurrogate
+      });
     }
+
+    const payloadRecord = toRecord(payload);
+    const personalInfoInput = toRecord(payloadRecord.personal_info);
+    const studentDataInput = toRecord(payloadRecord.student_data);
+    let existingPersonalInfo = toRecord(context.profile?.personal_info);
+    let existingStudentData: Record<string, unknown> = {};
+
+    const supabase = await getSupabaseServerClient();
+    if (supabase) {
+      const [{ data: existingProfileRows }, { data: existingStudentRows }] = (await Promise.all([
+        supabase.from("profiles").select("personal_info").eq("id", context.user_id).limit(1),
+        supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
+      ])) as [{ data: ProfilePersonalInfoRow[] | null }, { data: StudentRow[] | null }];
+
+      const persistedProfilePersonalInfo = toRecord(existingProfileRows?.[0]?.personal_info);
+      if (isNonEmptyRecord(persistedProfilePersonalInfo)) {
+        existingPersonalInfo = persistedProfilePersonalInfo;
+      }
+      existingStudentData = toRecord(existingStudentRows?.[0]?.student_data);
+    }
+
+    const firstName = asTrimmedString(personalInfoInput.first_name) ?? asTrimmedString(existingPersonalInfo.first_name);
+    const lastName = asTrimmedString(personalInfoInput.last_name) ?? asTrimmedString(existingPersonalInfo.last_name);
+    const derivedFullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+    const fullName =
+      asTrimmedString(personalInfoInput.full_name) ??
+      (derivedFullName.length > 0 ? derivedFullName : asTrimmedString(existingPersonalInfo.full_name));
+    const email =
+      asTrimmedString(context.session_user?.email) ??
+      asTrimmedString(personalInfoInput.email) ??
+      asTrimmedString(existingPersonalInfo.email);
+
+    const profilePersonalInfo: Record<string, unknown> = {
+      ...existingPersonalInfo
+    };
+    if (firstName) profilePersonalInfo.first_name = firstName;
+    if (lastName) profilePersonalInfo.last_name = lastName;
+    if (fullName) profilePersonalInfo.full_name = fullName;
+    if (email) profilePersonalInfo.email = email;
+
+    const hasAvatarFileRefInput = hasOwn(personalInfoInput, "avatar_file_ref") || hasOwn(personalInfoInput, "avatarFileRef");
+    if (hasAvatarFileRefInput) {
+      const rawAvatarFileRef = personalInfoInput.avatar_file_ref ?? personalInfoInput.avatarFileRef;
+      if (rawAvatarFileRef === null) {
+        delete profilePersonalInfo.avatar_file_ref;
+        delete profilePersonalInfo.avatar_url;
+      } else {
+        const rawAvatarFileRefRecord = toRecord(rawAvatarFileRef);
+        const parsedAvatarFileRef = parseAvatarFileRef(rawAvatarFileRef);
+        if (!parsedAvatarFileRef) {
+          const response = badRequest("invalid_avatar_file_ref");
+          recordProductMetric(obs, "student.profile_saved.failed", {
+            outcome: "handled_failure",
+            statusCode: response.status,
+            persona,
+            orgId,
+            actorIdSurrogate,
+            errorCode: "invalid_avatar_file_ref"
+          });
+          return finalize({
+            response,
+            outcome: "handled_failure",
+            errorCode: "invalid_avatar_file_ref",
+            persona,
+            orgId,
+            actorIdSurrogate
+          });
+        }
+        profilePersonalInfo.avatar_file_ref = {
+          ...rawAvatarFileRefRecord,
+          bucket: parsedAvatarFileRef.bucket,
+          path: parsedAvatarFileRef.path
+        };
+      }
+    }
+
+    const hasTargetRolesInput = Object.prototype.hasOwnProperty.call(studentDataInput, "target_roles");
+    const hasTargetCompaniesInput = Object.prototype.hasOwnProperty.call(studentDataInput, "target_companies");
+
+    let targetRoles = hasTargetRolesInput
+      ? extractTargetRoleNames(studentDataInput)
+      : extractTargetRoleNames(existingStudentData);
+    let targetCompanies = hasTargetCompaniesInput
+      ? extractTargetCompanyNames(studentDataInput)
+      : extractTargetCompanyNames(existingStudentData);
+
+    let rolesToInsert: string[] = [];
+    let companiesToInsert: string[] = [];
+
+    if (supabase && hasTargetRolesInput) {
+      const { data: roleRows } = (await supabase
+        .from("job_roles")
+        .select("role_name")
+        .order("role_name", { ascending: true })) as { data: RoleRow[] | null };
+
+      const existingRoleOptions = buildOptionList(
+        (roleRows ?? []).map((row) => row.role_name ?? ""),
+        []
+      );
+      const resolved = resolveOptionSelections(targetRoles, existingRoleOptions);
+      targetRoles = resolved.resolvedSelections;
+      rolesToInsert = resolved.newEntries;
+    }
+
+    if (supabase && hasTargetCompaniesInput) {
+      const { data: companyRows } = (await supabase
+        .from("companies")
+        .select("company_name")
+        .order("company_name", { ascending: true })) as { data: CompanyRow[] | null };
+
+      const existingCompanyOptions = buildOptionList(
+        (companyRows ?? []).map((row) => row.company_name ?? ""),
+        []
+      );
+      const resolved = resolveOptionSelections(targetCompanies, existingCompanyOptions);
+      targetCompanies = resolved.resolvedSelections;
+      companiesToInsert = resolved.newEntries;
+    }
+
+    const studentData: Record<string, unknown> = {
+      ...existingStudentData,
+      ...studentDataInput,
+      profile_links: hasOwn(studentDataInput, "profile_links")
+        ? mergeProfileLinks({
+            existingLinks: toRecord(existingStudentData.profile_links),
+            incomingLinks: toRecord(studentDataInput.profile_links)
+          })
+        : toRecord(existingStudentData.profile_links),
+      artifact_profile_links: hasOwn(studentDataInput, "artifact_profile_links")
+        ? mergeProfileLinks({
+            existingLinks: toRecord(existingStudentData.artifact_profile_links),
+            incomingLinks: toRecord(studentDataInput.artifact_profile_links)
+          })
+        : toRecord(existingStudentData.artifact_profile_links),
+      target_roles: targetRoles,
+      target_companies: targetCompanies
+    };
+
+    if (supabase) {
+      const { error: profileUpsertError } = (await supabase.from("profiles").upsert(
+        {
+          id: context.user_id,
+          role: "student",
+          personal_info: profilePersonalInfo
+        },
+        { onConflict: "id" }
+      )) as { error: unknown };
+      if (profileUpsertError) {
+        const response = badRequest("profile_save_failed");
+        recordProductMetric(obs, "student.profile_saved.failed", {
+          outcome: "handled_failure",
+          statusCode: response.status,
+          persona,
+          orgId,
+          actorIdSurrogate,
+          errorCode: "profile_save_failed"
+        });
+        return finalize({
+          response,
+          outcome: "handled_failure",
+          errorCode: "profile_save_failed",
+          persona,
+          orgId,
+          actorIdSurrogate
+        });
+      }
+
+      const { error: studentUpsertError } = (await supabase.from("students").upsert(
+        {
+          profile_id: context.user_id,
+          student_data: studentData
+        },
+        { onConflict: "profile_id" }
+      )) as { error: unknown };
+      if (studentUpsertError) {
+        const response = badRequest("student_profile_save_failed");
+        recordProductMetric(obs, "student.profile_saved.failed", {
+          outcome: "handled_failure",
+          statusCode: response.status,
+          persona,
+          orgId,
+          actorIdSurrogate,
+          errorCode: "student_profile_save_failed"
+        });
+        return finalize({
+          response,
+          outcome: "handled_failure",
+          errorCode: "student_profile_save_failed",
+          persona,
+          orgId,
+          actorIdSurrogate
+        });
+      }
+
+      if (rolesToInsert.length > 0) {
+        const { error: roleUpsertError } = (await supabase.from("job_roles").upsert(
+          rolesToInsert.map((roleName) => ({ role_name: roleName })),
+          { onConflict: "role_name_normalized" }
+        )) as { error: unknown };
+        if (roleUpsertError) {
+          const response = badRequest("role_option_save_failed");
+          recordProductMetric(obs, "student.profile_saved.failed", {
+            outcome: "handled_failure",
+            statusCode: response.status,
+            persona,
+            orgId,
+            actorIdSurrogate,
+            errorCode: "role_option_save_failed"
+          });
+          return finalize({
+            response,
+            outcome: "handled_failure",
+            errorCode: "role_option_save_failed",
+            persona,
+            orgId,
+            actorIdSurrogate
+          });
+        }
+
+        await notifyOnNewRolesForMapping({
+          supabase,
+          roleNames: rolesToInsert,
+          detectedByProfileId: context.user_id,
+          sourceFlow: "student_profile_update",
+        });
+      }
+
+      if (companiesToInsert.length > 0) {
+        const { error: companyUpsertError } = (await supabase.from("companies").upsert(
+          companiesToInsert.map((companyName) => ({ company_name: companyName })),
+          { onConflict: "company_name_normalized" }
+        )) as { error: unknown };
+        if (companyUpsertError) {
+          const response = badRequest("company_option_save_failed");
+          recordProductMetric(obs, "student.profile_saved.failed", {
+            outcome: "handled_failure",
+            statusCode: response.status,
+            persona,
+            orgId,
+            actorIdSurrogate,
+            errorCode: "company_option_save_failed"
+          });
+          return finalize({
+            response,
+            outcome: "handled_failure",
+            errorCode: "company_option_save_failed",
+            persona,
+            orgId,
+            actorIdSurrogate
+          });
+        }
+      }
+    }
+
+    const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, profilePersonalInfo);
+    const completionFields = ["first_name", "last_name", "full_name", "email"];
+    const completedFieldCount = completionFields.filter((key) => asTrimmedString(profilePersonalInfo[key]) !== null).length;
+    const profileCompletenessPct = Math.round((completedFieldCount / completionFields.length) * 100);
+    const changedSections = Object.keys(payloadRecord).sort();
+
+    const response = ok({
+      resource: "student_profile",
+      profile: {
+        id: context.user_id,
+        personal_info: hydratedProfilePersonalInfo
+      },
+      student_data: studentData,
+      status: "saved",
+      session_source: context.session_source ?? "none"
+    });
+
+    recordProductMetric(obs, "student.profile_saved", {
+      outcome: "success",
+      statusCode: response.status,
+      persona,
+      orgId,
+      actorIdSurrogate,
+      details: {
+        profile_completeness_pct: profileCompletenessPct,
+        changed_sections: changedSections
+      }
+    });
+
+    return finalize({
+      response,
+      outcome: "success",
+      persona,
+      orgId,
+      actorIdSurrogate,
+      details: {
+        profile_completeness_pct: profileCompletenessPct,
+        changed_sections: changedSections
+      }
+    });
+  } catch (error) {
+    const sentryEventId = obs.recordUnexpected({
+      eventName: "student.profile_save.unexpected",
+      error,
+      persona: "student",
+      errorCode: "unexpected_exception"
+    });
+    const response = Response.json({ ok: false, error: "unexpected_exception" }, { status: 500 });
+    recordProductMetric(obs, "student.profile_saved.failed", {
+      outcome: "unexpected_failure",
+      statusCode: response.status,
+      persona: "student",
+      errorCode: "unexpected_exception",
+      sentryEventId
+    });
+    return finalize({
+      response,
+      outcome: "unexpected_failure",
+      errorCode: "unexpected_exception",
+      persona: "student",
+      sentryEventId
+    });
   }
-
-  const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, profilePersonalInfo);
-
-  return ok({
-    resource: "student_profile",
-    profile: {
-      id: context.user_id,
-      personal_info: hydratedProfilePersonalInfo
-    },
-    student_data: studentData,
-    status: "saved",
-    session_source: context.session_source ?? "none"
-  });
 }

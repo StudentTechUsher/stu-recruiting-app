@@ -10,6 +10,20 @@ const {
   hasPersonaMock: vi.fn(),
   listRecruiterReviewCandidatesMock: vi.fn(),
 }));
+let infoSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+const getEventNames = (spy: ReturnType<typeof vi.spyOn>) =>
+  spy.mock.calls
+    .map((entry: unknown[]) => {
+      try {
+        const payload = JSON.parse(String(entry[0])) as { event_name?: string };
+        return payload.event_name;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value: unknown): value is string => typeof value === "string");
 
 vi.mock("@/lib/auth-context", () => ({
   getAuthContext: getAuthContextMock,
@@ -26,6 +40,9 @@ vi.mock("@/lib/recruiter/review-candidates", () => ({
 describe("recruiter candidates route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     getAuthContextMock.mockResolvedValue({
       authenticated: true,
       user_id: "recruiter-1",
@@ -71,6 +88,18 @@ describe("recruiter candidates route", () => {
     expect(payload.data.resource).toBe("review_candidates");
     expect(payload.data.total).toBe(1);
     expect(payload.data.candidates[0].candidate_key).toBe("greenhouse:app-1");
+    expect(getEventNames(infoSpy)).toContain("recruiter.candidate_search_performed");
+  });
+
+  it("emits handled failure metric for unauthorized search access", async () => {
+    hasPersonaMock.mockReturnValue(false);
+
+    const response = await GET(new Request("http://localhost/api/recruiter/candidates"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ ok: false, error: "forbidden" });
+    expect(getEventNames(warnSpy)).toContain("recruiter.candidate_search_performed.failed");
   });
 
   it("validates candidate action payload", async () => {
