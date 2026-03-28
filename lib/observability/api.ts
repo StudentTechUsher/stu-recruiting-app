@@ -180,6 +180,26 @@ const toSentryLevel = (severity: ObsSeverity): Sentry.SeverityLevel => {
   return "info";
 };
 
+const toSentryLogMethod = (severity: ObsSeverity): "debug" | "info" | "warn" | "error" | "fatal" => {
+  if (severity === "fatal") return "fatal";
+  if (severity === "error") return "error";
+  if (severity === "warn") return "warn";
+  if (severity === "debug") return "debug";
+  return "info";
+};
+
+const emitSentryLog = (event: ObsEvent) => {
+  const logger = (Sentry as typeof Sentry & {
+    logger?: Partial<Record<"debug" | "info" | "warn" | "error" | "fatal", (message: string, attributes?: Record<string, unknown>) => void>>;
+  }).logger;
+
+  if (!logger) return;
+  const method = toSentryLogMethod(event.severity);
+  const logFn = logger[method];
+  if (typeof logFn !== "function") return;
+  logFn(event.event_name, event as Record<string, unknown>);
+};
+
 const emit = (event: ObsEvent): string | undefined => {
   if (!resolveSentryEnabled("server")) return undefined;
   const level = toSentryLevel(event.severity);
@@ -202,6 +222,8 @@ const emit = (event: ObsEvent): string | undefined => {
   if (event.event_name.startsWith("student.") || event.event_name.startsWith("recruiter.") || event.event_name.startsWith("auth.")) {
     Sentry.metrics.count("stu.product.events_total", 1, { attributes: metricAttributes });
   }
+
+  emitSentryLog(event);
 
   return Sentry.withScope((scope) => {
     scope.setLevel(level);

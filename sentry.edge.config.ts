@@ -8,6 +8,7 @@ import {
   resolveSentryDsn,
   resolveSentryEnabled,
   resolveSentryEnvironment,
+  resolveSentryLogsEnabled,
   resolveSentryRelease,
   resolveTracesSampler,
   scrubSentryBreadcrumb,
@@ -17,6 +18,7 @@ import {
 Sentry.init({
   dsn: resolveSentryDsn("edge"),
   enabled: resolveSentryEnabled("edge"),
+  enableLogs: resolveSentryLogsEnabled("edge"),
   environment: resolveSentryEnvironment(),
   release: resolveSentryRelease(),
   tracesSampler: resolveTracesSampler(),

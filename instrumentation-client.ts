@@ -7,6 +7,7 @@ import {
   resolveSentryDsn,
   resolveSentryEnabled,
   resolveSentryEnvironment,
+  resolveSentryLogsEnabled,
   resolveSentryRelease,
   resolveTracesSampler,
   scrubSentryBreadcrumb,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/observability/sentry";
 
 const enableReplay = process.env.NEXT_PUBLIC_SENTRY_ENABLE_REPLAY === "true";
-const enableLogs = process.env.NEXT_PUBLIC_SENTRY_ENABLE_LOGS === "true";
+const enableLogs = resolveSentryLogsEnabled("client");
 
 Sentry.init({
   dsn: resolveSentryDsn("client"),

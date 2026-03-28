@@ -10,6 +10,11 @@ const {
   setLevelMock,
   metricsCountMock,
   metricsDistributionMock,
+  loggerInfoMock,
+  loggerWarnMock,
+  loggerErrorMock,
+  loggerDebugMock,
+  loggerFatalMock,
 } = vi.hoisted(() => ({
   captureApiUnexpectedExceptionMock: vi.fn(),
   resolveSentryEnabledMock: vi.fn(),
@@ -20,6 +25,11 @@ const {
   setLevelMock: vi.fn(),
   metricsCountMock: vi.fn(),
   metricsDistributionMock: vi.fn(),
+  loggerInfoMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
+  loggerDebugMock: vi.fn(),
+  loggerFatalMock: vi.fn(),
 }));
 
 vi.mock("@/lib/observability/sentry", () => ({
@@ -30,6 +40,13 @@ vi.mock("@/lib/observability/sentry", () => ({
 vi.mock("@sentry/nextjs", () => ({
   captureMessage: captureMessageMock,
   withScope: withScopeMock,
+  logger: {
+    info: loggerInfoMock,
+    warn: loggerWarnMock,
+    error: loggerErrorMock,
+    debug: loggerDebugMock,
+    fatal: loggerFatalMock,
+  },
   metrics: {
     count: metricsCountMock,
     distribution: metricsDistributionMock,
@@ -104,6 +121,14 @@ describe("observability api helpers", () => {
     });
 
     expect(captureMessageMock).toHaveBeenCalledWith("student.profile_saved", "info");
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      "student.profile_saved",
+      expect.objectContaining({
+        request_id: "req-profile-1",
+        trace_id: TRACE_ID,
+        persona: "student",
+      })
+    );
     expect(metricsCountMock).toHaveBeenCalledWith(
       "stu.obs.events_total",
       1,
@@ -147,6 +172,13 @@ describe("observability api helpers", () => {
 
     expect(sentryEventId).toBe("sentry-evt-1");
     expect(captureMessageMock).toHaveBeenCalledWith("student.profile_save.unexpected", "error");
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      "student.profile_save.unexpected",
+      expect.objectContaining({
+        outcome: "unexpected_failure",
+        sentry_event_id: "sentry-evt-1",
+      })
+    );
     expect(metricsCountMock).toHaveBeenCalledWith(
       "stu.obs.events_total",
       1,

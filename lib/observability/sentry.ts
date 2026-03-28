@@ -66,6 +66,14 @@ const parseOptionalEnv = (value: string | undefined): string | undefined => {
   return normalized.length > 0 ? normalized : undefined;
 };
 
+const parseBooleanEnv = (value: string | undefined): boolean | undefined => {
+  const normalized = parseOptionalEnv(value)?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+  return undefined;
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -172,6 +180,19 @@ export const resolveSentryEnvironment = (): string => {
 export const resolveSentryRelease = (): string | undefined => parseOptionalEnv(process.env.SENTRY_RELEASE);
 
 export const resolveSentryEnabled = (target: RuntimeTarget): boolean => Boolean(resolveSentryDsn(target));
+
+export const resolveSentryLogsEnabled = (target: RuntimeTarget): boolean => {
+  if (!resolveSentryEnabled(target)) return false;
+
+  const serverSetting = parseBooleanEnv(process.env.SENTRY_ENABLE_LOGS);
+  const clientSetting = parseBooleanEnv(process.env.NEXT_PUBLIC_SENTRY_ENABLE_LOGS);
+
+  if (target === "client") {
+    return clientSetting ?? serverSetting ?? true;
+  }
+
+  return serverSetting ?? clientSetting ?? true;
+};
 
 export const resolveTracesSampler = () => {
   const isProd = resolveSentryEnvironment() === "production";
