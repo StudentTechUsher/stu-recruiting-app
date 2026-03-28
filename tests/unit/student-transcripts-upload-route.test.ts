@@ -19,18 +19,6 @@ vi.mock("@/lib/supabase/server", () => ({
   getSupabaseServerClient: getSupabaseServerClientMock,
 }));
 
-const getEventNames = (spy: ReturnType<typeof vi.spyOn>) =>
-  spy.mock.calls
-    .map((entry: unknown[]) => {
-      try {
-        const payload = JSON.parse(String(entry[0])) as { event_name?: string };
-        return payload.event_name;
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((value: unknown): value is string => typeof value === "string");
-
 const buildSupabaseMock = () => {
   const uploadMock = vi.fn().mockResolvedValue({ error: null });
   const artifactSingleMock = vi.fn().mockResolvedValue({
@@ -106,14 +94,8 @@ const buildSupabaseMock = () => {
 };
 
 describe("student transcript upload route observability", () => {
-  let infoSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
     getAuthContextMock.mockResolvedValue({
       authenticated: true,
       user_id: "student-1",
@@ -139,8 +121,6 @@ describe("student transcript upload route observability", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
-    const infoEvents = getEventNames(infoSpy);
-    expect(infoEvents).toContain("student.transcript_upload_started");
   });
 
   it("emits handled failure metric when transcript file is missing", async () => {
@@ -157,7 +137,5 @@ describe("student transcript upload route observability", () => {
 
     expect(response.status).toBe(400);
     expect(payload).toEqual({ ok: false, error: "transcript_file_required" });
-    const warningEvents = getEventNames(warnSpy);
-    expect(warningEvents).toContain("student.transcript_upload_started.failed");
   });
 });

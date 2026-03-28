@@ -1,11 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { captureApiUnexpectedExceptionMock } = vi.hoisted(() => ({
+const {
+  captureApiUnexpectedExceptionMock,
+  resolveSentryEnabledMock,
+  captureMessageMock,
+  withScopeMock,
+  setTagMock,
+  setContextMock,
+  setLevelMock,
+} = vi.hoisted(() => ({
   captureApiUnexpectedExceptionMock: vi.fn(),
+  resolveSentryEnabledMock: vi.fn(),
+  captureMessageMock: vi.fn(),
+  withScopeMock: vi.fn(),
+  setTagMock: vi.fn(),
+  setContextMock: vi.fn(),
+  setLevelMock: vi.fn(),
 }));
 
 vi.mock("@/lib/observability/sentry", () => ({
   captureApiUnexpectedException: captureApiUnexpectedExceptionMock,
+  resolveSentryEnabled: resolveSentryEnabledMock,
+}));
+
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: captureMessageMock,
+  withScope: withScopeMock,
 }));
 
 import {
@@ -22,6 +42,15 @@ const SPAN_ID = "0123456789abcdef";
 describe("observability api helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveSentryEnabledMock.mockReturnValue(true);
+    captureMessageMock.mockReturnValue("sentry-msg-1");
+    withScopeMock.mockImplementation((callback: (scope: unknown) => unknown) =>
+      callback({
+        setTag: setTagMock,
+        setContext: setContextMock,
+        setLevel: setLevelMock,
+      })
+    );
   });
 
   it("resolves request_id and trace_id from incoming headers", () => {
@@ -44,7 +73,6 @@ describe("observability api helpers", () => {
   });
 
   it("emits product metrics with correlation fields", () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const context = createApiObsContext({
       request: new Request("http://localhost/api/student/profile", {
         method: "POST",
@@ -67,18 +95,21 @@ describe("observability api helpers", () => {
       },
     });
 
-    expect(infoSpy).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(String(infoSpy.mock.calls[0]?.[0])) as Record<string, unknown>;
-    expect(payload.event_name).toBe("student.profile_saved");
-    expect(payload.request_id).toBe("req-profile-1");
-    expect(payload.trace_id).toBe(TRACE_ID);
-    expect(payload.route).toBe("/api/student/profile");
-    expect(payload.persona).toBe("student");
-    expect(payload.org_id).toBe("org-1");
+    expect(captureMessageMock).toHaveBeenCalledWith("student.profile_saved", "info");
+    expect(setTagMock).toHaveBeenCalledWith("request_id", "req-profile-1");
+    expect(setTagMock).toHaveBeenCalledWith("trace_id", TRACE_ID);
+    expect(setTagMock).toHaveBeenCalledWith("persona", "student");
+    expect(setTagMock).toHaveBeenCalledWith("org_id", "org-1");
+    expect(setContextMock).toHaveBeenCalledWith(
+      "observability_event",
+      expect.objectContaining({
+        event_name: "student.profile_saved",
+        route: "/api/student/profile",
+      })
+    );
   });
 
   it("attaches sentry_event_id for unexpected exceptions", () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     captureApiUnexpectedExceptionMock.mockReturnValue("sentry-evt-1");
 
     const context = createApiObsContext({
@@ -97,11 +128,15 @@ describe("observability api helpers", () => {
     });
 
     expect(sentryEventId).toBe("sentry-evt-1");
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(String(errorSpy.mock.calls[0]?.[0])) as Record<string, unknown>;
-    expect(payload.event_name).toBe("student.profile_save.unexpected");
-    expect(payload.sentry_event_id).toBe("sentry-evt-1");
-    expect(payload.error_code).toBe("unexpected_exception");
-    expect(payload.outcome).toBe("unexpected_failure");
+    expect(captureMessageMock).toHaveBeenCalledWith("student.profile_save.unexpected", "error");
+    expect(setContextMock).toHaveBeenCalledWith(
+      "observability_event",
+      expect.objectContaining({
+        event_name: "student.profile_save.unexpected",
+        sentry_event_id: "sentry-evt-1",
+        error_code: "unexpected_exception",
+        outcome: "unexpected_failure",
+      })
+    );
   });
 });

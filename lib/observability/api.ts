@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { captureApiUnexpectedException } from "@/lib/observability/sentry";
+import * as Sentry from "@sentry/nextjs";
+import { captureApiUnexpectedException, resolveSentryEnabled } from "@/lib/observability/sentry";
 
 export type ObsOutcome =
   | "start"
@@ -171,21 +172,37 @@ const resolveTraceId = (request: Request): string | undefined => {
   );
 };
 
-const emit = (event: ObsEvent) => {
-  const payload = JSON.stringify(event);
-  if (event.severity === "error" || event.severity === "fatal") {
-    console.error(payload);
-    return;
-  }
-  if (event.severity === "warn") {
-    console.warn(payload);
-    return;
-  }
-  if (event.severity === "debug") {
-    console.debug(payload);
-    return;
-  }
-  console.info(payload);
+const toSentryLevel = (severity: ObsSeverity): Sentry.SeverityLevel => {
+  if (severity === "fatal") return "fatal";
+  if (severity === "error") return "error";
+  if (severity === "warn") return "warning";
+  if (severity === "debug") return "debug";
+  return "info";
+};
+
+const emit = (event: ObsEvent): string | undefined => {
+  if (!resolveSentryEnabled("server")) return undefined;
+  const level = toSentryLevel(event.severity);
+
+  return Sentry.withScope((scope) => {
+    scope.setLevel(level);
+    scope.setTag("event_name", event.event_name);
+    scope.setTag("service", event.service);
+    scope.setTag("route", event.route_template);
+    scope.setTag("component", event.component);
+    scope.setTag("operation", event.operation);
+    scope.setTag("outcome", event.outcome);
+    scope.setTag("request_id", event.request_id);
+
+    if (event.trace_id) scope.setTag("trace_id", event.trace_id);
+    if (event.persona) scope.setTag("persona", event.persona);
+    if (event.org_id) scope.setTag("org_id", event.org_id);
+    if (event.provider) scope.setTag("provider", event.provider);
+    if (event.error_code) scope.setTag("error_code", event.error_code);
+
+    scope.setContext("observability_event", event);
+    return Sentry.captureMessage(event.event_name, level);
+  });
 };
 
 const toErrorDetails = (error: unknown) => {
