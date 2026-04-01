@@ -24,7 +24,10 @@ type MagicLinkLoginScreenProps = {
   errorMessages?: Record<string, string>;
   initialError?: string | null;
   additionalPayload?: Record<string, string>;
+  googleOAuthPath?: string | null;
 };
+
+type SignInMethod = "magic_link" | "google";
 
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
@@ -56,14 +59,17 @@ export function MagicLinkLoginScreen({
   loadingLabel,
   errorMessages = {},
   initialError = null,
-  additionalPayload = {}
+  additionalPayload = {},
+  googleOAuthPath = null,
 }: MagicLinkLoginScreenProps) {
+  const hasGoogleOAuth = Boolean(googleOAuthPath);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [lastRequestedEmail, setLastRequestedEmail] = useState("");
+  const [signInMethod, setSignInMethod] = useState<SignInMethod | null>(hasGoogleOAuth ? null : "magic_link");
   const normalizedEmail = email.trim().toLowerCase();
   const isCooldownActive = cooldownSeconds > 0 && normalizedEmail !== "" && normalizedEmail === lastRequestedEmail;
 
@@ -151,28 +157,82 @@ export function MagicLinkLoginScreen({
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a]">{heading}</h1>
         <p className="mt-2 text-sm text-[#3c5f52]">{description}</p>
 
-        <form className="mt-5 space-y-4" onSubmit={onSubmit}>
-          <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
-            {emailLabel}
-            <input
-              type="email"
-              autoComplete="email"
-              className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
-              placeholder={emailPlaceholder}
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
+        {hasGoogleOAuth ? (
+          <div className="mt-5 rounded-xl border border-[#d6e1db] bg-[#f8fcfa] p-2">
+            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#48695d]">
+              Sign-in method
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSignInMethod("magic_link")}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
+                  signInMethod === "magic_link"
+                    ? "border-emerald-500 bg-emerald-50 text-[#0a1f1a]"
+                    : "border-[#bfd2ca] bg-white text-[#3f6055] hover:bg-[#edf5f1]"
+                }`}
+              >
+                Magic link
+              </button>
+              <button
+                type="button"
+                onClick={() => setSignInMethod("google")}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
+                  signInMethod === "google"
+                    ? "border-emerald-500 bg-emerald-50 text-[#0a1f1a]"
+                    : "border-[#bfd2ca] bg-white text-[#3f6055] hover:bg-[#edf5f1]"
+                }`}
+              >
+                Google
+              </button>
+            </div>
+          </div>
+        ) : null}
 
-          <button
-            type="submit"
-            disabled={loading || isCooldownActive}
-            className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        {(!hasGoogleOAuth || signInMethod === "magic_link") ? (
+          <form className="mt-5 space-y-4" onSubmit={onSubmit}>
+            <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
+              {emailLabel}
+              <input
+                type="email"
+                autoComplete="email"
+                className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
+                placeholder={emailPlaceholder}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={loading || isCooldownActive}
+              className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? loadingLabel : isCooldownActive ? `Wait ${cooldownSeconds}s` : submitLabel}
+            </button>
+          </form>
+        ) : null}
+
+        {hasGoogleOAuth && signInMethod === "google" ? (
+          <a
+            href={googleOAuthPath ?? undefined}
+            className="mt-5 inline-flex w-full items-center justify-center gap-3 rounded-xl border border-[#dadce0] bg-white px-3 py-2 text-sm font-semibold text-[#3c4043] shadow-sm transition-colors hover:bg-[#f8f9fa]"
           >
-            {loading ? loadingLabel : isCooldownActive ? `Wait ${cooldownSeconds}s` : submitLabel}
-          </button>
-        </form>
+            <svg
+              aria-hidden="true"
+              width="18"
+              height="18"
+              viewBox="0 0 48 48"
+            >
+              <path fill="#EA4335" d="M24 9.5c3.9 0 7.4 1.3 10.2 4l7.6-7.6C37.3 2 31.1 0 24 0 14.6 0 6.5 5.4 2.6 13.3l8.9 6.9C13.5 13.8 18.3 9.5 24 9.5z" />
+              <path fill="#4285F4" d="M46.1 24.5c0-1.7-.2-3.3-.5-4.8H24v9.1h12.4c-.5 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.5-4.1 6.8-10.1 6.8-17.3z" />
+              <path fill="#FBBC05" d="M11.5 28.2c-.5-1.4-.8-2.8-.8-4.2s.3-2.9.8-4.2l-8.9-6.9C.9 16.2 0 20 0 24s.9 7.8 2.6 11.1l8.9-6.9z" />
+              <path fill="#34A853" d="M24 48c7.1 0 13.1-2.3 17.5-6.3l-7.6-5.9c-2.1 1.4-4.8 2.2-9.9 2.2-5.7 0-10.5-4.3-12.2-10.1l-8.9 6.9C6.5 42.6 14.6 48 24 48z" />
+            </svg>
+            <span>Sign in with Google</span>
+          </a>
+        ) : null}
 
         {error ? <p className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}
         {notice ? <p className="mt-3 text-sm font-medium text-emerald-700">{notice}</p> : null}

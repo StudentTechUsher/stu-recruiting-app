@@ -6,7 +6,7 @@ const upcomingCoachCapabilities = [
   {
     title: "Role + employer targeting",
     detail:
-      "Get coaching that adapts to your selected positions and employers, with practical recommendations you can execute right away."
+      "Get coaching that adapts to your selected roles and employers, with practical recommendations you can execute right away."
   },
   {
     title: "Capability gap prioritization",
@@ -65,7 +65,7 @@ export default function StudentCapabilityCoachPage() {
                 href="/student/targets"
                 className="inline-flex h-10 items-center rounded-xl bg-[#12f987] px-4 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] shadow-[0_16px_30px_-18px_rgba(10,31,26,0.65)] transition-colors hover:bg-[#0ed978]"
               >
-                Open My Positions & Employers
+                Open My Roles & Employers
               </Link>
               <Link
                 href="/student/artifacts?openAddArtifact=true"

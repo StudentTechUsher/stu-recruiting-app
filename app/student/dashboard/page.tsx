@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { CapabilityRadar, type CapabilityRadarAxis } from "@/components/student/CapabilityRadar";
+import { EvidenceTargetRadar, type EvidenceTargetRadarAxis } from "@/components/student/EvidenceTargetRadar";
 
 type VerificationBreakdown = {
   verified: number;
@@ -46,6 +47,31 @@ type DashboardPayload = {
   state: "no_evidence" | "partial_no_verification" | "full_low_trust" | "progressing";
   primary_cta: { label: string; href: string };
   secondary_cta: { label: string; href: string };
+};
+
+type ActiveCapabilityProfile = {
+  capability_profile_id: string;
+  company_id: string;
+  company_label: string;
+  role_id: string;
+  role_label: string;
+  selected_at: string;
+  selection_source: "manual" | "agent_recommended" | "agent_confirmed" | "migrated_legacy";
+  status: "active";
+};
+
+type CapabilityProfileFit = {
+  capability_profile_id: string;
+  company_label: string;
+  role_label: string;
+  axes: EvidenceTargetRadarAxis[];
+  generated_at: string;
+  evidence_freshness_marker: string;
+};
+
+type CapabilityTargetsPayload = {
+  active_capability_profiles: ActiveCapabilityProfile[];
+  fit_by_capability_profile_id: Record<string, CapabilityProfileFit>;
 };
 
 type ProfilePayload = {
@@ -123,8 +149,10 @@ const mapDashboardAxisToRadarAxis = (axis: DashboardAxis): CapabilityRadarAxis =
 
 export default function StudentDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
+  const [isTargetsLoading, setIsTargetsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
+  const [capabilityTargets, setCapabilityTargets] = useState<CapabilityTargetsPayload | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
   const [isDismissingMismatch, setIsDismissingMismatch] = useState(false);
   const [mobileRadarTab, setMobileRadarTab] = useState<RadarTab>("soft");
@@ -167,6 +195,35 @@ export default function StudentDashboardPage() {
     };
 
     void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadTargets = async () => {
+      setIsTargetsLoading(true);
+      try {
+        const response = await fetch("/api/student/capability-profiles", { cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as
+          | { ok: true; data?: CapabilityTargetsPayload }
+          | { ok: false; error?: string }
+          | null;
+        if (!response.ok || !payload || !payload.ok || !payload.data) {
+          throw new Error("capability_targets_load_failed");
+        }
+        if (!active) return;
+        setCapabilityTargets(payload.data);
+      } catch {
+        if (!active) return;
+        setCapabilityTargets(null);
+      } finally {
+        if (active) setIsTargetsLoading(false);
+      }
+    };
+
+    void loadTargets();
     return () => {
       active = false;
     };
@@ -367,7 +424,7 @@ export default function StudentDashboardPage() {
                 }
                 emptyCta={
                   mobileRadarTab === "role"
-                    ? { label: "Select roles", href: "/student/targets" }
+                    ? { label: "Select role targets", href: "/student/targets" }
                     : { label: "Add artifacts", href: "/student/artifacts?openAddArtifact=true" }
                 }
               />
@@ -396,7 +453,7 @@ export default function StudentDashboardPage() {
                       ? "No role capability mapping available yet for selected roles."
                       : "No role-skill evidence linked yet."
                 }
-                emptyCta={{ label: "Select roles", href: "/student/targets" }}
+                emptyCta={{ label: "Select role targets", href: "/student/targets" }}
               />
             </div>
           </article>
@@ -437,7 +494,7 @@ export default function StudentDashboardPage() {
                   Role context
                 </p>
                 <p className="mt-1 text-sm text-[#2f4f44] dark:text-slate-200">
-                  {dashboard.roles.length > 0 ? dashboard.roles.join(", ") : "No selected roles yet"}
+                  {dashboard.roles.length > 0 ? dashboard.roles.join(", ") : "No selected role targets yet"}
                 </p>
                 <p className="mt-2 text-xs text-[#4f6d64] dark:text-slate-400">
                   Evidence count: {dashboard.kpis.evidence_count}
@@ -446,6 +503,62 @@ export default function StudentDashboardPage() {
             ) : null}
           </article>
         </div>
+
+        <article className="mt-6 rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
+          <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">
+            Explanatory view only. It compares target expectations against current evidence coverage by capability axis.
+          </p>
+          {isTargetsLoading ? (
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div className={`${skeletonClass} h-[360px]`} />
+              <div className={`${skeletonClass} h-[360px]`} />
+            </div>
+          ) : (capabilityTargets?.active_capability_profiles?.length ?? 0) > 0 ? (
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              {capabilityTargets?.active_capability_profiles.map((target, index) => {
+                const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
+                return (
+                  <section
+                    key={`target-fit-${target.capability_profile_id}`}
+                    className="rounded-xl border border-[#d2e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900/70"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
+                        {target.role_label} @ {target.company_label}
+                      </p>
+                      <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                        {index === 0 ? "Primary" : "Secondary"}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex min-h-[320px] items-center justify-center">
+                      {fit?.axes && fit.axes.length > 0 ? (
+                        <EvidenceTargetRadar
+                          axes={fit.axes}
+                          ariaLabel={`Evidence vs target for ${target.role_label} at ${target.company_label}`}
+                        />
+                      ) : (
+                        <div className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+                          Fit data is loading. Refresh shortly.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+              <p>No active capability targets selected yet.</p>
+              <Link
+                href="/student/targets"
+                className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
+              >
+                Open My Roles & Employers
+              </Link>
+            </div>
+          )}
+        </article>
       </section>
     </main>
   );

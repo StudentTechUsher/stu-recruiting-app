@@ -1,59 +1,79 @@
-# Student Dashboard (Capability Dashboard) Specification
+# Student Dashboard (Capability Alignment Dashboard) Specification
 
 ## Purpose
-Define Phase 1 student landing behavior and CTA loops that strengthen the same evidence signals recruiters inspect.
+Define candidate landing behavior that emphasizes evidence-backed progress against 1 to 2 selected Capability Profiles.
 
 ## Route and Placement
 | Rule | Requirement |
 | --- | --- |
 | Landing route | Authenticated student default route is `/student/dashboard`. |
-| Primary intent | Show capability signal and trust state derived from evidence. |
-| No dead-end | Dashboard must provide direct CTAs into evidence actions. |
+| Primary intent | Show evidence-backed strengths, gaps, and next actions for active targets. |
+| Focus constraint | Dashboard supports at most two active Capability Profiles at one time. |
+| No dead-end | Dashboard provides direct CTAs to evidence actions, target management, and coaching surfaces. |
 
 ## Dashboard Sections
 | Section | Required content |
 | --- | --- |
-| Radar chart | Soft-skill baseline + union of role-required capabilities (deduped). |
-| KPI strip | Capability coverage, verified evidence share, pending/unverified share, last updated timestamp. |
-| Supporting stat | Optional `evidence_count`, displayed as secondary context only. |
-| Action rail | CTAs for add artifacts, verify artifacts, review Evidence Profile. |
+| Active target header | Display selected Capability Profiles and active target count (`1` or `2`). |
+| Capability evidence view | Show capability coverage and trust breakdown scoped to selected target. |
+| Evidence quality strip | Show strong, limited, and insufficient evidence cues. |
+| Next actions rail | Prioritized coaching actions linked to expected evidence artifacts. |
+| Explainability panel | Why this gap or strength is shown, with evidence references. |
 
-## Radar Contract
+## Dashboard Data Contract
 | Field | Requirement |
 | --- | --- |
-| `capability_id` | Required stable ID from capability model. |
-| `label` | Required axis label. |
-| `axis_type` | Required (`soft_skill` or `role_required`). |
-| `covered` | Required boolean derived from evidence linkage presence. |
-| `supporting_evidence_ids` | Required traceability list. |
-| `verification_breakdown` | Required trust counts for linked evidence. |
+| `active_capability_profiles` | Required list of active target summaries (max 2). |
+| `active_capability_profiles[].capability_profile_id` | Required target ID. |
+| `active_capability_profiles[].company_label` | Required target company display label. |
+| `active_capability_profiles[].role_label` | Required target role label. |
+| `axes[].capability_id` | Required stable capability ID. |
+| `axes[].covered` | Required boolean derived from evidence linkage presence. |
+| `axes[].supporting_evidence_ids` | Required traceability list. |
+| `axes[].verification_breakdown` | Required trust counts. |
+| `axes[].evidence_confidence` | Required confidence class for candidate-facing evidence quality cues. |
 
 ## KPI Definitions
 | KPI | Definition |
 | --- | --- |
-| Capability coverage | `covered_capabilities / total_axes` (displayed as percent). |
-| Verified evidence share | `verified_linked_evidence / total_linked_evidence`. |
-| Pending/unverified share | `(pending + unverified)_linked_evidence / total_linked_evidence`. |
-| Last updated | Most recent `updated_at` across linked evidence records. |
+| Capability evidence coverage | `covered_capabilities / total_target_capabilities` |
+| Verified evidence share | `verified_linked_evidence / total_linked_evidence` |
+| Limited evidence share | `limited_or_insufficient_capabilities / total_target_capabilities` |
+| Last updated | Most recent linked evidence update timestamp |
 
 ## CTA Decision Table
-| Condition | Primary CTA emphasis | Secondary CTA |
+| Condition | Primary CTA | Secondary CTA |
 | --- | --- | --- |
-| No evidence (`coverage = 0`, trust = 0) | Add artifacts | Review Evidence Profile |
-| Partial coverage, no verification (`coverage > 0`, verified share = 0) | Verify artifacts | Add artifacts |
-| Full coverage, low trust (one or more required capabilities with no verified evidence) | Verify high-impact artifacts | Review Evidence Profile |
+| No active target | Select your first Capability Profile | Review Evidence Profile |
+| One active target, no evidence | Add evidence for selected target | Open Capability Selection Agent |
+| Active target with limited evidence | Open Capability Fit Coaching | Verify key evidence |
+| Two active targets with progress | Compare target gaps | Open Capability Fit Coaching |
+
+## Explainability Requirements
+| Requirement | Rule |
+| --- | --- |
+| Evidence traceability | Every strength and gap must link to evidence IDs or explicit no-evidence marker. |
+| Clear language | Use strengths, gaps, trust, and next actions language. Avoid ranking framing. |
+| Tradeoff visibility | If two active targets exist, show tradeoffs in evidence requirements. |
 
 ## Deterministic Low-Data States
-| State | Expected values | Required behavior |
-| --- | --- | --- |
-| `no_evidence` | coverage `0%`, trust `0`, empty radar values | Show empty-but-visible radar + Add artifacts emphasis. |
-| `partial_no_verification` | coverage `>0`, verified share `0` | Show Verify artifacts emphasis. |
-| `full_low_trust` | coverage `100%`, at least one required capability has no verified evidence | Show Verify high-impact artifacts emphasis. |
+| State | Required behavior |
+| --- | --- |
+| `no_target_selected` | Prompt target selection and explain max-2 focus model. |
+| `no_evidence` | Show add-evidence onboarding and keep dashboard structure visible. |
+| `limited_evidence` | Surface verification and artifact improvement actions with rationale. |
+| `progressing` | Show strengths and actionable remaining gaps. |
 
 ## Explicit Constraints
 | Constraint | Rule |
 | --- | --- |
-| Ranking/scoring | Dashboard must not emit candidate score, rank, or hidden prioritization index. |
-| Language guard | Dashboard copy must not imply ranking, match quality, or candidate scoring. |
-| Opaque transforms | Every displayed value must be traceable to linked evidence IDs. |
-| Compatibility | Capability-evidence relationships must match recruiter-visible relationships exactly. |
+| Ranking and score outputs | Dashboard must not emit candidate ranking or opaque score-centric framing. |
+| Hidden transforms | Displayed claims must be traceable to linked evidence and capability profile context. |
+| Over-targeting | Dashboard must not allow more than two active targets. |
+
+## Cross-References
+- `docs/system/capability-derivation.md`
+- `docs/system/evidence-model.md`
+- `docs/features/capability-selection-agent-spec.md`
+- `docs/features/capability-fit-coaching-agent-spec.md`
+- `docs/features/student-evidence-profile.md`

@@ -114,11 +114,49 @@ export async function GET(req: Request) {
     return NextResponse.redirect(toLoginRedirect(req.url, "invalid_magic_link"), 303);
   }
 
-  const profile = await getProfileByUserId(supabase, user.id);
-  const persona = resolvePersonaFromProfileOrUser(profile?.role, user);
   const intendedPersona = resolveMagicLinkIntentFromCookieHeader(req.headers.get("cookie"));
+  let profile = await getProfileByUserId(supabase, user.id);
+  let persona = resolvePersonaFromProfileOrUser(profile?.role, user);
+
+  if (!persona && intendedPersona === "student") {
+    const { error: bootstrapError } = await supabase.auth.updateUser({
+      data: {
+        role: "student",
+        stu_persona: "student",
+      },
+    });
+
+    if (bootstrapError) {
+      console.warn("auth_oauth_student_bootstrap_failed", {
+        reason: "update_user_failed",
+        error: bootstrapError,
+      });
+    } else {
+      try {
+        const refreshed = await supabase.auth.getUser();
+        if (refreshed.data.user) {
+          user = refreshed.data.user;
+        }
+      } catch (refreshError) {
+        console.warn("auth_oauth_student_bootstrap_failed", {
+          reason: "refresh_user_failed",
+          error: refreshError,
+        });
+      }
+
+      profile = await getProfileByUserId(supabase, user.id);
+      persona = resolvePersonaFromProfileOrUser(profile?.role, user);
+      console.info("auth_oauth_student_bootstrap_completed", {
+        resolved_persona: persona,
+      });
+    }
+  }
 
   if (!persona) {
+    console.warn("auth_callback_role_unassigned", {
+      intended_persona: intendedPersona,
+      provider: toTrimmedString((user.app_metadata ?? {}).provider),
+    });
     await safeSignOut(supabase);
     const response = NextResponse.redirect(toLoginRedirect(req.url, "role_unassigned"), 303);
     cookieAccumulator.apply(response);
@@ -128,6 +166,11 @@ export async function GET(req: Request) {
   }
 
   if (intendedPersona && intendedPersona !== persona) {
+    console.warn("auth_callback_persona_mismatch", {
+      intended_persona: intendedPersona,
+      resolved_persona: persona,
+      provider: toTrimmedString((user.app_metadata ?? {}).provider),
+    });
     await safeSignOut(supabase);
     const mismatchLoginUrl = new URL(getMagicLinkLoginPathForPersona(intendedPersona), req.url);
     mismatchLoginUrl.searchParams.set("error", "wrong_account_type");
@@ -143,11 +186,20 @@ export async function GET(req: Request) {
     const claimSession = resolveClaimSessionFromCookieHeader(req.headers.get("cookie"));
     const expectedTokenHash = hashClaimInviteToken(claimToken);
     const authenticatedEmail = toTrimmedString((user as Record<string, unknown>).email)?.toLowerCase() ?? null;
+    const appMetadata = (user.app_metadata ?? {}) as Record<string, unknown>;
+    const provider = toTrimmedString(appMetadata.provider)?.toLowerCase();
+    const providerList = Array.isArray(appMetadata.providers)
+      ? appMetadata.providers
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.toLowerCase())
+      : [];
+    const isGoogleFlow = provider === "google" || providerList.includes("google");
     const claimSessionMatches =
-      claimSession &&
-      claimSession.token_hash === expectedTokenHash &&
-      authenticatedEmail &&
-      claimSession.email === authenticatedEmail;
+      (claimSession &&
+        claimSession.token_hash === expectedTokenHash &&
+        authenticatedEmail &&
+        claimSession.email === authenticatedEmail) ||
+      (!claimSession && isGoogleFlow && intendedPersona === "student" && Boolean(authenticatedEmail));
 
     if (!claimSessionMatches) {
       claimStatus = "invalid";

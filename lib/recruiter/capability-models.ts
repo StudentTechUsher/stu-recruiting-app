@@ -5,6 +5,7 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 type CapabilityModelRow = {
   capability_model_id: string;
   company_id: string | null;
+  role_id?: string | null;
   recruiter_id: string | null;
   model_data: Record<string, unknown> | null;
   active_version_id: string | null;
@@ -325,6 +326,7 @@ const buildModelPayload = (input: {
   recruiterId: string;
   modelName: string;
   description?: string | null;
+  roleId?: string | null;
   weights: Record<string, number>;
   thresholds: Record<string, number>;
   requiredEvidence: string[];
@@ -332,6 +334,7 @@ const buildModelPayload = (input: {
 }): Record<string, unknown> => ({
   company_id: input.companyId,
   recruiter_id: input.recruiterId,
+  role_id: input.roleId ?? null,
   model_name: input.modelName,
   description: input.description ?? null,
   weights: input.weights,
@@ -501,6 +504,7 @@ export async function createCapabilityModel(input: {
   recruiterId: string;
   modelName: string;
   description?: string | null;
+  roleId?: string | null;
   weights: Record<string, number>;
   thresholds: Record<string, number>;
   requiredEvidence: string[];
@@ -519,6 +523,7 @@ export async function createCapabilityModel(input: {
     recruiterId: input.recruiterId,
     modelName: input.modelName,
     description: input.description ?? null,
+    roleId: input.roleId ?? null,
     weights: input.weights,
     thresholds: input.thresholds,
     requiredEvidence: input.requiredEvidence,
@@ -529,6 +534,7 @@ export async function createCapabilityModel(input: {
     .from("capability_models")
     .insert({
       company_id: scopedCompanyId,
+      role_id: input.roleId ?? null,
       recruiter_id: input.recruiterId,
       model_data: modelPayload,
       current_version: 1,

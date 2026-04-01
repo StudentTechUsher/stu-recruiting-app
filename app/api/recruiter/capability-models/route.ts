@@ -14,6 +14,7 @@ const numericRecordSchema = z.record(z.string(), z.number());
 const createModelSchema = z.object({
   model_name: z.string().min(2),
   description: z.string().optional(),
+  role_id: z.string().uuid().nullable().optional(),
   weights: numericRecordSchema,
   thresholds: numericRecordSchema,
   required_evidence: z.array(z.string()).default([]),
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
     recruiterId,
     modelName: parsed.data.model_name,
     description: parsed.data.description,
+    roleId: parsed.data.role_id ?? null,
     weights: parsed.data.weights,
     thresholds: parsed.data.thresholds,
     requiredEvidence: parsed.data.required_evidence,

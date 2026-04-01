@@ -1,26 +1,35 @@
 # Student Artifact Ingestion Specification
 
 ## Purpose
-Define Phase 1 ingestion touchpoints and processing requirements for student evidence inputs.
+Define candidate-facing ingestion touchpoints and processing requirements for Evidence Profile growth, target alignment, and coaching readiness.
 
 ## Supported Sources
 | Source | Input type | Required outcome |
 | --- | --- | --- |
-| Resume | Uploaded document | Extract and persist normalized artifact drafts with provenance. |
-| Transcript | Uploaded document | Extract coursework/evidence with verification-aware metadata. |
-| GitHub | Profile/repository metadata | Extract project evidence with source provenance. |
-| Kaggle | Profile metadata | Extract project/competition/research evidence with provenance. |
+| Resume | Uploaded document | Extract normalized artifact drafts with provenance and weak-evidence labeling. |
+| Transcript | Uploaded document | Extract coursework evidence with verification-aware metadata. |
+| GitHub | Profile and repository metadata | Extract project evidence with source provenance and platform-backed tier. |
+| Kaggle | Profile metadata | Extract project, competition, and research evidence with source provenance and platform-backed tier. |
+| LeetCode | Public profile link, profile metadata, candidate-provided export or screenshot | Extract algorithmic challenge evidence with explicit uncertainty and conservative trust defaults. |
+
+## Source Onboarding Rules
+| Rule ID | Rule |
+| --- | --- |
+| SAI-SRC-001 | Candidate can add or update source profile links from Evidence Profile workspace. |
+| SAI-SRC-002 | Source onboarding must surface what data was imported and what could not be imported. |
+| SAI-SRC-003 | LeetCode onboarding must communicate that source access and field completeness may vary. |
+| SAI-SRC-004 | Source onboarding must not imply that connecting one source alone makes profile decision-ready. |
 
 ## Ingestion Pipeline States
 | State | Description |
 | --- | --- |
-| `received` | Input accepted from student source action. |
-| `extracting` | Extraction in progress. |
-| `extracted` | Structured artifact drafts produced. |
-| `normalized` | Artifact schema normalized. |
-| `verification_assigned` | Verification assigned during normalization when deterministic, or after explicit verification rule/action pass. |
-| `persisted` | Artifacts and provenance saved. |
-| `failed_retryable` | Recoverable failure with safe retry. |
+| `received` | Input accepted from source action |
+| `extracting` | Extraction in progress |
+| `extracted` | Structured artifact drafts produced |
+| `normalized` | Artifact schema normalized |
+| `verification_assigned` | Verification state and tier assigned |
+| `persisted` | Artifacts and provenance saved |
+| `failed_retryable` | Recoverable failure with safe retry |
 
 State diagram:
 `RECEIVED -> EXTRACTING -> EXTRACTED -> NORMALIZED -> VERIFICATION_ASSIGNED -> PERSISTED`
@@ -29,43 +38,58 @@ State diagram:
 | Operation | Requirement |
 | --- | --- |
 | Add | Persist normalized artifact and provenance refs. |
-| Replace | Persist new version; retain prior provenance-linked versions. |
-| Remove | Hide or deactivate primary display artifact while preserving provenance-linked history and downstream evidence references. |
-| Re-extract | Run extraction again and persist as new provenance-linked version(s). |
+| Replace | Persist new version and retain prior provenance-linked versions. |
+| Remove | Hide or deactivate primary display artifact while preserving history and linkage references. |
+| Re-extract | Re-run extraction and persist as new provenance-linked version set. |
 
 ## Normalization Rules
 | Rule ID | Rule |
 | --- | --- |
 | SAI-001 | Normalize to allowed artifact types and required fields. |
-| SAI-002 | Persist source provenance refs (`source`, `source_object_id`, `ingestion_run_id`, `file_refs`, timestamps, fingerprint/hash when available). |
-| SAI-003 | Assign verification state per verification model rules. |
-| SAI-004 | Ensure ingestion output is compatible with capability derivation contract. |
-| SAI-005 | If equivalent source payload is re-ingested, detect equivalence and avoid duplicate canonical evidence unless content or provenance materially changed. |
+| SAI-002 | Persist source provenance refs (`source`, `source_object_id`, `ingestion_run_id`, `file_refs`, timestamps, fingerprint). |
+| SAI-003 | Assign verification state and verification tier per verification model rules. |
+| SAI-004 | Ensure output remains compatible with capability derivation contract and selected Capability Profile context. |
+| SAI-005 | Detect equivalent re-ingested payloads and avoid unnecessary canonical duplicates unless content or provenance materially changed. |
 
 ## Verification Assignment Timing
 | Condition | Behavior |
 | --- | --- |
-| Deterministic verification rule satisfied during normalization | Assign verification in the same ingestion run. |
-| Deterministic verification rule not satisfied | Keep `pending` or `unverified` until explicit verification action/rule pass. |
-| Explicit verification action/rule pass succeeds | Transition to `verification_assigned` with updated state metadata. |
+| Deterministic verification rule satisfied during normalization | Assign verification in same ingestion run. |
+| Deterministic verification rule not satisfied | Keep `pending` or `unverified` until explicit verification step. |
+| Explicit verification path succeeds | Promote state and tier with metadata history preserved. |
 
-## Verification Integration
+## LeetCode-Specific Handling
+| Rule ID | Rule |
+| --- | --- |
+| SAI-LC-001 | Capture raw source data when available: handle, profile URL, solved counts, difficulty distribution, contest fields, activity streak indicators. |
+| SAI-LC-002 | Capture derived artifacts conservatively, for example algorithmic problem-solving artifacts and contest participation artifacts. |
+| SAI-LC-003 | Mark uncertain or missing source fields with explicit unknown flags. |
+| SAI-LC-004 | Default LeetCode-derived records to `platform_backed` tier and conservative verification state unless additional validation exists. |
+
+## Coaching-Linked Expectations
 | Requirement | Rule |
 | --- | --- |
-| Visibility | Student sees verification state and method/source context per artifact. |
-| Propagation | Verification flows to capability trust metrics and dashboard KPIs. |
-| Constraint | Verification does not alter capability existence mapping. |
+| Evidence improvement linkage | Ingestion output must support expected evidence targets generated by Capability Fit Coaching. |
+| Action traceability | Candidate can trace coaching action to artifacts added or updated. |
+| Gap closure visibility | Candidate sees which target capability gaps gained stronger evidence after ingestion updates. |
 
 ## Phase 1 Constraints
 | Constraint | Rule |
 | --- | --- |
-| No ranking/scoring | Ingestion must not emit ranking, scoring, or recommendation state. |
-| Determinism | Same input and same evidence state must produce same normalized mapping outcome. |
-| Compatibility | Persisted evidence structures must be recruiter-compatible without hidden transform layers. |
+| No ranking or scoring | Ingestion must not emit ranking or score outputs. |
+| Determinism | Same input and same state produce same normalized outcome. |
+| Compatibility | Persisted structures are recruiter-compatible without hidden transforms. |
 
 ## Failure Safety and Retry
 | Rule ID | Rule |
 | --- | --- |
 | SAI-FR-001 | Failures must not partially publish invalid artifacts as active evidence. |
-| SAI-FR-002 | Retry resumes from a safe checkpoint or restarts idempotently. |
-| SAI-FR-003 | Failed runs preserve audit trail via provenance and ingestion run metadata. |
+| SAI-FR-002 | Retry resumes from safe checkpoint or restarts idempotently. |
+| SAI-FR-003 | Failed runs preserve audit trail with ingestion metadata and provenance. |
+
+## Cross-References
+- `docs/features/ingestion-flow.md`
+- `docs/system/evidence-model.md`
+- `docs/system/artifact-verification-model.md`
+- `docs/system/leetcode-source-integration-spec.md`
+- `docs/features/capability-fit-coaching-agent-spec.md`

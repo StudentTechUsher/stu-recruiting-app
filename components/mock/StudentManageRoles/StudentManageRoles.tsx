@@ -10,7 +10,7 @@ const untoggledClassName =
   "border-[#d1e0d9] bg-white text-[#1f4035] hover:bg-[#f2f8f5] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
 const skeletonBlockClassName = "animate-pulse rounded-lg bg-[#e4efe9] dark:bg-slate-700/70";
 const targetPositionChangeConfirmationMessage =
-  "Changing target positions updates the capability attributes tracked in your dashboard. Continue?";
+  "Changing target roles updates the capability attributes tracked in your dashboard. Continue?";
 
 type StudentProfileApiData = {
   profile: {
@@ -476,18 +476,18 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       ? selectedRoles.filter((value) => normalizeOptionSearchKey(value) !== normalized)
       : [...selectedRoles, role];
     if (nextSelectedRoles.length === 0) {
-      setStatusMessage("Keep at least one target position selected.");
+      setStatusMessage("Keep at least one target role selected.");
       return;
     }
     if (typeof window !== "undefined" && !window.confirm(targetPositionChangeConfirmationMessage)) {
       return;
     }
     setSelectedRoles(nextSelectedRoles);
-    setStatusMessage("Saving target positions...");
+    setStatusMessage("Saving target roles...");
     void saveSelections({
       rolesOverride: nextSelectedRoles,
       employersOverride: selectedEmployers,
-      successMessage: "Target positions saved. Capability tracking updated.",
+      successMessage: "Target roles saved. Capability tracking updated.",
     });
   };
 
@@ -535,7 +535,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       : [...selectedRoles, resolvedRole];
     setSelectedRoles(nextSelectedRoles);
     setCustomRoleName("");
-    setStatusMessage("Saving target positions...");
+    setStatusMessage("Saving target roles...");
     void saveSelections({
       rolesOverride: nextSelectedRoles,
       employersOverride: selectedEmployers,
@@ -1130,11 +1130,11 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
               ? "Manage profile and focus targets"
               : showProfileSections
                 ? "Manage profile"
-                : "My Positions & Employers"}
+                : "My Roles & Employers"}
           </h2>
           <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
             {showProfileSections && showTargetSections
-              ? "Edit your profile details and update which positions and employers you want coaching to prioritize."
+              ? "Edit your profile details and update which roles and employers you want coaching to prioritize."
               : showProfileSections
                 ? "Update your profile details, links, and avatar used across student experiences."
                 : "Set role and employer targets, then use dedicated coaching tools to focus your next actions."}
@@ -1145,7 +1145,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                 href="/student/targets"
                 className="inline-flex rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                Go to My Positions & Employers
+                Go to My Roles & Employers
               </Link>
             ) : null}
             {showTargetSections && !showProfileSections ? (

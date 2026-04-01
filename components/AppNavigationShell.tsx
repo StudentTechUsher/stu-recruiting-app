@@ -162,9 +162,9 @@ const studentNavItems: NavItem[] = [
   },
   {
     key: "student-targets",
-    label: "My Positions & Employers",
-    shortLabel: "Positions",
-    description: "Set role and employer targets",
+    label: "My Roles & Employers",
+    shortLabel: "Roles",
+    description: "Set capability targets by role and employer",
     icon: CompassIcon,
     href: "/student/targets",
     releaseKey: "manageRoles"

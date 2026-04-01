@@ -209,4 +209,126 @@ describe("auth callback route", () => {
     expect(redeemClaimInviteTokenMock).not.toHaveBeenCalled();
     expect(response.headers.get("set-cookie")).toContain("stu-claim-session=");
   });
+
+  it("bootstraps missing persona to student when student intent is present", async () => {
+    const getUserMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          user: {
+            id: "student-4",
+            email: "student4@example.com",
+            app_metadata: { provider: "google", providers: ["google"] },
+            user_metadata: {},
+          },
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          user: {
+            id: "student-4",
+            email: "student4@example.com",
+            app_metadata: { provider: "google", providers: ["google"] },
+            user_metadata: { role: "student", stu_persona: "student" },
+          },
+        },
+        error: null,
+      });
+    const updateUserMock = vi.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: "student-4",
+          user_metadata: { role: "student", stu_persona: "student" },
+        },
+      },
+      error: null,
+    });
+    createServerClientMock.mockReturnValue({
+      auth: {
+        exchangeCodeForSession: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "student-4",
+              email: "student4@example.com",
+              app_metadata: { provider: "google", providers: ["google"] },
+              user_metadata: {},
+            },
+          },
+          error: null,
+        }),
+        getUser: getUserMock,
+        updateUser: updateUserMock,
+        signOut: vi.fn().mockResolvedValue({ error: null }),
+      },
+    });
+    getProfileByUserIdMock.mockResolvedValue(null);
+
+    const response = await GET(
+      new Request("https://app.example.com/auth/callback?code=test-code", {
+        headers: {
+          cookie: "stu-magic-link-intent=student",
+        },
+      })
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://app.example.com/student/onboarding");
+    expect(updateUserMock).toHaveBeenCalledWith({
+      data: {
+        role: "student",
+        stu_persona: "student",
+      },
+    });
+  });
+
+  it("keeps role_unassigned behavior when student bootstrap fails", async () => {
+    const signOutMock = vi.fn().mockResolvedValue({ error: null });
+    const updateUserMock = vi.fn().mockResolvedValue({
+      data: { user: null },
+      error: { message: "update_failed" },
+    });
+    createServerClientMock.mockReturnValue({
+      auth: {
+        exchangeCodeForSession: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "student-5",
+              email: "student5@example.com",
+              app_metadata: { provider: "google", providers: ["google"] },
+              user_metadata: {},
+            },
+          },
+          error: null,
+        }),
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "student-5",
+              email: "student5@example.com",
+              app_metadata: { provider: "google", providers: ["google"] },
+              user_metadata: {},
+            },
+          },
+          error: null,
+        }),
+        updateUser: updateUserMock,
+        signOut: signOutMock,
+      },
+    });
+    getProfileByUserIdMock.mockResolvedValue(null);
+
+    const response = await GET(
+      new Request("https://app.example.com/auth/callback?code=test-code", {
+        headers: {
+          cookie: "stu-magic-link-intent=student",
+        },
+      })
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://app.example.com/login?error=role_unassigned");
+    expect(updateUserMock).toHaveBeenCalledTimes(1);
+    expect(signOutMock).toHaveBeenCalledTimes(1);
+  });
 });

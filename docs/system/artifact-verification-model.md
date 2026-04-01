@@ -1,106 +1,97 @@
 # Artifact Verification Model
 
-## Source of Truth
-- Baseline definitions come from `docs/artifact-verification-methods.md`.
-- This document classifies methods by delivery status (`live`, `pending`, `planned`) and defines trust-layer behavior.
+## Purpose
+Define verification states, verification tiers, and trust-layer behavior for artifact evidence, including LeetCode-derived evidence and weak-evidence interpretation limits.
 
----
+## Source of Truth
+- Baseline verification methods: `docs/artifact-verification-methods.md`
+- Terminology authority: `docs/system/evidence-profile-terminology.md`
+- LeetCode source integration: `docs/system/leetcode-source-integration-spec.md`
 
 ## Verification States and Strength
 | Verification state | Meaning | Merge strength |
 | --- | --- | --- |
-| `verified` | Artifact passed an accepted verification path. | 3 (highest) |
+| `verified` | Artifact passed an accepted verification path. | 3 |
 | `pending` | Verification evidence submitted but not yet completed. | 2 |
-| `unverified` | No accepted verification completion evidence. | 1 (lowest) |
+| `unverified` | No accepted verification completion evidence. | 1 |
 
-> **Invariant:** Merge conflict resolution must use verification strength ordering (3 > 2 > 1) when selecting canonical artifact representations.
+> **Invariant:** Merge conflict resolution uses verification strength ordering `verified > pending > unverified`.
 
----
+## Verification Tiers
+| Verification tier | Meaning | Typical examples |
+| --- | --- | --- |
+| `self_asserted` | Candidate-entered or source-extracted without independent validation. | Manual entry, resume extraction, unvalidated screenshot claims |
+| `platform_backed` | Evidence backed by source platform data and provenance but without full independent verification. | GitHub profile metadata, Kaggle profile metadata, LeetCode public profile metadata |
+| `verified` | Evidence completed accepted verification path with stronger trust posture. | Transcript parse, validated official document, attestation workflow |
 
 ## Verification Method Matrix by Artifact Type
-| Artifact type | Verification method | Classification | Resulting state |
-| --- | --- | --- | --- |
-| `coursework` | `transcript_parse` | live | `verified` |
-| `coursework` | `transcript_extraction` | live | `verified` |
-| `coursework` | `syllabus_upload` | pending | `pending` until validated |
-| `coursework` | `syllabus_ai_match` | pending | `verified` after successful validation |
-| `project` | `github_extraction` | live | `verified` |
-| `project` | `kaggle_extraction` | live | `verified` |
-| `project` | `resume_extraction` | live | `unverified` |
-| `project` | `linkedin_extraction` | live | `unverified` |
-| `project` | `project_supporting_doc_review` | planned | `verified` after reviewer/AI validation |
-| `internship` | `internship_document_review` | planned | `verified` after reviewer/AI validation |
-| `internship` | `manager_attestation` | planned | `verified` |
-| `employment` | `employment_document_review` | planned | `verified` after reviewer/AI validation |
-| `employment` | `hr_or_manager_attestation` | planned | `verified` |
-| `certification` | `certificate_document_review` | planned | `verified` after reviewer/AI validation |
-| `certification` | `issuer_registry_validation` | planned | `verified` |
-| `leadership` | `leadership_role_document_review` | planned | `verified` after reviewer/AI validation |
-| `leadership` | `organization_roster_validation` | planned | `verified` |
-| `club` | `club_membership_document_review` | planned | `verified` after reviewer/AI validation |
-| `club` | `membership_roster_validation` | planned | `verified` |
-| `competition` | `competition_result_document_review` | planned | `verified` after reviewer/AI validation |
-| `competition` | `organizer_result_validation` | planned | `verified` |
-| `research` | `research_output_document_review` | planned | `verified` after reviewer/AI validation |
-| `research` | `publication_or_doi_validation` | planned | `verified` |
-| `test` | `official_score_report_review` | planned | `verified` after reviewer/AI validation |
-| `test` | `assessment_provider_validation` | planned | `verified` |
+| Artifact type | Verification method | Classification | Default tier | Resulting state |
+| --- | --- | --- | --- | --- |
+| `coursework` | `transcript_parse` | live | `verified` | `verified` |
+| `coursework` | `transcript_extraction` | live | `verified` | `verified` |
+| `coursework` | `syllabus_upload` | pending | `self_asserted` | `pending` until validation |
+| `coursework` | `syllabus_ai_match` | pending | `verified` | `verified` after validation |
+| `project` | `github_extraction` | live | `platform_backed` | `verified` |
+| `project` | `kaggle_extraction` | live | `platform_backed` | `verified` |
+| `project` | `leetcode_profile_extraction` | mvp | `platform_backed` | `unverified` by default unless promoted by additional verification |
+| `project` | `resume_extraction` | live | `self_asserted` | `unverified` |
+| `project` | `linkedin_extraction` | live | `self_asserted` | `unverified` |
+| `competition` | `leetcode_contest_capture` | mvp | `platform_backed` | `unverified` by default unless validated |
+| `competition` | `competition_result_document_review` | planned | `verified` | `verified` after validation |
+| `internship` | `internship_document_review` | planned | `verified` | `verified` after validation |
+| `employment` | `employment_document_review` | planned | `verified` | `verified` after validation |
+| `certification` | `issuer_registry_validation` | planned | `verified` | `verified` |
+| `leadership` | `organization_roster_validation` | planned | `verified` | `verified` |
+| `club` | `membership_roster_validation` | planned | `verified` | `verified` |
+| `research` | `publication_or_doi_validation` | planned | `verified` | `verified` |
+| `test` | `assessment_provider_validation` | planned | `verified` | `verified` |
 
----
-
-## Verification Assignment Rules (If/Then)
+## Assignment Rules (If and Then)
 | If | Then |
 | --- | --- |
-| Source is transcript parse/extraction and payload passes validation | Set `verification_status = verified` with transcript method. |
-| Source is GitHub or Kaggle extraction and payload passes extraction checks | Set `verification_status = verified` with source extraction method. |
-| Coursework is manual and has syllabus evidence awaiting validation | Set `verification_status = pending`, method `syllabus_upload`. |
-| Source is resume or LinkedIn extraction with no additional validation | Set `verification_status = unverified`. |
-| Planned verifier path completes successfully | Promote `pending` or `unverified` artifact to `verified`. |
+| Source is transcript parse or extraction and payload passes validation | Set state `verified` and tier `verified`. |
+| Source is GitHub or Kaggle extraction and payload passes source checks | Set tier `platform_backed`; state may be `verified` when extraction path is accepted by policy. |
+| Source is LeetCode profile or contest capture with only public profile evidence | Set tier `platform_backed` and state `unverified` unless independent verifier completes. |
+| Source is resume or LinkedIn extraction with no additional validation | Set state `unverified` and tier `self_asserted`. |
+| Planned verifier path completes successfully | Promote state to `verified` and tier to `verified`, retaining prior provenance history. |
 
-> **Invariant:** Verification is assigned per artifact version (per source instance), not globally across all representations of an artifact.
+> **Invariant:** Verification is assigned per artifact version, not globally across all representations.
 
-> **Invariant:** Extraction-based verification (e.g., transcript, GitHub) is considered a trusted source validation, but does not override independent verification methods when both exist.
+## Weak or Unverifiable Evidence Handling
+| Rule ID | Rule |
+| --- | --- |
+| VER-WEAK-001 | Weak evidence remains visible and traceable with explicit trust labeling. |
+| VER-WEAK-002 | Coaching may use weak evidence for exploratory suggestions but must call out uncertainty. |
+| VER-WEAK-003 | Decision-Ready Candidate Package must distinguish `self_asserted` and `platform_backed` from `verified` evidence. |
+| VER-WEAK-004 | Weak evidence must not be framed as proof of broad job readiness without supporting artifacts. |
 
----
+## Interpretation Limits and Non-Claims Policy
+| Policy ID | Rule |
+| --- | --- |
+| VER-LIMIT-001 | Algorithmic challenge evidence, including LeetCode, is one evidence category and not a universal proxy for hiring readiness. |
+| VER-LIMIT-002 | Do not infer soft-skill readiness solely from coding challenge data. |
+| VER-LIMIT-003 | Do not represent LeetCode presence as guaranteed interview performance or employability outcome. |
+| VER-LIMIT-004 | User-facing copy must describe evidence context, strengths, and gaps without ranking language. |
 
 ## Trust-Layer Impact (No Ranking)
-| Verification state | Recruiter impact | Candidate decisioning impact |
+| Verification state | Candidate impact | Recruiter impact |
 | --- | --- | --- |
-| `verified` | Show highest trust indicator on artifact/evidence card. | No ranking/filtering effect |
-| `pending` | Show in-review indicator. | No ranking/filtering effect |
-| `unverified` | Show low-trust indicator. | No ranking/filtering effect |
+| `verified` | Show high-trust indicator. | Show highest trust indicator. |
+| `pending` | Show in-review indicator. | Show in-review indicator. |
+| `unverified` | Show needs-verification indicator. | Show low-trust indicator. |
 
-> **Invariant:** Verification must not be used for ranking, ordering, or filtering candidates in Phase 1.
-
----
-
-## Artifact Types With Limited Live Verification Coverage
-| Artifact type | Live coverage status | Notes |
-| --- | --- | --- |
-| `internship` | no live verification path | Only planned document/attestation paths exist |
-| `employment` | no live verification path | Only planned document/attestation paths exist |
-| `certification` | no live verification path | No issuer validation implemented |
-| `leadership` | no live verification path | No institutional validation implemented |
-| `club` | no live verification path | No roster validation implemented |
-| `competition` | no live verification path | No organizer validation implemented |
-| `research` | no live verification path | No publication validation implemented |
-| `test` | no live verification path | No provider validation implemented |
-
----
-
-## Multi-Method Verification Gap Analysis
-| Gap ID | Artifact types | Gap description | Required direction |
-| --- | --- | --- | --- |
-| VER-001 | `internship`, `employment` | No independent live attestation channel beyond planned document review. | Add direct manager/HR attestation and reconciliation logic. |
-| VER-002 | `certification`, `test` | No issuer/provider live validation path is implemented. | Add issuer/provider validation integrations. |
-| VER-003 | `leadership`, `club`, `competition`, `research` | Evidence relies on planned reviewer path only. | Add independent institutional or organizer validation paths. |
-| VER-004 | `project` | Verified extraction exists, but manual project evidence lacks implemented verifier completion. | Ship supporting-document verification path. |
-
----
+> **Invariant:** Verification influences trust display only, not candidate ordering, inclusion, or exclusion.
 
 ## Cross-System Invariants
 | Invariant ID | Rule |
 | --- | --- |
-| VER-INV-001 | Verification strength determines artifact representation precedence, not ownership precedence. |
-| VER-INV-002 | Candidate ownership always overrides employer ownership regardless of verification state. |
-| VER-INV-003 | All artifact versions must retain verification state and provenance metadata for auditability. |
+| VER-INV-001 | Verification strength determines representation precedence, not ownership precedence. |
+| VER-INV-002 | Candidate ownership overrides employer ownership regardless of verification state. |
+| VER-INV-003 | All artifact versions retain verification metadata and provenance for auditability. |
+| VER-INV-004 | Verification and tier semantics must remain consistent across dashboard, coaching, and recruiter package views. |
+
+## Cross-References
+- `docs/artifact-verification-methods.md`
+- `docs/system/evidence-model.md`
+- `docs/system/leetcode-source-integration-spec.md`
+- `docs/features/capability-fit-coaching-agent-spec.md`

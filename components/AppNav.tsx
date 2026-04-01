@@ -20,7 +20,7 @@ const navGroups = [
     label: "Student",
     items: [
       ["Onboarding", "/student/onboarding"],
-      ["My Positions & Employers", "/student/targets"],
+      ["My Roles & Employers", "/student/targets"],
       ["Interview Prep", "/student/interview-prep"],
       ["Profile", "/student/profile"],
       ["Dashboard", "/student/dashboard"],

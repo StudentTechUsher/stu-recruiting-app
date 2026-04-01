@@ -3,90 +3,92 @@
 ## System Boundary
 | Dimension | Phase 1 Rule |
 | --- | --- |
-| ATS position | Stu operates behind ATS platforms through integrations. |
+| ATS position | Stu operates behind ATS platforms through integrations and curated handoff workflows. |
 | Decision role | Stu does not score, rank, or automatically filter candidates. |
-| Core function | Stu extracts, normalizes, maps, and verifies evidence for recruiter review. |
-| Output intent | Evidence-backed review support only. |
+| Core function | Stu builds candidate Evidence Profiles, aligns them to selected Capability Profiles, and supports evidence-backed recruiter readiness. |
+| Output intent | Candidate guidance plus recruiter decision readiness through curated package review. |
 
-> **Invariant:** Phase 1 is a data quality and trust layer, not a decision-making system.
-
----
+> **Invariant:** Phase 1 is an evidence and trust system, not an automated hiring decision system.
 
 ## Canonical Profile Model
-
 > **Invariant:** After claim, each candidate has exactly one canonical Evidence Profile.
 
 > **Rule:** All post-claim ingestion, merging, and updates must target this canonical profile. Employer-scoped profile variants must not exist after claim.
 
-> **Ownership transition:**  
-- Pre-claim: employer-scoped profile variants  
-- Post-claim: candidate-owned canonical Evidence Profile  
-
----
+> **Ownership transition:**
+- Pre-claim: employer-scoped profile variants
+- Post-claim: candidate-owned canonical Evidence Profile
 
 ## Inputs
 | Input class | Sources | Example payload scope | Ownership at ingest |
 | --- | --- | --- | --- |
-| ATS candidate/application data | Greenhouse, Lever, BambooHR (and equivalent) | Candidate identity fields, job/application metadata, pipeline stage, attachments | Employer-scoped before claim |
-| Transcript evidence | Transcript PDF + parsed transcript outputs | Courses, course metadata, transcript-derived coursework artifacts | Candidate evidence layer |
-| External profile links | GitHub, LinkedIn, Kaggle | Public profile metadata, repository/project evidence, competition/research context | Candidate evidence layer with provenance |
-| Candidate-entered supporting files | Syllabus and artifact support files | Manual evidence attachments and verification-support files | Candidate evidence layer |
-
----
+| ATS candidate and application data | Greenhouse, Lever, BambooHR (and equivalent) | Candidate identity fields, job and application metadata, pipeline stage, attachments | Employer-scoped before claim |
+| Transcript evidence | Transcript PDF plus parse outputs | Coursework and transcript-derived artifacts | Candidate evidence layer |
+| External profile links | GitHub, LinkedIn, Kaggle, LeetCode | Public profile metadata and source evidence | Candidate evidence layer with provenance |
+| Candidate-entered supporting files | Syllabus and supporting artifacts | Manual evidence attachments and verification support files | Candidate evidence layer |
+| Candidate preferences and goals | Onboarding and profile preferences | Interest areas, work attributes, constraints, motivations | Candidate-owned preference context |
+| Capability Profile library | Company-role capability definitions | `capability_profile_id`, capability requirements, evidence expectations | Recruiter or operator curated |
 
 ## Processing Stages
 | Stage | Description | Required output |
 | --- | --- | --- |
-| Ingestion | Capture ATS and external evidence inputs. | Raw source records with source IDs and timestamps |
-| Extraction | Parse or transform source data into artifact candidates. | Structured artifact drafts |
-| Normalization | Enforce artifact type, required fields, provenance, and dedupe strategy. | Normalized artifact records |
-| Capability mapping | Map artifacts to one or more capabilities. | Capability-to-evidence links |
-| Verification assignment | Assign trust status from available verification methods. | `verification_status` + method/source metadata |
-| Evidence Profile update | Merge records into canonical candidate Evidence Profile using deterministic merge rules. | Updated canonical profile + provenance history |
+| Onboarding | Candidate establishes baseline identity, profile, and preferences. | Candidate baseline context |
+| Evidence ingestion and extraction | System captures source inputs and creates artifact candidates. | Raw source records plus structured drafts |
+| Normalization and verification assignment | System normalizes artifact shape and assigns verification state and tier. | Normalized artifacts with trust metadata |
+| Evidence Profile update | System merges records into canonical profile with deterministic merge rules. | Updated canonical profile plus provenance history |
+| Capability selection | Candidate uses Capability Selection Agent to choose at most 2 active Capability Profiles. | Active target set and rationale |
+| Capability Fit Coaching loop | Coaching maps evidence strengths and gaps to concrete actions and expected evidence. | Structured coaching recommendations |
+| Evidence improvement | Candidate adds, revises, or verifies artifacts based on coaching guidance. | Improved profile evidence and verification state |
+| Controlled visibility action | Candidate runs Open Profile Visibility to Selected Employers for one selected target. | Visibility request plus candidate-approved package |
+| Operator and recruiter handoff | Internal workflow delivers Decision-Ready Candidate Package for curated review. | Recruiter-ready package payload |
 
 > **Invariant:** Evidence Profile updates must never create additional profile variants after claim.
 
-> **Invariant:** Artifacts are never deleted; all versions must remain preserved as provenance-linked records.
+> **Invariant:** Artifacts are never deleted. All versions remain provenance-linked records.
 
----
+## End-to-End Workflow (Candidate and Recruiter Linked Outcomes)
+`ONBOARDING_COMPLETE -> EVIDENCE_PROFILE_ACTIVE -> CAPABILITY_SELECTION_IN_PROGRESS -> ACTIVE_CAPABILITY_PROFILES_SET(1..2) -> CAPABILITY_FIT_COACHING_ACTIVE -> EVIDENCE_IMPROVEMENT_ITERATION -> OPEN_PROFILE_VISIBILITY_REQUESTED -> OPERATOR_HANDOFF_READY -> DECISION_READY_CANDIDATE_PACKAGE_DELIVERED`
+
+## Focused Targeting Rules
+| Rule ID | Rule |
+| --- | --- |
+| PM-FOCUS-001 | Candidate may keep no more than 2 active Capability Profiles at one time. |
+| PM-FOCUS-002 | Candidate may run Open Profile Visibility to Selected Employers only for one selected active target per request. |
+| PM-FOCUS-003 | Workflow prioritizes depth of evidence for selected targets over broad application broadcasting. |
+| PM-FOCUS-004 | Candidate guidance must explain target tradeoffs and encourage commitment to focused targets. |
 
 ## Output Contracts
 | Output | Description | Consumer |
 | --- | --- | --- |
-| Artifacts | Typed evidence records with provenance and verification metadata. | Recruiter review, candidate profile UX |
-| Capabilities | Capability labels supported by linked artifacts. | Recruiter list/detail views |
-| Evidence links | Relationship between capability and specific artifacts. | Evidence side-panel inspection flow |
-
----
-
-## State Transition (Text Diagram)
-`ATS_IMPORTED -> IDENTITY_MATCHED -> EVIDENCE_EXTRACTED -> EVIDENCE_NORMALIZED -> CAPABILITY_MAPPED -> VERIFICATION_ASSIGNED -> EVIDENCE_PROFILE_UPDATED`
-
----
+| Evidence Profile | Candidate-owned profile with artifacts, provenance, verification metadata, and capability linkage context. | Candidate UX, recruiter review |
+| Capability alignment summary | Evidence-backed strengths, gaps, and next actions per selected Capability Profile. | Candidate coaching UX |
+| Decision-Ready Candidate Package | Curated package for one selected company-role target, including evidence-backed strengths and gaps. | Operators and recruiters |
+| Visibility request record | Candidate-authorized handoff request for a selected target. | Internal workflow and audit logs |
 
 ## Deterministic Behavior Requirements
 | Requirement | Rule |
 | --- | --- |
-| Ordering | Candidate list ordering must be deterministic (e.g., ATS stage, application time), not derived from inferred candidate quality. |
-| Merge behavior | Artifact selection must follow verification → completeness → recency ordering. |
-| Identity resolution | All ingestion must converge to a single canonical profile post-claim. |
-
----
+| Ordering | Recruiter list ordering remains deterministic (for example ATS stage and application time), not inferred candidate quality. |
+| Merge behavior | Artifact selection follows verification strength, then completeness, then recency. |
+| Identity resolution | All ingestion converges to one canonical profile post-claim. |
+| Target constraints | Active target count and state transitions are enforced deterministically. |
 
 ## Explicit Exclusions
 | Exclusion | Rule |
 | --- | --- |
 | Candidate scoring | No numeric candidate score is generated in Phase 1. |
 | Candidate ranking | No ordered ranking list is generated in Phase 1. |
-| Automated filtering | No auto-accept, auto-reject, or auto-hold decisions are made by Stu in Phase 1. |
-| Verification-based gating | Verification states influence trust display only, not candidate inclusion or exclusion. |
-| Implicit scoring | No proxy metrics (confidence, strength, completeness scores) may be introduced that function as ranking. |
-
----
+| Automated filtering | No auto-accept, auto-reject, or auto-hold decisions are made by Stu. |
+| Visibility blast workflows | No mass-broadcast visibility to employers. Visibility is controlled and target-specific. |
+| Opaque guidance framing | User-facing outputs must not rely on opaque score-centric framing. |
 
 ## Cross-References
-| Referenced section | Document |
-| --- | --- |
-| Section 3: Identity and ownership model | `docs/system/identity-ownership-model.md` |
-| Section 4: Recruiter experience | `docs/features/recruiter-review-experience.md` |
-| Section 5: Verification model | `docs/system/artifact-verification-model.md` |
+- `docs/system/evidence-profile-terminology.md`
+- `docs/system/canonical-profile.md`
+- `docs/system/capability-model.md`
+- `docs/system/capability-derivation.md`
+- `docs/system/evidence-model.md`
+- `docs/features/capability-selection-agent-spec.md`
+- `docs/features/capability-fit-coaching-agent-spec.md`
+- `docs/features/candidate-targeting-visibility-workflow-spec.md`
+- `docs/features/recruiter-review-experience.md`
