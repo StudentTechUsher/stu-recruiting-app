@@ -166,6 +166,17 @@ const sourceStateToneClass: Record<SourceDisplayState, string> = {
   Failed: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200"
 };
 
+const SourceExtractingIndicator = ({ label = "Extracting source evidence" }: { label?: string }) => (
+  <span className="inline-flex items-center gap-2">
+    <span
+      className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#21453a]/25 border-t-[#21453a] dark:border-slate-400/25 dark:border-t-slate-100"
+      aria-hidden="true"
+    />
+    <span>Extracting</span>
+    <span className="sr-only">{label}</span>
+  </span>
+);
+
 const normalizeGithubProfileUrl = (value: string): string => {
   const trimmed = value.trim();
   if (trimmed.length === 0) return "";
@@ -1466,7 +1477,13 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                               disabled={isExtracting}
                               className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                             >
-                              {isExtracting ? "Extracting..." : state === "Up to date" ? "Upload new and re-extract" : "Upload and extract"}
+                              {isExtracting ? (
+                                <SourceExtractingIndicator label={`Extracting ${sourceLabel[source]} evidence`} />
+                              ) : state === "Up to date" ? (
+                                "Upload new and re-extract"
+                              ) : (
+                                "Upload and extract"
+                              )}
                             </button>
                             {lastExtractedAt ? (
                               <span className="text-[11px] text-[#557168] dark:text-slate-400">
@@ -1560,7 +1577,13 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                               disabled={isExtracting || urlValue.length === 0}
                               className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                             >
-                              {isExtracting ? "Extracting..." : state === "Up to date" ? "Re-extract" : "Extract"}
+                              {isExtracting ? (
+                                <SourceExtractingIndicator label={`Extracting ${sourceLabel[source]} evidence`} />
+                              ) : state === "Up to date" ? (
+                                "Re-extract"
+                              ) : (
+                                "Extract"
+                              )}
                             </button>
                             {lastExtractedAt ? (
                               <span className="text-[11px] text-[#557168] dark:text-slate-400">

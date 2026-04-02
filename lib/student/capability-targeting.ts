@@ -93,6 +93,8 @@ const capabilityLabelById: Record<string, string> = {
 };
 
 const artifactTypeToCapabilities: Record<string, string[]> = {
+  // TODO(stu-evidence): Replace type-level defaults with artifact-level signal extraction
+  // and role-targeted signal validation. A single artifact type can emit different signals.
   coursework: ["technical_depth", "data_management"],
   project: ["technical_depth", "systems_thinking", "execution_reliability"],
   internship: ["execution_reliability", "collaboration", "communication"],
@@ -131,6 +133,12 @@ const toIsoTimestampOrNow = (value: unknown): string => {
 };
 
 const normalizeLabelKey = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, " ");
+const normalizeCapabilityKey = (value: string): string =>
+  normalizeLabelKey(value)
+    .replace(/[^a-z0-9\s_-]/g, "")
+    .replace(/[-\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
 const toVerificationState = (value: unknown): VerificationState => {
   const raw = toTrimmedString(value)?.toLowerCase();
@@ -350,6 +358,99 @@ export const normalizeCapabilityProfileRequestKey = ({
 export const buildSelectionFingerprint = (active: ActiveCapabilityProfileSelection[]): string =>
   active.map((item) => item.capability_profile_id).join("|");
 
+type CapabilityFamily =
+  | "communication"
+  | "collaboration"
+  | "execution_reliability"
+  | "technical_depth"
+  | "systems_thinking"
+  | "data_management"
+  | "product_analytics"
+  | "research_methodology"
+  | "leadership";
+
+const resolveCapabilityFamily = (capabilityId: string): CapabilityFamily | null => {
+  const normalized = normalizeCapabilityKey(capabilityId);
+  if (!normalized) return null;
+
+  if (normalized.includes("communicat")) return "communication";
+  if (normalized.includes("collab") || normalized.includes("teamwork") || normalized.includes("cross_function")) {
+    return "collaboration";
+  }
+  if (
+    normalized.includes("execution") ||
+    normalized.includes("reliab") ||
+    normalized.includes("delivery") ||
+    normalized.includes("ownership")
+  ) {
+    return "execution_reliability";
+  }
+  if (normalized.includes("technical") || normalized.includes("engineering") || normalized.includes("coding")) {
+    return "technical_depth";
+  }
+  if (normalized.includes("systems") || normalized.includes("architecture") || normalized.includes("problem_solv")) {
+    return "systems_thinking";
+  }
+  if (normalized.includes("data_manage") || normalized.includes("data_quality") || normalized.includes("data_literacy")) {
+    return "data_management";
+  }
+  if (
+    normalized.includes("analytics") ||
+    normalized.includes("analytical") ||
+    normalized.includes("business_judg") ||
+    normalized.includes("decision")
+  ) {
+    return "product_analytics";
+  }
+  if (normalized.includes("research") || normalized.includes("experiment") || normalized.includes("hypothesis")) {
+    return "research_methodology";
+  }
+  if (normalized.includes("leader") || normalized.includes("influence") || normalized.includes("stakeholder_manage")) {
+    return "leadership";
+  }
+  return null;
+};
+
+const expandMappedCapabilityIds = ({
+  mappedCapabilityIds,
+  targetCapabilityIds,
+}: {
+  mappedCapabilityIds: string[];
+  targetCapabilityIds: string[];
+}): string[] => {
+  if (mappedCapabilityIds.length === 0) return [];
+
+  const targetIdsByFamily = new Map<CapabilityFamily, Set<string>>();
+  for (const targetCapabilityId of targetCapabilityIds) {
+    const family = resolveCapabilityFamily(targetCapabilityId);
+    if (!family) continue;
+    const existing = targetIdsByFamily.get(family) ?? new Set<string>();
+    existing.add(targetCapabilityId);
+    targetIdsByFamily.set(family, existing);
+  }
+
+  const expanded = new Set<string>();
+  for (const mappedCapabilityId of mappedCapabilityIds) {
+    expanded.add(mappedCapabilityId);
+    const family = resolveCapabilityFamily(mappedCapabilityId);
+    if (!family) continue;
+    const familyTargets = targetIdsByFamily.get(family);
+    if (!familyTargets) continue;
+    for (const capabilityId of familyTargets) expanded.add(capabilityId);
+  }
+
+  return Array.from(expanded.values());
+};
+
+const hashMarkerSeed = (seed: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 export const buildEvidenceFreshnessMarker = (artifacts: DerivationArtifact[]): string => {
   const latestUpdatedAt = artifacts.reduce((latest, artifact) => {
     const ts = artifact.updated_at ? Date.parse(artifact.updated_at) : 0;
@@ -357,7 +458,15 @@ export const buildEvidenceFreshnessMarker = (artifacts: DerivationArtifact[]): s
     return ts;
   }, 0);
 
-  return `${artifacts.length}:${latestUpdatedAt}`;
+  const markerSeed = artifacts
+    .map((artifact) => {
+      const verificationStatus = toVerificationState(artifact.artifact_data.verification_status);
+      return `${artifact.artifact_id}:${artifact.artifact_type}:${verificationStatus}:${artifact.updated_at ?? ""}`;
+    })
+    .sort()
+    .join("|");
+
+  return `${artifacts.length}:${latestUpdatedAt}:${hashMarkerSeed(markerSeed)}`;
 };
 
 const capabilityLabel = (capabilityId: string): string => {
@@ -407,7 +516,10 @@ export const computeCapabilityProfileFit = ({
   }
 
   for (const artifact of artifacts) {
-    const mappedCapabilities = artifactTypeToCapabilities[artifact.artifact_type] ?? [];
+    const mappedCapabilities = expandMappedCapabilityIds({
+      mappedCapabilityIds: artifactTypeToCapabilities[artifact.artifact_type] ?? [],
+      targetCapabilityIds,
+    });
     if (mappedCapabilities.length === 0) continue;
     const verificationState = toVerificationState(artifact.artifact_data.verification_status);
     const contribution = contributionWeightByVerificationState[verificationState];

@@ -124,6 +124,37 @@ export function RecruiterEvidenceSidebar({
         </div>
       ) : (
         <div className="space-y-4">
+          <div className="rounded-xl border border-[#d8e5de] bg-[#f7fbf9] px-3 py-3 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4a675f] dark:text-slate-400">
+              AI Literacy Map
+            </p>
+            {detail.ai_literacy_map ? (
+              <div className="mt-2 space-y-1 text-xs text-[#365a4f] dark:text-slate-300">
+                <p>
+                  Profile Coverage: <span className="font-semibold">{detail.ai_literacy_map.profile_coverage_percent}%</span>
+                  {" · "}
+                  Recruiter-Safe Coverage:{" "}
+                  <span className="font-semibold">{detail.ai_literacy_map.recruiter_safe_coverage_percent}%</span>
+                </p>
+                <p>
+                  Level: <span className="font-semibold">{detail.ai_literacy_map.overall_indicative_literacy_level ?? "Awareness"}</span>
+                  {" · "}
+                  Confidence: <span className="font-semibold capitalize">{detail.ai_literacy_map.confidence.class}</span>
+                </p>
+                <p>
+                  Domains evidenced:{" "}
+                  <span className="font-semibold">
+                    {detail.ai_literacy_map.domains_with_profile_signal}/{detail.ai_literacy_map.total_role_relevant_domains}
+                  </span>
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-[#58736a] dark:text-slate-400">
+                Recruiter-safe AI Literacy Map is not available yet for this candidate.
+              </p>
+            )}
+          </div>
+
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#4a675f] dark:text-slate-400">
               Capabilities

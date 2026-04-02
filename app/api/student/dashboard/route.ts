@@ -2,13 +2,16 @@ import { getAuthContext } from "@/lib/auth-context";
 import { forbidden, ok } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
 import { deriveCapabilitiesFromEvidence, type RoleCapabilityMap } from "@/lib/capabilities/derivation";
+import { getAiLiteracyMapForAudience } from "@/lib/ai-literacy/map";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
 type StudentRow = { student_data: unknown };
 type ArtifactRow = {
   artifact_id: string;
   artifact_type: string;
   artifact_data: unknown;
+  source_provenance?: unknown;
   updated_at: string | null;
   is_active?: boolean | null;
 };
@@ -16,6 +19,7 @@ type SourceExtractionStatus = "extracting" | "succeeded" | "failed" | "unknown";
 
 type DashboardState = "no_evidence" | "partial_no_verification" | "full_low_trust" | "progressing";
 type JobRoleMappingRow = { role_name_normalized: string | null; role_data: unknown };
+type CapabilityModelRow = { capability_model_id: string; model_data: unknown; updated_at: string | null };
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -31,10 +35,56 @@ const toStringArray = (value: unknown): string[] => {
 };
 
 const normalizeRoleName = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, " ");
+const toNumericRecord = (value: unknown): Record<string, number> => {
+  const record = toRecord(value);
+  const parsed: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) continue;
+    const normalizedKey = key.trim();
+    if (normalizedKey.length === 0) continue;
+    parsed[normalizedKey] = raw;
+  }
+  return parsed;
+};
+
 const toTrimmedString = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+};
+
+const extractCapabilityIdsFromCapabilityModel = (modelData: unknown): string[] => {
+  const record = toRecord(modelData);
+  const weights = toNumericRecord(record.weights);
+  const weightedCapabilityIds = Object.keys(weights).filter((capabilityId) => capabilityId.length > 0);
+  if (weightedCapabilityIds.length > 0) return weightedCapabilityIds;
+
+  const rawCapabilityIds = record.capability_ids;
+  if (!Array.isArray(rawCapabilityIds)) return [];
+  return rawCapabilityIds
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+};
+
+const resolveCapabilityIdsFromRoleMap = ({
+  selectedRoles,
+  roleCapabilityMap,
+}: {
+  selectedRoles: string[];
+  roleCapabilityMap: RoleCapabilityMap | null;
+}): string[] => {
+  if (!roleCapabilityMap) return [];
+  const deduped = new Set<string>();
+  for (const role of selectedRoles) {
+    const normalizedRole = normalizeRoleName(role);
+    const mappedCapabilityIds = roleCapabilityMap[normalizedRole] ?? [];
+    for (const capabilityId of mappedCapabilityIds) {
+      const normalizedCapabilityId = capabilityId.trim();
+      if (normalizedCapabilityId.length > 0) deduped.add(normalizedCapabilityId);
+    }
+  }
+  return Array.from(deduped.values());
 };
 
 const buildDbRoleCapabilityMap = async ({
@@ -112,6 +162,24 @@ export async function GET() {
           evidence_count: 0,
           total_linked_evidence: 0,
         },
+        ai_literacy: {
+          status: "not_started",
+          profile_coverage_percent: 0,
+          recruiter_safe_coverage_percent: 0,
+          overall_indicative_literacy_level: "Awareness",
+          confidence: { class: "insufficient", score: 0 },
+          role_lens: {
+            role_family: "business_ops_analyst",
+            role_labels: [],
+            role_lens_key: "business_ops_analyst:baseline",
+          },
+          domains_with_profile_signal: 0,
+          domains_with_recruiter_safe_signal: 0,
+          total_role_relevant_domains: 0,
+          last_evaluated_at: null,
+          updated: false,
+          has_selected_capability_model: false,
+        },
         identity_state: "unavailable",
         alerts: {
           extraction_in_progress: false,
@@ -132,7 +200,7 @@ export async function GET() {
     supabase.from("students").select("student_data").eq("profile_id", context.user_id).limit(1),
     supabase
       .from("artifacts")
-      .select("artifact_id, artifact_type, artifact_data, updated_at, is_active")
+      .select("artifact_id, artifact_type, artifact_data, source_provenance, updated_at, is_active")
       .eq("profile_id", context.user_id)
       .order("updated_at", { ascending: false }),
   ])) as [{ data: StudentRow[] | null }, { data: ArtifactRow[] | null }];
@@ -175,33 +243,114 @@ export async function GET() {
       artifact_id: row.artifact_id,
       artifact_type: row.artifact_type,
       artifact_data: toRecord(row.artifact_data),
+      source_provenance: toRecord(row.source_provenance),
       updated_at: row.updated_at,
     }));
 
+  const activeCapabilityProfiles = Array.isArray(studentData.active_capability_profiles)
+    ? studentData.active_capability_profiles
+    : [];
+  const selectedCapabilityProfileRecord =
+    activeCapabilityProfiles.length > 0 && typeof activeCapabilityProfiles[0] === "object" && activeCapabilityProfiles[0] !== null
+      ? (activeCapabilityProfiles[0] as Record<string, unknown>)
+      : null;
+  const selectedCapabilityModelId =
+    selectedCapabilityProfileRecord && typeof selectedCapabilityProfileRecord.capability_profile_id === "string"
+      ? (selectedCapabilityProfileRecord.capability_profile_id as string)
+      : null;
+  const selectedRoleFromCapabilityProfile = toTrimmedString(selectedCapabilityProfileRecord?.role_label);
+  const selectedRolesForCoverage = Array.from(
+    new Set(
+      [...selectedRoles, ...(selectedRoleFromCapabilityProfile ? [selectedRoleFromCapabilityProfile] : [])]
+        .map((role) => role.trim())
+        .filter((role) => role.length > 0)
+    )
+  );
+
   const dbRoleCapabilityMap = await buildDbRoleCapabilityMap({
     supabase,
-    selectedRoles,
+    selectedRoles: selectedRolesForCoverage,
+  });
+
+  let selectedCapabilityIds = [] as string[];
+  if (selectedCapabilityModelId) {
+    const capabilityModelsClient = getSupabaseServiceRoleClient() ?? supabase;
+    const { data: selectedCapabilityModelRows } = (await capabilityModelsClient
+      .from("capability_models")
+      .select("capability_model_id, model_data, updated_at")
+      .eq("capability_model_id", selectedCapabilityModelId)
+      .limit(1)) as { data: CapabilityModelRow[] | null; error: unknown };
+    const selectedCapabilityModel = selectedCapabilityModelRows?.[0];
+    selectedCapabilityIds = extractCapabilityIdsFromCapabilityModel(selectedCapabilityModel?.model_data);
+  }
+  if (selectedCapabilityIds.length === 0) {
+    selectedCapabilityIds = resolveCapabilityIdsFromRoleMap({
+      selectedRoles: selectedRolesForCoverage,
+      roleCapabilityMap: dbRoleCapabilityMap,
+    });
+  }
+  const hasUnresolvedSelectedCapabilityModel = Boolean(selectedCapabilityModelId) && selectedCapabilityIds.length === 0;
+
+  const aiLiteracyMap = await getAiLiteracyMapForAudience({
+    supabase,
+    profileId: context.user_id,
+    audience: "candidate",
+    requireManualGeneration: true,
   });
 
   const derived = deriveCapabilitiesFromEvidence({
-    selectedRoles,
+    selectedRoles: selectedRolesForCoverage,
     artifacts: activeArtifacts,
     roleCapabilityMap: dbRoleCapabilityMap ?? undefined,
+    explicitRequiredCapabilityIds: hasUnresolvedSelectedCapabilityModel
+      ? []
+      : selectedCapabilityIds.length > 0
+        ? selectedCapabilityIds
+        : undefined,
   });
   const coveragePercentForDashboard =
-    selectedRoles.length === 0
+    hasUnresolvedSelectedCapabilityModel
+      ? 0
+      : selectedRolesForCoverage.length === 0 && selectedCapabilityIds.length === 0
       ? Math.min(derived.kpis.capability_coverage_percent, 30)
       : derived.kpis.capability_coverage_percent;
 
-  const requiredAxes = derived.axes.filter((axis) => axis.capability_class !== "fallback");
+  const requiredAxes =
+    hasUnresolvedSelectedCapabilityModel
+      ? []
+      : selectedCapabilityIds.length > 0
+      ? derived.axes.filter((axis) => selectedCapabilityIds.includes(axis.capability_id))
+      : derived.axes.filter((axis) => axis.capability_class !== "fallback");
   const hasLowTrustRequiredCapability = requiredAxes.some(
     (axis) => axis.covered && axis.verification_breakdown.verified === 0
   );
 
+  const requiredVerificationTotals = requiredAxes.reduce(
+    (totals, axis) => {
+      totals.verified += axis.verification_breakdown.verified;
+      totals.pending += axis.verification_breakdown.pending;
+      totals.unverified += axis.verification_breakdown.unverified;
+      return totals;
+    },
+    { verified: 0, pending: 0, unverified: 0 }
+  );
+  const requiredTotalLinkedEvidence =
+    requiredVerificationTotals.verified + requiredVerificationTotals.pending + requiredVerificationTotals.unverified;
+  const verifiedEvidenceShareForDashboard =
+    requiredTotalLinkedEvidence === 0
+      ? 0
+      : Number((requiredVerificationTotals.verified / requiredTotalLinkedEvidence).toFixed(4));
+  const pendingUnverifiedShareForDashboard =
+    requiredTotalLinkedEvidence === 0
+      ? 0
+      : Number(
+          ((requiredVerificationTotals.pending + requiredVerificationTotals.unverified) / requiredTotalLinkedEvidence).toFixed(4)
+        );
+
   const state = determineDashboardState({
     evidenceCount: derived.kpis.evidence_count,
     coveragePercent: coveragePercentForDashboard,
-    verifiedShare: derived.kpis.verified_evidence_share,
+    verifiedShare: verifiedEvidenceShareForDashboard,
     hasLowTrustRequiredCapability,
   });
 
@@ -223,12 +372,33 @@ export async function GET() {
   return ok({
     resource: "student_dashboard",
     dashboard: {
-      roles: selectedRoles,
+      roles: selectedRolesForCoverage,
       axes: derived.axes,
       unmapped_artifact_ids: derived.unmapped_artifact_ids,
       kpis: {
         ...derived.kpis,
         capability_coverage_percent: coveragePercentForDashboard,
+        verified_evidence_share: verifiedEvidenceShareForDashboard,
+        pending_unverified_share: pendingUnverifiedShareForDashboard,
+        total_linked_evidence: requiredTotalLinkedEvidence,
+      },
+      ai_literacy: {
+        status: aiLiteracyMap?.status ?? "not_started",
+        profile_coverage_percent: aiLiteracyMap?.profile_coverage_percent ?? 0,
+        recruiter_safe_coverage_percent: aiLiteracyMap?.recruiter_safe_coverage_percent ?? 0,
+        overall_indicative_literacy_level: aiLiteracyMap?.overall_indicative_literacy_level ?? "Awareness",
+        confidence: aiLiteracyMap?.confidence ?? { class: "insufficient", score: 0 },
+        role_lens: aiLiteracyMap?.role_lens ?? {
+          role_family: "business_ops_analyst",
+          role_labels: selectedRolesForCoverage,
+          role_lens_key: "business_ops_analyst:baseline",
+        },
+        domains_with_profile_signal: aiLiteracyMap?.domains_with_profile_signal ?? 0,
+        domains_with_recruiter_safe_signal: aiLiteracyMap?.domains_with_recruiter_safe_signal ?? 0,
+        total_role_relevant_domains: aiLiteracyMap?.total_role_relevant_domains ?? 0,
+        last_evaluated_at: aiLiteracyMap?.evaluated_at ?? null,
+        updated: false,
+        has_selected_capability_model: Boolean(selectedCapabilityModelId),
       },
       alerts: {
         extraction_in_progress: extractionInProgress,

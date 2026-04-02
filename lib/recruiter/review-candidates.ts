@@ -7,6 +7,7 @@ import {
   resolveCandidateForIngestion,
   selectCanonicalArtifactVersion,
 } from "@/lib/candidates/identity";
+import { getAiLiteracyMapForAudience } from "@/lib/ai-literacy/map";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
 export type VerificationState = "verified" | "pending" | "unverified";
@@ -95,6 +96,20 @@ export type ReviewCandidateEvidencePayload = {
   capability_summary: ReviewCapabilitySummary[];
   selected_capability_id: string | null;
   artifacts: ReviewEvidenceArtifact[];
+  ai_literacy_map: {
+    status: "available";
+    profile_coverage_percent: number;
+    recruiter_safe_coverage_percent: number;
+    overall_indicative_literacy_level: "Awareness" | "Foundational Use" | "Applied Judgment" | "Strategic Fluency" | null;
+    confidence: {
+      class: "insufficient" | "limited" | "moderate" | "strong";
+      score: number;
+    };
+    total_role_relevant_domains: number;
+    domains_with_profile_signal: number;
+    domains_with_recruiter_safe_signal: number;
+    last_evaluated_at: string | null;
+  } | null;
   panel_state:
     | "panel_loading"
     | "panel_single_evidence"
@@ -1073,6 +1088,30 @@ export async function getRecruiterReviewCandidateEvidence(input: {
       )
     : context.artifacts;
 
+  let aiLiteracyMap: ReviewCandidateEvidencePayload["ai_literacy_map"] = null;
+  if (context.evidence_profile_id) {
+    const supabase = getSupabaseServiceRoleClient();
+    const resolved = await getAiLiteracyMapForAudience({
+      supabase,
+      profileId: context.evidence_profile_id,
+      audience: "recruiter",
+      requireManualGeneration: true,
+    });
+    if (resolved && resolved.status === "available") {
+      aiLiteracyMap = {
+        status: "available",
+        profile_coverage_percent: resolved.profile_coverage_percent,
+        recruiter_safe_coverage_percent: resolved.recruiter_safe_coverage_percent,
+        overall_indicative_literacy_level: resolved.overall_indicative_literacy_level,
+        confidence: resolved.confidence,
+        total_role_relevant_domains: resolved.total_role_relevant_domains,
+        domains_with_profile_signal: resolved.domains_with_profile_signal,
+        domains_with_recruiter_safe_signal: resolved.domains_with_recruiter_safe_signal,
+        last_evaluated_at: resolved.evaluated_at,
+      };
+    }
+  }
+
   return {
     application_id: context.row.application_id,
     candidate_id: context.row.candidate_id,
@@ -1085,6 +1124,7 @@ export async function getRecruiterReviewCandidateEvidence(input: {
     capability_summary: context.row.capability_summary,
     selected_capability_id: selectedCapabilityId,
     artifacts,
+    ai_literacy_map: aiLiteracyMap,
     panel_state: determinePanelState(artifacts),
   };
 }

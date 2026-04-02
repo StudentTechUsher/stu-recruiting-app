@@ -48,6 +48,7 @@ describe("recruiter candidate evidence route", () => {
       capability_summary: [],
       selected_capability_id: null,
       artifacts: [],
+      ai_literacy_map: null,
       panel_state: "panel_no_evidence",
     });
 

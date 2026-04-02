@@ -128,7 +128,22 @@ type CapabilityTargetsPayload = {
   fit_by_capability_profile_id: Record<string, CapabilityProfileFit>;
 };
 
+type AiLiteracyStatus = 'not_started' | 'in_progress' | 'partial_available' | 'available' | 'needs_attention';
+
+type AiLiteracyPayload = {
+  ai_literacy?: {
+    status: AiLiteracyStatus;
+    profile_coverage_percent: number;
+    recruiter_safe_coverage_percent: number;
+    domains_with_profile_signal: number;
+    total_role_relevant_domains: number;
+    last_evaluated_at: string | null;
+    has_selected_capability_model?: boolean;
+  };
+};
+
 type SnackbarState = { kind: 'success' | 'error' | 'info'; message: string } | null;
+type ArtifactVerificationStatus = 'verified' | 'pending' | 'unverified';
 
 type DraftArtifactForm = {
   courseCode: string;
@@ -321,29 +336,125 @@ const hasCourseworkVerificationFile = (fileRefs: Array<Record<string, unknown>>)
   });
 };
 
-const getArtifactVerificationStatus = (artifact: ArtifactRecord): 'verified' | 'unverified' => {
+const getArtifactVerificationStatus = (artifact: ArtifactRecord): ArtifactVerificationStatus => {
   const verificationStatus = toTrimmedString(artifact.artifactData.verification_status)?.toLowerCase();
   if (verificationStatus === 'verified') return 'verified';
-  if (verificationStatus === 'unverified' || verificationStatus === 'pending') return 'unverified';
+  if (verificationStatus === 'pending') return 'pending';
+  if (verificationStatus === 'unverified') return 'unverified';
   if (isTranscriptBackedCoursework(artifact.artifactData)) return 'verified';
-
-  const source = artifact.source.toLowerCase();
-  const link = (artifact.link ?? '').toLowerCase();
-  if (
-    source.includes('transcript') ||
-    source.includes('github') ||
-    source.includes('leetcode') ||
-    link.includes('github.com') ||
-    link.includes('leetcode.com')
-  ) {
-    return 'verified';
-  }
   return 'unverified';
 };
 
-const verificationToneClass: Record<'verified' | 'unverified', string> = {
+const verificationToneClass: Record<ArtifactVerificationStatus, string> = {
   verified: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100',
+  pending: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-100',
   unverified: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100'
+};
+
+const verificationStatusLabel: Record<ArtifactVerificationStatus, string> = {
+  verified: 'Verified',
+  pending: 'Pending verification',
+  unverified: 'Unverified'
+};
+
+type ArtifactVerificationConfig = {
+  title: string;
+  helpText: string;
+  methods: Array<{ value: string; label: string }>;
+  requireContactEmail?: boolean;
+  requireEvidenceUrl?: boolean;
+  requireContactOrEvidenceUrl?: boolean;
+  requireSyllabusForCoursework?: boolean;
+};
+
+const verificationConfigByType: Record<ArtifactType, ArtifactVerificationConfig> = {
+  coursework: {
+    title: 'Submit coursework verification',
+    helpText: 'Manual coursework requires a syllabus or supporting file to move into verification review.',
+    methods: [{ value: 'syllabus_upload', label: 'Syllabus upload review' }],
+    requireSyllabusForCoursework: true
+  },
+  internship: {
+    title: 'Submit internship verification',
+    helpText: 'Provide a supervisor or mentor contact and verification source details.',
+    methods: [
+      { value: 'reference_confirmation', label: 'Reference confirmation' },
+      { value: 'employer_email_confirmation', label: 'Employer email confirmation' }
+    ],
+    requireContactEmail: true
+  },
+  employment: {
+    title: 'Submit employment verification',
+    helpText: 'Provide a manager or HR contact and verification source details.',
+    methods: [
+      { value: 'reference_confirmation', label: 'Reference confirmation' },
+      { value: 'employer_email_confirmation', label: 'Employer email confirmation' }
+    ],
+    requireContactEmail: true
+  },
+  project: {
+    title: 'Submit project verification',
+    helpText: 'Link to a concrete artifact (demo, repo, or portfolio) used for verification.',
+    methods: [
+      { value: 'artifact_link_review', label: 'Artifact link review' },
+      { value: 'work_sample_review', label: 'Work sample review' }
+    ],
+    requireEvidenceUrl: true
+  },
+  certification: {
+    title: 'Submit certification verification',
+    helpText: 'Provide the credential URL or official provider record.',
+    methods: [
+      { value: 'credential_check', label: 'Credential check' },
+      { value: 'provider_record_review', label: 'Provider record review' }
+    ],
+    requireEvidenceUrl: true
+  },
+  competition: {
+    title: 'Submit competition verification',
+    helpText: 'Provide a public result link or uploaded proof for review.',
+    methods: [
+      { value: 'competition_record_review', label: 'Competition record review' },
+      { value: 'artifact_link_review', label: 'Artifact link review' }
+    ],
+    requireEvidenceUrl: true
+  },
+  research: {
+    title: 'Submit research verification',
+    helpText: 'Provide publication, repository, or lab record evidence.',
+    methods: [
+      { value: 'publication_review', label: 'Publication review' },
+      { value: 'artifact_link_review', label: 'Artifact link review' }
+    ],
+    requireEvidenceUrl: true
+  },
+  test: {
+    title: 'Submit assessment verification',
+    helpText: 'Provide score report or provider-hosted evidence URL.',
+    methods: [
+      { value: 'score_report_review', label: 'Score report review' },
+      { value: 'provider_record_review', label: 'Provider record review' }
+    ],
+    requireEvidenceUrl: true
+  },
+  leadership: {
+    title: 'Submit leadership verification',
+    helpText: 'Provide organization contact or public role evidence.',
+    methods: [
+      { value: 'organization_confirmation', label: 'Organization confirmation' },
+      { value: 'public_reference_review', label: 'Public reference review' }
+    ],
+    requireContactOrEvidenceUrl: true
+  },
+  club: {
+    title: 'Submit club verification',
+    helpText: 'Provide organization contact or public role evidence.',
+    methods: [
+      { value: 'organization_confirmation', label: 'Organization confirmation' },
+      { value: 'public_reference_review', label: 'Public reference review' }
+    ],
+    requireContactOrEvidenceUrl: true
+  }
 };
 
 const isArtifactType = (value: unknown): value is ArtifactType => {
@@ -466,7 +577,11 @@ const EvidenceVsTargetSummary = ({
   capabilityTargets: CapabilityTargetsPayload | null;
   compact?: boolean;
 }) => {
-  const hasTargets = (capabilityTargets?.active_capability_profiles?.length ?? 0) > 0;
+  const activeTargets = capabilityTargets?.active_capability_profiles ?? [];
+  const activeTargetsCount = activeTargets.length;
+  const hasTargets = activeTargetsCount > 0;
+  const useMultiColumnLayout = !compact && activeTargetsCount > 1;
+  const showPriorityBadge = activeTargetsCount > 1;
 
   if (isLoading) {
     return (
@@ -491,10 +606,12 @@ const EvidenceVsTargetSummary = ({
     );
   }
 
+  const fitByCapabilityProfileId = capabilityTargets?.fit_by_capability_profile_id ?? {};
+
   return (
-    <div className={`mt-3 grid gap-3 ${compact ? '' : 'sm:grid-cols-2'}`}>
-      {capabilityTargets?.active_capability_profiles.map((target, index) => {
-        const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
+    <div className={`mt-3 grid gap-3 ${useMultiColumnLayout ? 'sm:grid-cols-2' : 'sm:grid-cols-1'}`}>
+      {activeTargets.map((target, index) => {
+        const fit = fitByCapabilityProfileId[target.capability_profile_id];
         const alignmentPercent = fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) : null;
         return (
           <section
@@ -509,9 +626,11 @@ const EvidenceVsTargetSummary = ({
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
                   {alignmentPercent !== null ? `Alignment ${alignmentPercent}%` : 'Alignment --'}
                 </span>
-                <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
-                  {index === 0 ? 'Primary' : 'Secondary'}
-                </span>
+                {showPriorityBadge ? (
+                  <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                    {index === 0 ? 'Primary' : 'Secondary'}
+                  </span>
+                ) : null}
               </div>
             </div>
             <div className="mt-3 flex min-h-[280px] items-center justify-center">
@@ -718,6 +837,14 @@ const normalizeLeetcodeUrl = (value: string | null | undefined): string => {
   }
 };
 
+const formatAiLiteracyStatus = (status: AiLiteracyStatus): string => {
+  if (status === 'not_started') return 'Not Started';
+  if (status === 'in_progress') return 'In Progress';
+  if (status === 'partial_available') return 'Partial Available';
+  if (status === 'needs_attention') return 'Needs Attention';
+  return 'Available';
+};
+
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -730,6 +857,14 @@ export const StudentArtifactRepository = () => {
   const [isSubmittingArtifact, setIsSubmittingArtifact] = useState(false);
   const [isDeletingArtifact, setIsDeletingArtifact] = useState(false);
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
+  const [showVerifyArtifactDialog, setShowVerifyArtifactDialog] = useState(false);
+  const [verifyingArtifactId, setVerifyingArtifactId] = useState<string | null>(null);
+  const [isSubmittingVerification, setIsSubmittingVerification] = useState(false);
+  const [verificationMethod, setVerificationMethod] = useState('');
+  const [verificationContactEmail, setVerificationContactEmail] = useState('');
+  const [verificationEvidenceUrl, setVerificationEvidenceUrl] = useState('');
+  const [verificationSourceNote, setVerificationSourceNote] = useState('');
+  const [verificationAttachmentName, setVerificationAttachmentName] = useState('');
   const hasAutoOpenedFromQueryRef = useRef(false);
 
   // Source extraction state
@@ -738,6 +873,15 @@ export const StudentArtifactRepository = () => {
   const [snackbar, setSnackbar] = useState<SnackbarState>(null);
   const [isTargetsLoading, setIsTargetsLoading] = useState(true);
   const [capabilityTargets, setCapabilityTargets] = useState<CapabilityTargetsPayload | null>(null);
+  const [isAiLiteracyLoading, setIsAiLiteracyLoading] = useState(true);
+  const [aiLiteracyStatus, setAiLiteracyStatus] = useState<AiLiteracyStatus>('not_started');
+  const [aiLiteracyProfileCoverage, setAiLiteracyProfileCoverage] = useState(0);
+  const [aiLiteracyRecruiterSafeCoverage, setAiLiteracyRecruiterSafeCoverage] = useState(0);
+  const [aiLiteracyDomainsWithSignal, setAiLiteracyDomainsWithSignal] = useState(0);
+  const [aiLiteracyTotalDomains, setAiLiteracyTotalDomains] = useState(0);
+  const [aiLiteracyLastEvaluatedAt, setAiLiteracyLastEvaluatedAt] = useState<string | null>(null);
+  const [hasSelectedCapabilityModel, setHasSelectedCapabilityModel] = useState(false);
+  const [isGeneratingAiLiteracy, setIsGeneratingAiLiteracy] = useState(false);
 
   useEffect(() => {
     if (!snackbar) return;
@@ -750,12 +894,17 @@ export const StudentArtifactRepository = () => {
   const [draftData, setDraftData] = useState<DraftArtifactForm>({ ...initialDraftArtifactForm });
   const [draftAttachmentName, setDraftAttachmentName] = useState('');
   const documentInputRef = useRef<HTMLInputElement | null>(null);
+  const verificationDocumentInputRef = useRef<HTMLInputElement | null>(null);
   const calculatedDraftTags = artifactTypeTagPreset[draftType];
 
   const filteredArtifacts = useMemo(() => {
     if (activeFilter === 'all') return artifacts;
     return artifacts.filter((artifact) => artifact.type === activeFilter);
   }, [activeFilter, artifacts]);
+  const verifyingArtifact = useMemo(
+    () => (verifyingArtifactId ? artifacts.find((artifact) => artifact.id === verifyingArtifactId) ?? null : null),
+    [artifacts, verifyingArtifactId]
+  );
 
   const sourceStatusSummary = useMemo(() => {
     const sourceLabels: Record<ImportSourceType, string> = {
@@ -845,6 +994,12 @@ export const StudentArtifactRepository = () => {
     [sourceExtractionLog]
   );
   const isFirstTimeExtractionUser = !isLoadingArtifacts && artifacts.length === 0 && !hasAnySuccessfulExtraction;
+  const aiLiteracyLastEvaluatedLabel = useMemo(() => {
+    if (!aiLiteracyLastEvaluatedAt) return 'Not evaluated yet';
+    const parsed = new Date(aiLiteracyLastEvaluatedAt);
+    if (Number.isNaN(parsed.getTime())) return 'Not evaluated yet';
+    return parsed.toLocaleString();
+  }, [aiLiteracyLastEvaluatedAt]);
 
   const showFirstArtifactTour = isFirstTimeExtractionUser && !showArtifactIntroTour;
 
@@ -864,6 +1019,40 @@ export const StudentArtifactRepository = () => {
       setCapabilityTargets(null);
     } finally {
       setIsTargetsLoading(false);
+    }
+  }, []);
+
+  const loadAiLiteracyMap = useCallback(async () => {
+    setIsAiLiteracyLoading(true);
+    try {
+      const response = await fetch('/api/student/ai-literacy-map', { cache: 'no-store' });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data: AiLiteracyPayload }
+        | { ok: false; error?: string }
+        | null;
+
+      if (!response.ok || !payload || !payload.ok || !payload.data.ai_literacy) {
+        throw new Error('ai_literacy_fetch_failed');
+      }
+
+      const aiLiteracy = payload.data.ai_literacy;
+      setAiLiteracyStatus(aiLiteracy.status);
+      setAiLiteracyProfileCoverage(aiLiteracy.profile_coverage_percent);
+      setAiLiteracyRecruiterSafeCoverage(aiLiteracy.recruiter_safe_coverage_percent);
+      setAiLiteracyDomainsWithSignal(aiLiteracy.domains_with_profile_signal);
+      setAiLiteracyTotalDomains(aiLiteracy.total_role_relevant_domains);
+      setAiLiteracyLastEvaluatedAt(aiLiteracy.last_evaluated_at);
+      setHasSelectedCapabilityModel(Boolean(aiLiteracy.has_selected_capability_model));
+    } catch {
+      setAiLiteracyStatus('not_started');
+      setAiLiteracyProfileCoverage(0);
+      setAiLiteracyRecruiterSafeCoverage(0);
+      setAiLiteracyDomainsWithSignal(0);
+      setAiLiteracyTotalDomains(0);
+      setAiLiteracyLastEvaluatedAt(null);
+      setHasSelectedCapabilityModel(false);
+    } finally {
+      setIsAiLiteracyLoading(false);
     }
   }, []);
 
@@ -919,6 +1108,16 @@ export const StudentArtifactRepository = () => {
   useEffect(() => {
     void loadCapabilityTargets();
   }, [loadCapabilityTargets]);
+
+  useEffect(() => {
+    void loadAiLiteracyMap();
+  }, [loadAiLiteracyMap]);
+
+  useEffect(() => {
+    if ((capabilityTargets?.active_capability_profiles?.length ?? 0) > 0) {
+      setHasSelectedCapabilityModel(true);
+    }
+  }, [capabilityTargets?.active_capability_profiles?.length]);
 
   const handleDraftTypeChange = (nextType: ArtifactType) => {
     setDraftType(nextType);
@@ -978,6 +1177,198 @@ export const StudentArtifactRepository = () => {
     setShowAddArtifactDialog(true);
   };
 
+  const closeVerifyArtifactDialog = () => {
+    setShowVerifyArtifactDialog(false);
+    setVerifyingArtifactId(null);
+    setVerificationMethod('');
+    setVerificationContactEmail('');
+    setVerificationEvidenceUrl('');
+    setVerificationSourceNote('');
+    setVerificationAttachmentName('');
+    if (verificationDocumentInputRef.current) {
+      verificationDocumentInputRef.current.value = '';
+    }
+  };
+
+  const openVerifyArtifactDialog = (artifact: ArtifactRecord) => {
+    const config = verificationConfigByType[artifact.type];
+    const existingMethod = toTrimmedString(artifact.artifactData.verification_method);
+    const existingSource = toTrimmedString(artifact.artifactData.verification_source);
+    const existingEvidenceUrl =
+      toTrimmedString(artifact.artifactData.link) ??
+      toTrimmedString(artifact.artifactData.project_demo_link) ??
+      toTrimmedString(artifact.artifactData.testEvidenceLink) ??
+      artifact.link ??
+      '';
+    const existingContactEmail =
+      toTrimmedString(artifact.artifactData.mentor_email) ??
+      (isValidEmail(toTrimmedString(artifact.artifactData.reference_contact_name) ?? '')
+        ? (toTrimmedString(artifact.artifactData.reference_contact_name) ?? '')
+        : '');
+
+    setVerifyingArtifactId(artifact.id);
+    setVerificationMethod(existingMethod ?? config.methods[0]?.value ?? 'artifact_review');
+    setVerificationContactEmail(existingContactEmail);
+    setVerificationEvidenceUrl(existingEvidenceUrl);
+    setVerificationSourceNote(existingSource ?? '');
+    setVerificationAttachmentName('');
+    if (verificationDocumentInputRef.current) {
+      verificationDocumentInputRef.current.value = '';
+    }
+    setShowVerifyArtifactDialog(true);
+  };
+
+  const handleVerificationDocumentSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setVerificationAttachmentName(file.name);
+  };
+
+  const submitArtifactVerification = async () => {
+    if (isSubmittingVerification || !verifyingArtifact) return;
+
+    const config = verificationConfigByType[verifyingArtifact.type];
+    const selectedFile = verificationDocumentInputRef.current?.files?.[0] ?? null;
+    const normalizedMethod = verificationMethod.trim() || config.methods[0]?.value || 'artifact_review';
+    const normalizedContactEmail = verificationContactEmail.trim();
+    const normalizedEvidenceUrl = verificationEvidenceUrl.trim();
+    const normalizedSourceNote = verificationSourceNote.trim();
+    const existingEvidenceUrl = toTrimmedString(verifyingArtifact.link) ?? '';
+
+    if (config.requireContactEmail && !isValidEmail(normalizedContactEmail)) {
+      setStatusMessage('Enter a valid contact email to submit verification.');
+      return;
+    }
+
+    if (config.requireEvidenceUrl) {
+      const hasValidUrl = isValidHttpUrl(normalizedEvidenceUrl) || isValidHttpUrl(existingEvidenceUrl);
+      if (!hasValidUrl) {
+        setStatusMessage('Provide a valid evidence URL for this verification method.');
+        return;
+      }
+    }
+
+    if (config.requireContactOrEvidenceUrl) {
+      const hasValidEmail = isValidEmail(normalizedContactEmail);
+      const hasValidUrl = isValidHttpUrl(normalizedEvidenceUrl) || isValidHttpUrl(existingEvidenceUrl);
+      if (!hasValidEmail && !hasValidUrl) {
+        setStatusMessage('Provide either a valid contact email or a valid evidence URL.');
+        return;
+      }
+    }
+
+    if (config.requireSyllabusForCoursework) {
+      const hasExistingVerificationFile = hasCourseworkVerificationFile(verifyingArtifact.fileRefs);
+      const selectedFileExtension = selectedFile?.name.split('.').pop()?.toLowerCase() ?? '';
+      const hasValidSyllabusFileExtension = selectedFile ? ['pdf', 'doc', 'docx'].includes(selectedFileExtension) : false;
+      if (selectedFile && !hasValidSyllabusFileExtension) {
+        setStatusMessage('Coursework syllabus must be a PDF or Word document (.pdf, .doc, .docx).');
+        return;
+      }
+      if (!isTranscriptBackedCoursework(verifyingArtifact.artifactData) && !hasExistingVerificationFile && !selectedFile) {
+        setStatusMessage('Manual coursework verification requires a syllabus file upload.');
+        return;
+      }
+    }
+
+    setIsSubmittingVerification(true);
+    try {
+      let mergedFileRefs = [...verifyingArtifact.fileRefs];
+
+      if (selectedFile) {
+        const uploadForm = new FormData();
+        uploadForm.set('file', selectedFile);
+        uploadForm.set('kind', verifyingArtifact.type === 'coursework' ? 'syllabus' : 'artifact_supporting_file');
+
+        const uploadResponse = await fetch('/api/student/artifacts/files', {
+          method: 'POST',
+          body: uploadForm
+        });
+        const uploadPayload = (await uploadResponse.json().catch(() => null)) as
+          | { ok: true; data: { file_ref: Record<string, unknown> } }
+          | { ok: false; error?: string }
+          | null;
+
+        if (!uploadResponse.ok || !uploadPayload || !uploadPayload.ok) {
+          setStatusMessage('Could not upload verification file. Try again.');
+          return;
+        }
+
+        mergedFileRefs = [...mergedFileRefs, uploadPayload.data.file_ref];
+      }
+
+      const effectiveEvidenceUrl =
+        normalizedEvidenceUrl.length > 0 && isValidHttpUrl(normalizedEvidenceUrl) ? normalizedEvidenceUrl : existingEvidenceUrl;
+      const updates: Record<string, unknown> = {
+        verification_status: isTranscriptBackedCoursework(verifyingArtifact.artifactData) ? 'verified' : 'pending',
+        verification_method: normalizedMethod,
+        verification_source:
+          normalizedSourceNote.length > 0
+            ? normalizedSourceNote
+            : effectiveEvidenceUrl.length > 0
+              ? effectiveEvidenceUrl
+              : normalizedContactEmail.length > 0
+                ? normalizedContactEmail
+                : 'manual_verification_submission'
+      };
+
+      if (effectiveEvidenceUrl.length > 0 && isValidHttpUrl(effectiveEvidenceUrl)) {
+        updates.link = effectiveEvidenceUrl;
+        if (verifyingArtifact.type === 'project') {
+          updates.project_demo_link = effectiveEvidenceUrl;
+        }
+      }
+
+      if (normalizedContactEmail.length > 0 && isValidEmail(normalizedContactEmail)) {
+        updates.reference_contact_name = normalizedContactEmail;
+        if (verifyingArtifact.type === 'internship') {
+          updates.mentor_email = normalizedContactEmail;
+        }
+      }
+
+      const response = await fetch('/api/student/artifacts', {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          artifact_id: verifyingArtifact.id,
+          updates,
+          file_refs: mergedFileRefs
+        })
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data: { artifact: ArtifactApiRow } }
+        | { ok: false; error?: string }
+        | null;
+
+      if (!response.ok || !payload || !payload.ok) {
+        const errorCode = payload && !payload.ok ? payload.error : null;
+        if (errorCode === 'coursework_syllabus_required') {
+          setStatusMessage('Manual coursework verification requires a syllabus file upload.');
+          return;
+        }
+        setStatusMessage('Unable to submit verification right now. Please try again.');
+        return;
+      }
+
+      const mappedArtifact = mapApiArtifactToRecord(payload.data.artifact);
+      if (mappedArtifact) {
+        setArtifacts((current) => current.map((artifact) => (artifact.id === mappedArtifact.id ? mappedArtifact : artifact)));
+        setSelectedArtifactId(mappedArtifact.id);
+      } else {
+        await loadArtifacts();
+      }
+      void loadCapabilityTargets();
+      closeVerifyArtifactDialog();
+      setStatusMessage('Verification details submitted.');
+      setSnackbar({ kind: 'success', message: 'Verification details submitted. Artifact marked for review.' });
+    } finally {
+      setIsSubmittingVerification(false);
+    }
+  };
+
   useEffect(() => {
     const openAddArtifactParam = searchParams.get('openAddArtifact');
     const shouldOpenFromQuery = openAddArtifactParam === 'true' || openAddArtifactParam === '1';
@@ -1013,6 +1404,44 @@ export const StudentArtifactRepository = () => {
     if (hasSeenIntroTour && !forceShowFromQuery) return;
     setShowArtifactIntroTour(true);
   }, [artifacts.length, isLoadingArtifacts, searchParams]);
+
+  const generateAiLiteracyMap = async () => {
+    if (isGeneratingAiLiteracy) return;
+    if (!hasSelectedCapabilityModel) {
+      setStatusMessage('Select at least one role target before generating your AI Literacy Map.');
+      setSnackbar({ kind: 'info', message: 'Select a role target before generating your AI Literacy Map.' });
+      return;
+    }
+
+    setIsGeneratingAiLiteracy(true);
+    try {
+      const response = await fetch('/api/student/ai-literacy-map', { method: 'POST' });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data: AiLiteracyPayload }
+        | { ok: false; error?: string }
+        | null;
+
+      if (!response.ok || !payload || !payload.ok || !payload.data.ai_literacy) {
+        throw new Error('ai_literacy_generation_failed');
+      }
+
+      const aiLiteracy = payload.data.ai_literacy;
+      setAiLiteracyStatus(aiLiteracy.status);
+      setAiLiteracyProfileCoverage(aiLiteracy.profile_coverage_percent);
+      setAiLiteracyRecruiterSafeCoverage(aiLiteracy.recruiter_safe_coverage_percent);
+      setAiLiteracyDomainsWithSignal(aiLiteracy.domains_with_profile_signal);
+      setAiLiteracyTotalDomains(aiLiteracy.total_role_relevant_domains);
+      setAiLiteracyLastEvaluatedAt(aiLiteracy.last_evaluated_at);
+      setHasSelectedCapabilityModel(Boolean(aiLiteracy.has_selected_capability_model));
+      setStatusMessage('AI Literacy Map generated.');
+      setSnackbar({ kind: 'success', message: 'AI Literacy Map generated.' });
+    } catch {
+      setStatusMessage('Unable to generate AI Literacy Map right now.');
+      setSnackbar({ kind: 'error', message: 'Unable to generate AI Literacy Map right now.' });
+    } finally {
+      setIsGeneratingAiLiteracy(false);
+    }
+  };
 
   const updateDraftField = <K extends keyof DraftArtifactForm>(key: K, value: DraftArtifactForm[K]) => {
     setDraftData((current) => ({
@@ -1401,6 +1830,8 @@ export const StudentArtifactRepository = () => {
   const courseworkSyllabusFieldLabel = isEditingTranscriptBackedCoursework
     ? 'Syllabus file (optional for transcript-sourced coursework)'
     : 'Syllabus file (required for manual coursework)';
+  const verifyingConfig = verifyingArtifact ? verificationConfigByType[verifyingArtifact.type] : null;
+  const verifyingArtifactHasCourseworkFile = verifyingArtifact ? hasCourseworkVerificationFile(verifyingArtifact.fileRefs) : false;
 
   return (
     <section
@@ -1475,6 +1906,8 @@ export const StudentArtifactRepository = () => {
           </p>
         ) : null}
 
+        <div id="ai-literacy-map" className="scroll-mt-24" />
+
         <div className="mt-4 lg:hidden">
           <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
@@ -1482,6 +1915,66 @@ export const StudentArtifactRepository = () => {
               Compare target expectations against your current evidence coverage by capability axis.
             </p>
             <EvidenceVsTargetSummary isLoading={isTargetsLoading} capabilityTargets={capabilityTargets} compact />
+          </div>
+        </div>
+
+        <div className="mt-4 lg:hidden">
+          <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">AI Literacy Map</p>
+            <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
+              Role-aware artifact generated from your evidence profile. Not a ranking score.
+            </p>
+            {isAiLiteracyLoading ? (
+              <div className="mt-3 h-16 animate-pulse rounded-xl bg-[#e4efe9] dark:bg-slate-700/70" />
+            ) : aiLiteracyStatus === 'not_started' ? (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                <p className="font-semibold">AI Literacy artifact not started</p>
+                <p className="mt-1">
+                  {hasSelectedCapabilityModel
+                    ? 'Generate your first AI Literacy Map from current evidence.'
+                    : 'Select a role target first. AI Literacy generation requires an active capability model.'}
+                </p>
+                <div className="mt-3">
+                  {hasSelectedCapabilityModel ? (
+                    <button
+                      type="button"
+                      onClick={() => void generateAiLiteracyMap()}
+                      disabled={isGeneratingAiLiteracy}
+                      className="inline-flex h-9 items-center rounded-xl bg-[#12f987] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isGeneratingAiLiteracy ? 'Generating...' : 'Generate AI Literacy Map'}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/student/targets"
+                      className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Select role target
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 text-xs text-[#38584f] dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
+                <p className="font-semibold">Status: {formatAiLiteracyStatus(aiLiteracyStatus)}</p>
+                <p className="mt-1">
+                  Profile Coverage: <span className="font-semibold">{aiLiteracyProfileCoverage}%</span> · Recruiter-Safe:{' '}
+                  <span className="font-semibold">{aiLiteracyRecruiterSafeCoverage}%</span>
+                </p>
+                <p className="mt-1">
+                  Domains with signal: <span className="font-semibold">{aiLiteracyDomainsWithSignal}</span> / {aiLiteracyTotalDomains}
+                </p>
+                <p className="mt-1">Last evaluated: {aiLiteracyLastEvaluatedLabel}</p>
+                <button
+                  type="button"
+                  onClick={() => void generateAiLiteracyMap()}
+                  disabled={isGeneratingAiLiteracy || !hasSelectedCapabilityModel}
+                  className="mt-2 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  {isGeneratingAiLiteracy ? 'Refreshing...' : 'Regenerate'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1602,7 +2095,7 @@ export const StudentArtifactRepository = () => {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge className={`shrink-0 ${artifactTypeToneClass[artifact.type]}`}>{artifactTypeLabelMap[artifact.type]}</Badge>
                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass[verificationStatus]}`}>
-                          {verificationStatus === 'verified' ? 'Verified' : 'Unverified'}
+                          {verificationStatusLabel[verificationStatus]}
                         </span>
                       </div>
                       {artifact.link || artifact.attachmentName ? (
@@ -1739,7 +2232,7 @@ export const StudentArtifactRepository = () => {
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge className={artifactTypeToneClass[artifact.type]}>{artifactTypeLabelMap[artifact.type]}</Badge>
                           <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass[verificationStatus]}`}>
-                            {verificationStatus === 'verified' ? 'Verified' : 'Unverified'}
+                            {verificationStatusLabel[verificationStatus]}
                           </span>
                         </div>
                       </div>
@@ -1801,6 +2294,19 @@ export const StudentArtifactRepository = () => {
                         >
                           Edit artifact
                         </Button>
+                        {verificationStatus !== 'verified' ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openVerifyArtifactDialog(artifact);
+                            }}
+                          >
+                            {verificationStatus === 'pending' ? 'Update verification' : 'Verify artifact'}
+                          </Button>
+                        ) : null}
                         {artifact.link ? (
                           <a
                             href={artifact.link}
@@ -1829,6 +2335,66 @@ export const StudentArtifactRepository = () => {
                 Compare target expectations against your current evidence coverage by capability axis.
               </p>
               <EvidenceVsTargetSummary isLoading={isTargetsLoading} capabilityTargets={capabilityTargets} />
+            </Card>
+
+            <Card
+              className="bg-white/95 p-5 dark:bg-slate-900/80"
+              header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">AI Literacy Map</h3>}
+            >
+              <p className="text-xs text-[#4f6a62] dark:text-slate-400">
+                Role-aware artifact generated from your evidence profile. Not a ranking score.
+              </p>
+              {isAiLiteracyLoading ? (
+                <div className="mt-3 h-16 animate-pulse rounded-xl bg-[#e4efe9] dark:bg-slate-700/70" />
+              ) : aiLiteracyStatus === 'not_started' ? (
+                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                  <p className="font-semibold">AI Literacy artifact not started</p>
+                  <p className="mt-1">
+                    {hasSelectedCapabilityModel
+                      ? 'Generate your first AI Literacy Map from current evidence.'
+                      : 'Select a role target first. AI Literacy generation requires an active capability model.'}
+                  </p>
+                  <div className="mt-3">
+                    {hasSelectedCapabilityModel ? (
+                      <button
+                        type="button"
+                        onClick={() => void generateAiLiteracyMap()}
+                        disabled={isGeneratingAiLiteracy}
+                        className="inline-flex h-9 items-center rounded-xl bg-[#12f987] px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isGeneratingAiLiteracy ? 'Generating...' : 'Generate AI Literacy Map'}
+                      </button>
+                    ) : (
+                      <Link
+                        href="/student/targets"
+                        className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        Select role target
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 text-xs text-[#38584f] dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
+                  <p className="font-semibold">Status: {formatAiLiteracyStatus(aiLiteracyStatus)}</p>
+                  <p className="mt-1">
+                    Profile Coverage: <span className="font-semibold">{aiLiteracyProfileCoverage}%</span> · Recruiter-Safe:{' '}
+                    <span className="font-semibold">{aiLiteracyRecruiterSafeCoverage}%</span>
+                  </p>
+                  <p className="mt-1">
+                    Domains with signal: <span className="font-semibold">{aiLiteracyDomainsWithSignal}</span> / {aiLiteracyTotalDomains}
+                  </p>
+                  <p className="mt-1">Last evaluated: {aiLiteracyLastEvaluatedLabel}</p>
+                  <button
+                    type="button"
+                    onClick={() => void generateAiLiteracyMap()}
+                    disabled={isGeneratingAiLiteracy || !hasSelectedCapabilityModel}
+                    className="mt-2 inline-flex h-8 items-center rounded-xl border border-[#bfd2ca] bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {isGeneratingAiLiteracy ? 'Refreshing...' : 'Regenerate'}
+                  </button>
+                </div>
+              )}
             </Card>
 
             <Card
@@ -1902,6 +2468,133 @@ export const StudentArtifactRepository = () => {
               aria-live="polite"
             >
               {snackbar.message}
+            </div>
+          </div>
+        ) : null}
+
+        {showVerifyArtifactDialog && verifyingArtifact && verifyingConfig ? (
+          <div className="fixed inset-0 z-[1250]">
+            <button
+              type="button"
+              aria-label="Close verify artifact"
+              onClick={closeVerifyArtifactDialog}
+              className="absolute inset-0 bg-[#0a1f1a]/45"
+            />
+            <div className="absolute inset-x-0 bottom-0 max-h-[86vh] overflow-y-auto rounded-t-3xl border border-[#cfddd6] bg-[#f8fcfa] p-4 pb-24 dark:border-slate-700 dark:bg-slate-900 lg:inset-x-auto lg:bottom-auto lg:left-1/2 lg:top-1/2 lg:max-h-[90vh] lg:w-[min(38rem,calc(100vw-3rem))] lg:-translate-x-1/2 lg:-translate-y-1/2 lg:rounded-3xl lg:p-6 lg:pb-6">
+              <div className="mx-auto h-1.5 w-12 rounded-full bg-[#c8d7d1] dark:bg-slate-700" />
+              <div className="mt-4 flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-[#0a1f1a] dark:text-slate-100">{verifyingConfig.title}</p>
+                  <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-300">{verifyingConfig.helpText}</p>
+                  <p className="mt-2 text-xs font-medium text-[#3f6055] dark:text-slate-300">
+                    Artifact: <span className="font-semibold">{verifyingArtifact.title}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close dialog"
+                  onClick={closeVerifyArtifactDialog}
+                  disabled={isSubmittingVerification}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#bfd2ca] bg-white text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {verifyingConfig.methods.length > 1 ? (
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Verification method
+                  <select
+                    value={verificationMethod}
+                    onChange={(event) => setVerificationMethod(event.target.value)}
+                    className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  >
+                    {verifyingConfig.methods.map((method) => (
+                      <option key={method.value} value={method.value}>
+                        {method.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              {verifyingConfig.requireContactEmail || verifyingConfig.requireContactOrEvidenceUrl ? (
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Contact email
+                  <input
+                    value={verificationContactEmail}
+                    onChange={(event) => setVerificationContactEmail(event.target.value)}
+                    placeholder="manager@company.com"
+                    className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+              ) : null}
+
+              {verifyingConfig.requireEvidenceUrl || verifyingConfig.requireContactOrEvidenceUrl ? (
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Evidence URL
+                  <input
+                    value={verificationEvidenceUrl}
+                    onChange={(event) => setVerificationEvidenceUrl(event.target.value)}
+                    placeholder="https://..."
+                    className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+              ) : null}
+
+              {verifyingConfig.requireSyllabusForCoursework ? (
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Syllabus file
+                  <input
+                    ref={verificationDocumentInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    onChange={handleVerificationDocumentSelect}
+                    className="mt-2 w-full rounded-xl border border-dashed border-[#bfd2ca] bg-white px-3 py-2 text-sm text-[#3b5a52] file:mr-3 file:rounded-lg file:border file:border-[#bfd2ca] file:bg-[#f5fbf8] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[#22473b] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:file:border-slate-500 dark:file:bg-slate-800 dark:file:text-slate-200"
+                  />
+                  <span className="mt-1 block text-[11px] font-medium normal-case tracking-normal text-[#4f6a62] dark:text-slate-400">
+                    {verificationAttachmentName.length > 0
+                      ? `Selected file: ${verificationAttachmentName}`
+                      : verifyingArtifactHasCourseworkFile
+                        ? 'Existing syllabus is already attached. Uploading a new file is optional.'
+                        : 'Required for manual coursework verification.'}
+                  </span>
+                </label>
+              ) : (
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                  Supporting file (optional)
+                  <input
+                    ref={verificationDocumentInputRef}
+                    type="file"
+                    onChange={handleVerificationDocumentSelect}
+                    className="mt-2 w-full rounded-xl border border-dashed border-[#bfd2ca] bg-white px-3 py-2 text-sm text-[#3b5a52] file:mr-3 file:rounded-lg file:border file:border-[#bfd2ca] file:bg-[#f5fbf8] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[#22473b] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:file:border-slate-500 dark:file:bg-slate-800 dark:file:text-slate-200"
+                  />
+                  {verificationAttachmentName.length > 0 ? (
+                    <span className="mt-1 block text-[11px] font-medium normal-case tracking-normal text-[#4f6a62] dark:text-slate-400">
+                      Selected file: {verificationAttachmentName}
+                    </span>
+                  ) : null}
+                </label>
+              )}
+
+              <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                Verification source notes
+                <textarea
+                  value={verificationSourceNote}
+                  onChange={(event) => setVerificationSourceNote(event.target.value)}
+                  placeholder="Add context for reviewers (source details, verification instructions, or caveats)."
+                  className="mt-2 min-h-20 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={closeVerifyArtifactDialog} disabled={isSubmittingVerification}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void submitArtifactVerification()} disabled={isSubmittingVerification}>
+                  {isSubmittingVerification ? 'Submitting...' : 'Submit verification'}
+                </Button>
+              </div>
             </div>
           </div>
         ) : null}

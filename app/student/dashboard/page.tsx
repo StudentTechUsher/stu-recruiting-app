@@ -47,6 +47,27 @@ type DashboardPayload = {
     evidence_count: number;
     total_linked_evidence: number;
   };
+  ai_literacy: {
+    status: "not_started" | "in_progress" | "partial_available" | "available" | "needs_attention";
+    profile_coverage_percent: number;
+    recruiter_safe_coverage_percent: number;
+    overall_indicative_literacy_level: "Awareness" | "Foundational Use" | "Applied Judgment" | "Strategic Fluency";
+    confidence: {
+      class: "insufficient" | "limited" | "moderate" | "strong";
+      score: number;
+    };
+    role_lens: {
+      role_family: string;
+      role_labels: string[];
+      role_lens_key: string;
+    };
+    domains_with_profile_signal: number;
+    domains_with_recruiter_safe_signal: number;
+    total_role_relevant_domains: number;
+    last_evaluated_at: string | null;
+    updated: boolean;
+    has_selected_capability_model: boolean;
+  };
   state: "no_evidence" | "partial_no_verification" | "full_low_trust" | "progressing";
   primary_cta: { label: string; href: string };
   secondary_cta: { label: string; href: string };
@@ -114,23 +135,26 @@ const resolveFirstName = (personalInfo: Record<string, unknown>): string | null 
   return null;
 };
 
-const formatTimestamp = (value: string | null): string => {
-  if (!value) return "No evidence yet";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "No evidence yet";
-  return parsed.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-};
-
 const resolveVerifiedShareTone = (share: number): MetricTone => {
   if (share >= 0.7) return "success";
   if (share >= 0.4) return "warning";
   return "danger";
+};
+
+const resolveCoverageTone = (coveragePercent: number): MetricTone => {
+  if (coveragePercent >= 70) return "success";
+  if (coveragePercent >= 35) return "warning";
+  return "danger";
+};
+
+const formatAiLiteracyStatus = (
+  status: DashboardPayload["ai_literacy"]["status"]
+): "Not Started" | "In Progress" | "Partial Available" | "Available" | "Needs Attention" => {
+  if (status === "not_started") return "Not Started";
+  if (status === "in_progress") return "In Progress";
+  if (status === "partial_available") return "Partial Available";
+  if (status === "needs_attention") return "Needs Attention";
+  return "Available";
 };
 
 const resolveOverallHiringSignal = ({
@@ -271,12 +295,57 @@ export default function StudentDashboardPage() {
     if (state === "full_low_trust") return "Coverage complete. Verification is the current priority.";
     return "Keep your evidence profile current.";
   }, [dashboard?.state]);
+  const primaryTargetCoverage = useMemo(() => {
+    const primaryTarget = capabilityTargets?.active_capability_profiles?.[0];
+    if (!primaryTarget) return null;
+    const fit = capabilityTargets?.fit_by_capability_profile_id?.[primaryTarget.capability_profile_id];
+    const axes = fit?.axes ?? [];
+    if (axes.length === 0) return null;
+    const covered = axes.filter((axis) => axis.evidence_state !== "missing" && axis.evidence_magnitude > 0).length;
+    const total = axes.length;
+    return {
+      covered,
+      total,
+      percent: Math.round((covered / total) * 100),
+      roleLabel: primaryTarget.role_label,
+    };
+  }, [capabilityTargets]);
+  const capabilityCoveragePercent = primaryTargetCoverage?.percent ?? (dashboard?.kpis.capability_coverage_percent ?? 0);
   const noRolesSelected = !isLoading && (dashboard?.roles.length ?? 0) === 0;
   const verifiedShareTone = resolveVerifiedShareTone(dashboard?.kpis.verified_evidence_share ?? 0);
   const overallHiringSignal = resolveOverallHiringSignal({
-    coveragePercent: dashboard?.kpis.capability_coverage_percent ?? 0,
+    coveragePercent: capabilityCoveragePercent,
     verifiedShare: dashboard?.kpis.verified_evidence_share ?? 0,
   });
+  const profileCoverageTone = resolveCoverageTone(dashboard?.ai_literacy.profile_coverage_percent ?? 0);
+  const aiLiteracyStatus = dashboard?.ai_literacy.status ?? "not_started";
+  const aiLiteracyHasModel = dashboard?.ai_literacy.has_selected_capability_model ?? false;
+  const aiLiteracyCardValue =
+    aiLiteracyStatus === "not_started" || aiLiteracyStatus === "in_progress" || aiLiteracyStatus === "needs_attention"
+      ? formatAiLiteracyStatus(aiLiteracyStatus)
+      : `${dashboard?.ai_literacy.profile_coverage_percent ?? 0}%`;
+  const aiLiteracyCardTone =
+    aiLiteracyStatus === "not_started" || aiLiteracyStatus === "needs_attention"
+      ? "warning"
+      : aiLiteracyStatus === "in_progress"
+        ? "neutral"
+        : profileCoverageTone;
+  const aiLiteracyCardHelperText =
+    aiLiteracyStatus === "not_started"
+      ? aiLiteracyHasModel
+        ? "No AI Literacy artifact yet. Generate it from your current evidence."
+        : "Select a role target first, then generate your AI Literacy Map."
+      : aiLiteracyStatus === "in_progress"
+        ? "We are evaluating your current evidence."
+        : aiLiteracyStatus === "needs_attention"
+          ? "Regenerate the artifact after adding stronger evidence."
+          : `${dashboard?.ai_literacy.domains_with_profile_signal ?? 0}/${dashboard?.ai_literacy.total_role_relevant_domains ?? 0} role-relevant domains · Recruiter-safe ${dashboard?.ai_literacy.recruiter_safe_coverage_percent ?? 0}%`;
+  const aiLiteracyCardCta =
+    aiLiteracyStatus === "not_started" || aiLiteracyStatus === "needs_attention"
+      ? aiLiteracyHasModel
+        ? { label: "Generate map", href: "/student/artifacts#ai-literacy-map" }
+        : { label: "Select role target", href: "/student/targets" }
+      : undefined;
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
@@ -333,9 +402,16 @@ export default function StudentDashboardPage() {
             <>
               <MetricCard
                 label="Capability coverage"
-                value={`${dashboard.kpis.capability_coverage_percent}%`}
+                value={`${capabilityCoveragePercent}%`}
                 tone={noRolesSelected ? "warning" : "neutral"}
-                helperText={noRolesSelected ? "Baseline mode is capped at 30% until you select a role." : undefined}
+                helperText={
+                  noRolesSelected
+                    ? "Baseline mode is capped at 30% until you select a role."
+                    : primaryTargetCoverage
+                      ? `${primaryTargetCoverage.covered}/${primaryTargetCoverage.total} capability axes covered for your primary role target.`
+                      : undefined
+                }
+                tooltipText="Calculated as covered capability axes divided by total required axes for your primary selected role target. An axis is covered when evidence magnitude is above zero (tentative or strong)."
               />
               <MetricCard
                 label="Verified evidence share"
@@ -358,7 +434,13 @@ export default function StudentDashboardPage() {
                     : undefined
                 }
               />
-              <MetricCard label="Last updated" value={formatTimestamp(dashboard.kpis.last_updated_at)} />
+              <MetricCard
+                label="AI Literacy Profile Coverage"
+                value={aiLiteracyCardValue}
+                tone={aiLiteracyCardTone}
+                helperText={aiLiteracyCardHelperText}
+                cta={aiLiteracyCardCta}
+              />
             </>
           )}
         </div>
@@ -374,10 +456,15 @@ export default function StudentDashboardPage() {
               <div className={`${skeletonClass} h-[360px]`} />
             </div>
           ) : (capabilityTargets?.active_capability_profiles?.length ?? 0) > 0 ? (
-            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+            <div
+              className={`mt-3 grid gap-4 ${
+                (capabilityTargets?.active_capability_profiles?.length ?? 0) > 1 ? "lg:grid-cols-2" : "lg:grid-cols-1"
+              }`}
+            >
               {capabilityTargets?.active_capability_profiles.map((target, index) => {
                 const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
                 const alignmentPercent = fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) : null;
+                const showPriorityBadge = (capabilityTargets?.active_capability_profiles?.length ?? 0) > 1;
                 return (
                   <section
                     key={`target-fit-${target.capability_profile_id}`}
@@ -391,9 +478,11 @@ export default function StudentDashboardPage() {
                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
                           {alignmentPercent !== null ? `Alignment ${alignmentPercent}%` : "Alignment --"}
                         </span>
-                        <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
-                          {index === 0 ? "Primary" : "Secondary"}
-                        </span>
+                        {showPriorityBadge ? (
+                          <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                            {index === 0 ? "Primary" : "Secondary"}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                     <div className="mt-3 flex min-h-[320px] items-center justify-center">
@@ -435,12 +524,14 @@ function MetricCard({
   tone = "neutral",
   helperText,
   cta,
+  tooltipText,
 }: {
   label: string;
   value: string;
   tone?: MetricTone;
   helperText?: string;
   cta?: { label: string; href: string };
+  tooltipText?: string;
 }) {
   const toneClasses =
     tone === "success"
@@ -461,7 +552,26 @@ function MetricCard({
 
   return (
     <article className={`rounded-xl border p-3 ${toneClasses}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">{label}</p>
+      <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
+        <span>{label}</span>
+        {tooltipText ? (
+          <span className="group relative">
+            <button
+              type="button"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#bfd2ca] bg-white text-[10px] font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+              aria-label={`How ${label} is calculated`}
+            >
+              i
+            </button>
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute left-0 top-6 z-20 w-[min(18rem,calc(100vw-3rem))] rounded-lg border border-[#d2dfd9] bg-white p-2.5 text-[11px] normal-case leading-4 text-[#3f5a52] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+            >
+              {tooltipText}
+            </span>
+          </span>
+        ) : null}
+      </p>
       <p className={`mt-1 text-sm font-semibold ${valueClasses}`}>{value}</p>
       {helperText ? <p className="mt-1 text-[11px] text-[#4f6d64] dark:text-slate-400">{helperText}</p> : null}
       {cta ? (

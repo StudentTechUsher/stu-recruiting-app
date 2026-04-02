@@ -95,4 +95,25 @@ describe("capability derivation", () => {
     expect(capabilityIds).not.toContain("systems_thinking");
     expect(capabilityIds).not.toContain("data_management");
   });
+
+  it("uses explicit required capability IDs when provided", () => {
+    const derived = deriveCapabilitiesFromEvidence({
+      selectedRoles: ["Unknown Role"],
+      explicitRequiredCapabilityIds: ["technical_depth", "systems_thinking", "communication"],
+      artifacts: [
+        {
+          artifact_id: "a-1",
+          artifact_type: "project",
+          artifact_data: { verification_status: "verified" },
+          updated_at: "2026-03-25T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const capabilityIds = derived.axes.map((axis) => axis.capability_id);
+    expect(new Set(capabilityIds)).toEqual(
+      new Set(["technical_depth", "systems_thinking", "communication"])
+    );
+    expect(derived.kpis.capability_coverage_percent).toBe(67);
+  });
 });
