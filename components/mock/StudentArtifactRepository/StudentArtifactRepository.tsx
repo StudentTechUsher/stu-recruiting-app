@@ -1,7 +1,11 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { CapabilityRadar, type CapabilityRadarAxis } from '@/components/student/CapabilityRadar';
+import {
+  EvidenceTargetRadar,
+  calculateEvidenceTargetAlignmentPercent,
+  type EvidenceTargetRadarAxis
+} from '@/components/student/EvidenceTargetRadar';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -87,6 +91,7 @@ type SourceExtractionEntry = {
 type SourceExtractionLog = {
   github?: SourceExtractionEntry;
   kaggle?: SourceExtractionEntry;
+  leetcode?: SourceExtractionEntry;
   linkedin?: SourceExtractionEntry;
   resume?: SourceExtractionEntry;
   transcript?: SourceExtractionEntry;
@@ -96,6 +101,31 @@ type ArtifactsApiPayload = {
   artifacts?: ArtifactApiRow[];
   source_extraction_log?: SourceExtractionLog;
   profile_links?: Record<string, string | null>;
+};
+
+type ActiveCapabilityProfile = {
+  capability_profile_id: string;
+  company_id: string;
+  company_label: string;
+  role_id: string;
+  role_label: string;
+  selected_at: string;
+  selection_source: 'manual' | 'agent_recommended' | 'agent_confirmed' | 'migrated_legacy';
+  status: 'active';
+};
+
+type CapabilityProfileFit = {
+  capability_profile_id: string;
+  company_label: string;
+  role_label: string;
+  axes: EvidenceTargetRadarAxis[];
+  generated_at: string;
+  evidence_freshness_marker: string;
+};
+
+type CapabilityTargetsPayload = {
+  active_capability_profiles: ActiveCapabilityProfile[];
+  fit_by_capability_profile_id: Record<string, CapabilityProfileFit>;
 };
 
 type SnackbarState = { kind: 'success' | 'error' | 'info'; message: string } | null;
@@ -185,15 +215,6 @@ const artifactTypes: Array<{ id: ArtifactType; label: string }> = [
   { id: 'research', label: 'Research' },
   { id: 'employment', label: 'Employment' },
   { id: 'test', label: 'Test evidence' }
-];
-
-const artifactTagOptions: ArtifactTag[] = [
-  'Technical depth',
-  'Applied execution',
-  'Collaboration signal',
-  'Systems thinking',
-  'Communication signal',
-  'Reliability signal'
 ];
 
 const artifactTypeLabelMap: Record<ArtifactType, string> = {
@@ -308,7 +329,13 @@ const getArtifactVerificationStatus = (artifact: ArtifactRecord): 'verified' | '
 
   const source = artifact.source.toLowerCase();
   const link = (artifact.link ?? '').toLowerCase();
-  if (source.includes('transcript') || source.includes('github') || link.includes('github.com')) {
+  if (
+    source.includes('transcript') ||
+    source.includes('github') ||
+    source.includes('leetcode') ||
+    link.includes('github.com') ||
+    link.includes('leetcode.com')
+  ) {
     return 'verified';
   }
   return 'unverified';
@@ -399,6 +426,23 @@ const PlusIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
   </svg>
 );
 
+const CloseIcon = ({ className = 'h-4 w-4' }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M18 6L6 18" />
+    <path d="M6 6l12 12" />
+  </svg>
+);
+
 
 const ArtifactCardSkeleton = () => (
   <div className="rounded-2xl border border-[#d5e1db] bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-900">
@@ -412,6 +456,79 @@ const ArtifactCardSkeleton = () => (
     <div className="mt-2 h-3 w-5/6 rounded bg-[#e6f1ec] dark:bg-slate-700" />
   </div>
 );
+
+const EvidenceVsTargetSummary = ({
+  isLoading,
+  capabilityTargets,
+  compact = false
+}: {
+  isLoading: boolean;
+  capabilityTargets: CapabilityTargetsPayload | null;
+  compact?: boolean;
+}) => {
+  const hasTargets = (capabilityTargets?.active_capability_profiles?.length ?? 0) > 0;
+
+  if (isLoading) {
+    return (
+      <div className={`mt-3 grid gap-3 ${compact ? '' : 'sm:grid-cols-2'}`} aria-hidden="true">
+        <div className="h-[320px] animate-pulse rounded-xl border border-[#d4e1db] bg-[#f8fcfa] dark:border-slate-700 dark:bg-slate-900/70" />
+        {!compact ? <div className="h-[320px] animate-pulse rounded-xl border border-[#d4e1db] bg-[#f8fcfa] dark:border-slate-700 dark:bg-slate-900/70" /> : null}
+      </div>
+    );
+  }
+
+  if (!hasTargets) {
+    return (
+      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+        <p>No active capability targets selected yet.</p>
+        <Link
+          href="/student/targets"
+          className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
+        >
+          Open My Roles & Employers
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`mt-3 grid gap-3 ${compact ? '' : 'sm:grid-cols-2'}`}>
+      {capabilityTargets?.active_capability_profiles.map((target, index) => {
+        const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
+        const alignmentPercent = fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) : null;
+        return (
+          <section
+            key={`evidence-fit-${target.capability_profile_id}`}
+            className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900/70"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                {target.role_label} @ {target.company_label}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
+                  {alignmentPercent !== null ? `Alignment ${alignmentPercent}%` : 'Alignment --'}
+                </span>
+                <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                  {index === 0 ? 'Primary' : 'Secondary'}
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 flex min-h-[280px] items-center justify-center">
+              {fit?.axes && fit.axes.length > 0 ? (
+                <EvidenceTargetRadar axes={fit.axes} ariaLabel={`Evidence vs target for ${target.role_label} at ${target.company_label}`} />
+              ) : (
+                <div className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+                  Fit data is loading. Refresh shortly.
+                </div>
+              )}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+};
 
 const mapApiArtifactToRecord = (row: ArtifactApiRow): ArtifactRecord | null => {
   const data = toRecord(row.artifact_data);
@@ -541,8 +658,8 @@ const toDraftFormFromArtifact = (artifact: ArtifactRecord): DraftArtifactForm =>
   return draft;
 };
 
-type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin' | 'kaggle';
-const importSourceTypes: ImportSourceType[] = ['resume', 'transcript', 'github', 'linkedin', 'kaggle'];
+type ImportSourceType = 'resume' | 'transcript' | 'github' | 'linkedin' | 'kaggle' | 'leetcode';
+const importSourceTypes: ImportSourceType[] = ['resume', 'transcript', 'github', 'linkedin', 'kaggle', 'leetcode'];
 
 const normalizeLinkedinUrl = (value: string | null | undefined): string => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -587,6 +704,20 @@ const normalizeKaggleUrl = (value: string | null | undefined): string => {
   }
 };
 
+const normalizeLeetcodeUrl = (value: string | null | undefined): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed.length === 0) return '';
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    if (!parsed.hostname.toLowerCase().endsWith('leetcode.com')) return '';
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const username = segments[0] === 'u' || segments[0] === 'profile' ? segments[1] : segments[0];
+    return username ? `https://leetcode.com/u/${username}` : '';
+  } catch {
+    return '';
+  }
+};
+
 export const StudentArtifactRepository = () => {
   const searchParams = useSearchParams();
   const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -605,6 +736,8 @@ export const StudentArtifactRepository = () => {
   const [sourceExtractionLog, setSourceExtractionLog] = useState<SourceExtractionLog>({});
   const [savedProfileLinks, setSavedProfileLinks] = useState<Record<string, string | null>>({});
   const [snackbar, setSnackbar] = useState<SnackbarState>(null);
+  const [isTargetsLoading, setIsTargetsLoading] = useState(true);
+  const [capabilityTargets, setCapabilityTargets] = useState<CapabilityTargetsPayload | null>(null);
 
   useEffect(() => {
     if (!snackbar) return;
@@ -624,54 +757,20 @@ export const StudentArtifactRepository = () => {
     return artifacts.filter((artifact) => artifact.type === activeFilter);
   }, [activeFilter, artifacts]);
 
-  const signalCoverage = useMemo(() => {
-    return artifactTagOptions
-      .map((tag) => ({
-        tag,
-        count: artifacts.filter((artifact) => artifact.tags.includes(tag)).length
-      }))
-      .sort((first, second) => second.count - first.count);
-  }, [artifacts]);
-
-  const maxTagCount = useMemo(() => {
-    return Math.max(...signalCoverage.map((item) => item.count), 1);
-  }, [signalCoverage]);
-
-  const signalRadarAxes = useMemo<CapabilityRadarAxis[]>(() => {
-    return signalCoverage.map((signal) => ({
-      id: signal.tag.toLowerCase().replace(/\s+/g, '-'),
-      label: signal.tag,
-      magnitude: signal.count === 0 ? 0 : signal.count / maxTagCount
-    }));
-  }, [maxTagCount, signalCoverage]);
-
-  const verificationSummary = useMemo(() => {
-    return artifacts.reduce(
-      (totals, artifact) => {
-        const status = getArtifactVerificationStatus(artifact);
-        if (status === 'verified') {
-          totals.verified += 1;
-          return totals;
-        }
-        totals.unverified += 1;
-        return totals;
-      },
-      { verified: 0, unverified: 0 }
-    );
-  }, [artifacts]);
-
   const sourceStatusSummary = useMemo(() => {
     const sourceLabels: Record<ImportSourceType, string> = {
       resume: 'Resume',
       transcript: 'Transcript',
       linkedin: 'LinkedIn',
       github: 'GitHub',
-      kaggle: 'Kaggle'
+      kaggle: 'Kaggle',
+      leetcode: 'LeetCode'
     };
     const normalizedLinks = {
       linkedin: normalizeLinkedinUrl(typeof savedProfileLinks.linkedin === 'string' ? savedProfileLinks.linkedin : null),
       github: normalizeGithubUrl(typeof savedProfileLinks.github === 'string' ? savedProfileLinks.github : null),
-      kaggle: normalizeKaggleUrl(typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : null)
+      kaggle: normalizeKaggleUrl(typeof savedProfileLinks.kaggle === 'string' ? savedProfileLinks.kaggle : null),
+      leetcode: normalizeLeetcodeUrl(typeof savedProfileLinks.leetcode === 'string' ? savedProfileLinks.leetcode : null)
     };
 
     const needsUpdateSources: string[] = [];
@@ -692,6 +791,8 @@ export const StudentArtifactRepository = () => {
             ? normalizedLinks.github.length > 0
             : source === 'kaggle'
               ? normalizedLinks.kaggle.length > 0
+              : source === 'leetcode'
+                ? normalizedLinks.leetcode.length > 0
               : false;
       const isConnected = hasDocumentConnection || hasExternalConnection;
       if (isConnected) connectedCount += 1;
@@ -699,14 +800,16 @@ export const StudentArtifactRepository = () => {
       if (entry?.status === 'extracting') extractingSources.push(sourceLabels[source]);
       if (entry?.status === 'failed') failedSources.push(sourceLabels[source]);
 
-      if (source === 'linkedin' || source === 'github' || source === 'kaggle') {
+      if (source === 'linkedin' || source === 'github' || source === 'kaggle' || source === 'leetcode') {
         const extractedFrom = typeof entry?.extracted_from === 'string' ? entry.extracted_from.trim() : '';
         const currentUrl =
           source === 'linkedin'
             ? normalizedLinks.linkedin
             : source === 'github'
               ? normalizedLinks.github
-              : normalizedLinks.kaggle;
+              : source === 'kaggle'
+                ? normalizedLinks.kaggle
+                : normalizedLinks.leetcode;
         if (currentUrl && (!extractedFrom || extractedFrom !== currentUrl)) needsUpdateSources.push(sourceLabels[source]);
       } else if (source === 'resume' || source === 'transcript') {
         if (hasDocumentConnection && entry?.status !== 'succeeded' && entry?.status !== 'extracting') {
@@ -735,7 +838,7 @@ export const StudentArtifactRepository = () => {
       failedCount: failedSources.length,
       contextLine: attentionCount > 1 ? attentionLine : contextLine
     };
-  }, [savedProfileLinks.github, savedProfileLinks.kaggle, savedProfileLinks.linkedin, sourceExtractionLog]);
+  }, [savedProfileLinks.github, savedProfileLinks.kaggle, savedProfileLinks.leetcode, savedProfileLinks.linkedin, sourceExtractionLog]);
 
   const hasAnySuccessfulExtraction = useMemo(
     () => Object.values(sourceExtractionLog).some((entry) => entry?.status === 'succeeded'),
@@ -744,6 +847,25 @@ export const StudentArtifactRepository = () => {
   const isFirstTimeExtractionUser = !isLoadingArtifacts && artifacts.length === 0 && !hasAnySuccessfulExtraction;
 
   const showFirstArtifactTour = isFirstTimeExtractionUser && !showArtifactIntroTour;
+
+  const loadCapabilityTargets = useCallback(async () => {
+    setIsTargetsLoading(true);
+    try {
+      const response = await fetch('/api/student/capability-profiles', { cache: 'no-store' });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok: true; data?: CapabilityTargetsPayload }
+        | { ok: false; error?: string }
+        | null;
+      if (!response.ok || !payload || !payload.ok || !payload.data) {
+        throw new Error('capability_targets_fetch_failed');
+      }
+      setCapabilityTargets(payload.data);
+    } catch {
+      setCapabilityTargets(null);
+    } finally {
+      setIsTargetsLoading(false);
+    }
+  }, []);
 
   const loadArtifacts = useCallback(async () => {
     const loadStartedAt = Date.now();
@@ -793,6 +915,10 @@ export const StudentArtifactRepository = () => {
   useEffect(() => {
     void loadArtifacts();
   }, [loadArtifacts]);
+
+  useEffect(() => {
+    void loadCapabilityTargets();
+  }, [loadCapabilityTargets]);
 
   const handleDraftTypeChange = (nextType: ArtifactType) => {
     setDraftType(nextType);
@@ -1223,6 +1349,7 @@ export const StudentArtifactRepository = () => {
       }
 
       closeArtifactDialog();
+      void loadCapabilityTargets();
       setStatusMessage(`${isEditingExistingArtifact ? 'Updated' : 'Added'} artifact: ${normalizedTitle}.`);
     } finally {
       setIsSubmittingArtifact(false);
@@ -1236,7 +1363,7 @@ export const StudentArtifactRepository = () => {
   const deleteEditingArtifact = async () => {
     const artifactIdToDelete = editingArtifactId;
     if (!artifactIdToDelete || isSubmittingArtifact || isDeletingArtifact) return;
-    if (!window.confirm('Remove this artifact from active Evidence Profile view? Version history will be preserved.')) return;
+    if (!window.confirm('Delete this artifact from your active Evidence Profile view? Version history will be preserved.')) return;
 
     setIsDeletingArtifact(true);
     try {
@@ -1252,14 +1379,16 @@ export const StudentArtifactRepository = () => {
 
       const payload = (await response.json().catch(() => null)) as { ok: boolean } | null;
       if (!response.ok || !payload || !payload.ok) {
-        setStatusMessage('Unable to remove artifact right now. Please try again.');
+        setStatusMessage('Unable to delete artifact right now. Please try again.');
         return;
       }
 
       setArtifacts((current) => current.filter((artifact) => artifact.id !== artifactIdToDelete));
       setSelectedArtifactId((current) => (current === artifactIdToDelete ? null : current));
       closeArtifactDialog();
-      setStatusMessage('Artifact removed from active view. Provenance history retained.');
+      void loadCapabilityTargets();
+      setStatusMessage(null);
+      setSnackbar({ kind: 'success', message: 'Artifact deleted.' });
     } finally {
       setIsDeletingArtifact(false);
     }
@@ -1346,47 +1475,15 @@ export const StudentArtifactRepository = () => {
           </p>
         ) : null}
 
-        {!isLoadingArtifacts ? (
-          <div className="mt-4 lg:hidden">
-            <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Signal coverage summary</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.verified}`}>
-                    Verified: {verificationSummary.verified}
-                  </span>
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.unverified}`}>
-                    Unverified: {verificationSummary.unverified}
-                  </span>
-                </div>
-              </div>
-              <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
-                Coverage uses a neutral radar shape. Verification colors represent trust labels only.
-              </p>
-              <div className="mt-3 flex items-center justify-center overflow-visible">
-                <CapabilityRadar
-                  axes={signalRadarAxes}
-                  ariaLabel="Mobile evidence signal coverage radar"
-                  className="h-[340px] w-full max-w-[520px]"
-                  labelFontSize={12}
-                />
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {signalCoverage.map((signal) => (
-                  <div
-                    key={`mobile-cov-${signal.tag}`}
-                    className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-950/70"
-                  >
-                    <p className="text-xs font-semibold text-[#1f4338] dark:text-slate-200">{signal.tag}</p>
-                    <p className="mt-0.5 text-[11px] text-[#4f6a62] dark:text-slate-400">
-                      {signal.count} linked artifact{signal.count === 1 ? '' : 's'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="mt-4 lg:hidden">
+          <div className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
+            <p className="mt-1 text-xs text-[#4f6a62] dark:text-slate-400">
+              Compare target expectations against your current evidence coverage by capability axis.
+            </p>
+            <EvidenceVsTargetSummary isLoading={isTargetsLoading} capabilityTargets={capabilityTargets} compact />
           </div>
-        ) : null}
+        </div>
 
         {!isLoadingArtifacts ? (
           <div className="mt-4 lg:hidden">
@@ -1726,47 +1823,12 @@ export const StudentArtifactRepository = () => {
           <div className="space-y-4 xl:space-y-4">
             <Card
               className="bg-white/95 p-5 dark:bg-slate-900/80"
-              header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Signal coverage summary</h3>}
+              header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Evidence vs Target</h3>}
             >
-              <div className="mb-3 space-y-2">
-                <span className="inline-flex items-center rounded-full border border-[#cae2d8] bg-[#eef9f3] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#1f5a45] dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-                  Coverage Radar
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.verified}`}>
-                    Verified: {verificationSummary.verified}
-                  </span>
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${verificationToneClass.unverified}`}>
-                    Unverified: {verificationSummary.unverified}
-                  </span>
-                </div>
-              </div>
               <p className="text-xs text-[#4f6a62] dark:text-slate-400">
-                Coverage uses a neutral radar shape. Verification colors represent trust labels only.
+                Compare target expectations against your current evidence coverage by capability axis.
               </p>
-              <div className="mt-3 flex items-center justify-center">
-                <CapabilityRadar
-                  axes={signalRadarAxes}
-                  ariaLabel="Evidence signal coverage radar"
-                  className="h-[360px] w-full max-w-[520px]"
-                  labelFontSize={12}
-                />
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {signalCoverage.map((signal) => {
-                  return (
-                    <div
-                      key={`coverage-${signal.tag}`}
-                      className="rounded-xl border border-[#d4e1db] bg-[#f8fcfa] px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
-                    >
-                      <p className="text-xs font-semibold text-[#1f4338] dark:text-slate-200">{signal.tag}</p>
-                      <p className="mt-0.5 text-[11px] text-[#4f6a62] dark:text-slate-400">
-                        {signal.count} linked artifact{signal.count === 1 ? '' : 's'}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
+              <EvidenceVsTargetSummary isLoading={isTargetsLoading} capabilityTargets={capabilityTargets} />
             </Card>
 
             <Card
@@ -1861,6 +1923,15 @@ export const StudentArtifactRepository = () => {
                     {isEditingInDialog ? 'Update this artifact using the same field set as create.' : 'Capture evidence quickly. You can edit details later.'}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  aria-label="Close dialog"
+                  onClick={closeArtifactDialog}
+                  disabled={isSubmittingArtifact || isDeletingArtifact}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#bfd2ca] bg-white text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
               </div>
 
               <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
@@ -2297,17 +2368,9 @@ export const StudentArtifactRepository = () => {
                     disabled={isDeletingArtifact || isSubmittingArtifact}
                     className="inline-flex h-10 items-center rounded-xl border border-rose-300 bg-rose-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-rose-500 dark:hover:bg-rose-400"
                   >
-                    {isDeletingArtifact ? 'Removing...' : 'Remove from active view'}
+                    {isDeletingArtifact ? 'Deleting...' : 'Delete'}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={closeArtifactDialog}
-                  disabled={isSubmittingArtifact || isDeletingArtifact}
-                  className="inline-flex h-10 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-sm font-semibold text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
               </div>
 
               {statusMessage ? (

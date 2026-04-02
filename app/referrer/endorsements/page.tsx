@@ -146,7 +146,7 @@ function ReferrerEndorsementsPageContent() {
                 value={profileInput}
                 onChange={(event) => setProfileInput(event.target.value)}
                 className="h-11 min-w-[280px] flex-1 rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm text-[#0a1f1a]"
-                placeholder="https://app.example.com/profile/..."
+                placeholder="https://app.example.com/u/..."
                 disabled={isResolving}
               />
               <button
@@ -196,7 +196,7 @@ function ReferrerEndorsementsPageContent() {
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-base font-semibold text-[#0a1f1a]">{student.full_name}</span>
-                  <span className="block truncate text-xs text-[#4c6860]">/profile/{student.share_slug}</span>
+                  <span className="block truncate text-xs text-[#4c6860]">/u/{student.share_slug}</span>
                 </span>
               </div>
 

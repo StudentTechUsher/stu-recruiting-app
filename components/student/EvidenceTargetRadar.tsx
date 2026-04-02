@@ -69,8 +69,30 @@ const buildPolygonPoints = ({
 
 const truncLabel = (value: string): string => {
   const normalized = value.trim();
-  if (normalized.length <= 22) return normalized;
-  return `${normalized.slice(0, 19)}...`;
+  if (normalized.length <= 28) return normalized;
+  return `${normalized.slice(0, 25)}...`;
+};
+
+const calculateEvidenceTargetAlignmentPercent = (axes: EvidenceTargetRadarAxis[]): number => {
+  const targetTotal = axes.reduce((sum, axis) => sum + clamp01(axis.target_magnitude), 0);
+  if (targetTotal <= 0) return 0;
+  const overlapTotal = axes.reduce(
+    (sum, axis) => sum + Math.min(clamp01(axis.evidence_magnitude), clamp01(axis.target_magnitude)),
+    0
+  );
+  return Math.round((overlapTotal / targetTotal) * 100);
+};
+
+const formatCapabilityLabel = (value: string): string => {
+  const normalized = value
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (normalized.length === 0) return value;
+  return normalized
+    .split(" ")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
 };
 
 export function EvidenceTargetRadar({
@@ -103,7 +125,7 @@ export function EvidenceTargetRadar({
     const label = radarCoordinates({
       index,
       count,
-      radius: 136,
+      radius: 148,
       center,
       magnitude: 1,
     });
@@ -152,12 +174,12 @@ export function EvidenceTargetRadar({
               y={entry.label.y}
               textAnchor={entry.textAnchor}
               dominantBaseline={entry.dominantBaseline}
-              fontSize={12}
-              fontWeight="700"
-              fill="#0f5132"
-              style={{ paintOrder: "stroke", stroke: "#f6fbf8", strokeWidth: 3 }}
+              fontSize={14}
+              fontWeight="800"
+              fill="#0b422e"
+              style={{ paintOrder: "stroke", stroke: "#f6fbf8", strokeWidth: 4 }}
             >
-              {truncLabel(entry.axis.label)}
+              {truncLabel(formatCapabilityLabel(entry.axis.label))}
             </text>
           </g>
         ))}
@@ -176,4 +198,5 @@ export function EvidenceTargetRadar({
   );
 }
 
+export { calculateEvidenceTargetAlignmentPercent };
 export type { EvidenceTargetRadarAxis };

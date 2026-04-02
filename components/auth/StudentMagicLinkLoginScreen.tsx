@@ -22,13 +22,17 @@ export function StudentMagicLinkLoginScreen({
   claimToken = null,
   googleOAuthEnabled = false,
 }: StudentMagicLinkLoginScreenProps) {
+  const description = googleOAuthEnabled
+    ? "Continue with Google or use your email to receive a secure sign-in link."
+    : "Use your email to receive a secure sign-in link.";
+
   return (
     <MagicLinkLoginScreen
       sessionCheckEnabled={sessionCheckEnabled}
       submitPath="/api/auth/login/student"
       eyebrow="Student sign-in"
-      heading="Get magic link"
-      description="Use your email to receive a secure sign-in link."
+      heading="Sign in"
+      description={description}
       emailLabel="Email"
       emailPlaceholder="name@example.com"
       submitLabel="Send magic link"

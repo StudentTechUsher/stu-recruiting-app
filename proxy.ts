@@ -25,6 +25,10 @@ const isPublicPath = (pathname: string) => {
   return (
     pathname.startsWith("/login") ||
     pathname.startsWith("/auth/callback") ||
+    pathname === "/profile" ||
+    pathname.startsWith("/profile/") ||
+    pathname === "/u" ||
+    pathname.startsWith("/u/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/images") ||
     pathname === "/favicon.ico" ||

@@ -55,10 +55,9 @@ const fetchCapabilityModels = async (
     error: unknown;
   };
   if (query.error) {
-    console.error("[student-capability-profile-selection] capability_models query failed", query.error);
     return [];
   }
-  return query.data ?? [];
+  return (query.data ?? []).filter((model) => model.is_active === true);
 };
 
 const createCapabilityProfileOptions = ({

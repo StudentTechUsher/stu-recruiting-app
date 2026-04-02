@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { CapabilityRadar, type CapabilityRadarAxis } from "@/components/student/CapabilityRadar";
-import { EvidenceTargetRadar, type EvidenceTargetRadarAxis } from "@/components/student/EvidenceTargetRadar";
+import {
+  EvidenceTargetRadar,
+  calculateEvidenceTargetAlignmentPercent,
+  type EvidenceTargetRadarAxis,
+} from "@/components/student/EvidenceTargetRadar";
 
 type VerificationBreakdown = {
   verified: number;
@@ -81,7 +84,7 @@ type ProfilePayload = {
 };
 
 type MetricTone = "neutral" | "success" | "warning" | "danger";
-type RadarTab = "soft" | "role";
+type HiringSignalLevel = "Weak" | "Weak-leaning" | "Moderate" | "Strong-leaning" | "Strong";
 
 const skeletonClass = "animate-pulse rounded-xl bg-[#dde9e3] dark:bg-slate-700/70";
 
@@ -130,21 +133,21 @@ const resolveVerifiedShareTone = (share: number): MetricTone => {
   return "danger";
 };
 
-const resolvePendingShareTone = (share: number): MetricTone => {
-  if (share <= 0.3) return "success";
-  if (share <= 0.6) return "warning";
-  return "danger";
-};
-
-const mapDashboardAxisToRadarAxis = (axis: DashboardAxis): CapabilityRadarAxis => {
-  const verified = axis.verification_breakdown.verified;
-  const pendingOrUnverified = axis.verification_breakdown.pending + axis.verification_breakdown.unverified;
-  const magnitude = axis.covered ? (verified > 0 ? 1 : pendingOrUnverified > 0 ? 0.65 : 0.5) : 0;
-  return {
-    id: axis.capability_id,
-    label: axis.label,
-    magnitude,
-  };
+const resolveOverallHiringSignal = ({
+  coveragePercent,
+  verifiedShare,
+}: {
+  coveragePercent: number;
+  verifiedShare: number;
+}): { level: HiringSignalLevel; tone: MetricTone } => {
+  const coverageWeight = Math.max(0, Math.min(coveragePercent, 100)) / 100;
+  const verifiedWeight = Math.max(0, Math.min(verifiedShare, 1));
+  const score = coverageWeight * 0.65 + verifiedWeight * 0.35;
+  if (score < 0.2) return { level: "Weak", tone: "danger" };
+  if (score < 0.4) return { level: "Weak-leaning", tone: "warning" };
+  if (score < 0.6) return { level: "Moderate", tone: "neutral" };
+  if (score < 0.8) return { level: "Strong-leaning", tone: "success" };
+  return { level: "Strong", tone: "success" };
 };
 
 export default function StudentDashboardPage() {
@@ -155,7 +158,6 @@ export default function StudentDashboardPage() {
   const [capabilityTargets, setCapabilityTargets] = useState<CapabilityTargetsPayload | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
   const [isDismissingMismatch, setIsDismissingMismatch] = useState(false);
-  const [mobileRadarTab, setMobileRadarTab] = useState<RadarTab>("soft");
 
   useEffect(() => {
     let active = true;
@@ -262,18 +264,6 @@ export default function StudentDashboardPage() {
     }
   };
 
-  const axes = useMemo(() => {
-    return (dashboard?.axes ?? []).filter((axis) => axis.capability_class !== "fallback");
-  }, [dashboard?.axes]);
-  const softSkillAxes = useMemo(() => {
-    return axes.filter((axis) => axis.capability_class === "soft_skill");
-  }, [axes]);
-  const roleSkillAxes = useMemo(() => {
-    return axes.filter((axis) => axis.capability_class === "role_capability");
-  }, [axes]);
-  const softSkillRadarAxes = useMemo<CapabilityRadarAxis[]>(() => softSkillAxes.map(mapDashboardAxisToRadarAxis), [softSkillAxes]);
-  const roleSkillRadarAxes = useMemo<CapabilityRadarAxis[]>(() => roleSkillAxes.map(mapDashboardAxisToRadarAxis), [roleSkillAxes]);
-
   const stateLabel = useMemo(() => {
     const state = dashboard?.state;
     if (state === "no_evidence") return "Add evidence to populate capability coverage.";
@@ -282,9 +272,11 @@ export default function StudentDashboardPage() {
     return "Keep your evidence profile current.";
   }, [dashboard?.state]);
   const noRolesSelected = !isLoading && (dashboard?.roles.length ?? 0) === 0;
-  const roleRadarEmpty = !isLoading && roleSkillRadarAxes.length === 0;
   const verifiedShareTone = resolveVerifiedShareTone(dashboard?.kpis.verified_evidence_share ?? 0);
-  const pendingShareTone = resolvePendingShareTone(dashboard?.kpis.pending_unverified_share ?? 0);
+  const overallHiringSignal = resolveOverallHiringSignal({
+    coveragePercent: dashboard?.kpis.capability_coverage_percent ?? 0,
+    verifiedShare: dashboard?.kpis.verified_evidence_share ?? 0,
+  });
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
@@ -356,11 +348,12 @@ export default function StudentDashboardPage() {
                 }
               />
               <MetricCard
-                label="Pending + unverified share"
-                value={asPercent(dashboard.kpis.pending_unverified_share)}
-                tone={pendingShareTone}
+                label="Overall Hiring Signal"
+                value={overallHiringSignal.level}
+                tone={overallHiringSignal.tone}
+                helperText="Adding and verifying a variety of artifacts for your evidence profile will strengthen your overall hiring signal to employers."
                 cta={
-                  pendingShareTone === "danger"
+                  overallHiringSignal.level === "Weak" || overallHiringSignal.level === "Weak-leaning"
                     ? { label: "Fix now", href: "/student/artifacts?focus=verification" }
                     : undefined
                 }
@@ -368,140 +361,6 @@ export default function StudentDashboardPage() {
               <MetricCard label="Last updated" value={formatTimestamp(dashboard.kpis.last_updated_at)} />
             </>
           )}
-        </div>
-
-        <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_1fr]">
-          <article className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Capability Radar</p>
-            <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">
-              Separate views for universal baseline skills and role-specific capability coverage.
-            </p>
-
-            {!isLoading ? (
-              <div className="mt-3 inline-flex rounded-xl border border-[#cadad3] bg-[#f2f8f5] p-1 lg:hidden dark:border-slate-700 dark:bg-slate-800/80">
-                <button
-                  type="button"
-                  onClick={() => setMobileRadarTab("soft")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
-                    mobileRadarTab === "soft"
-                      ? "bg-white text-[#12392f] shadow-sm dark:bg-slate-900 dark:text-slate-100"
-                      : "text-[#4f6d64] dark:text-slate-300"
-                  }`}
-                >
-                  Soft Skills
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMobileRadarTab("role")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
-                    mobileRadarTab === "role"
-                      ? "bg-white text-[#12392f] shadow-sm dark:bg-slate-900 dark:text-slate-100"
-                      : "text-[#4f6d64] dark:text-slate-300"
-                  }`}
-                >
-                  Role Skills
-                </button>
-              </div>
-            ) : null}
-
-            <div className="mt-4 lg:hidden">
-              <CapabilityRadarPanel
-                title={mobileRadarTab === "soft" ? "Soft Skills Radar" : "Role Skills Radar"}
-                subtitle={
-                  mobileRadarTab === "soft"
-                    ? "Universal baseline capabilities tracked for all students."
-                    : "Role-required capabilities based on selected target roles."
-                }
-                axes={mobileRadarTab === "soft" ? softSkillRadarAxes : roleSkillRadarAxes}
-                isLoading={isLoading || !dashboard}
-                ariaLabel={mobileRadarTab === "soft" ? "Soft skills capability radar" : "Role skills capability radar"}
-                emptyMessage={
-                  mobileRadarTab === "role"
-                    ? noRolesSelected
-                      ? "Select at least one role to unlock role-skill tracking."
-                      : "No role capability mapping available yet for selected roles."
-                    : "No soft-skill evidence linked yet."
-                }
-                emptyCta={
-                  mobileRadarTab === "role"
-                    ? { label: "Select role targets", href: "/student/targets" }
-                    : { label: "Add artifacts", href: "/student/artifacts?openAddArtifact=true" }
-                }
-              />
-            </div>
-
-            <div className="mt-4 hidden gap-4 lg:grid lg:grid-cols-2">
-              <CapabilityRadarPanel
-                title="Soft Skills Radar"
-                subtitle="Universal baseline capabilities tracked for all students."
-                axes={softSkillRadarAxes}
-                isLoading={isLoading || !dashboard}
-                ariaLabel="Soft skills capability radar"
-                emptyMessage="No soft-skill evidence linked yet."
-                emptyCta={{ label: "Add artifacts", href: "/student/artifacts?openAddArtifact=true" }}
-              />
-              <CapabilityRadarPanel
-                title="Role Skills Radar"
-                subtitle="Role-required capabilities based on selected target roles."
-                axes={roleSkillRadarAxes}
-                isLoading={isLoading || !dashboard}
-                ariaLabel="Role skills capability radar"
-                emptyMessage={
-                  noRolesSelected
-                    ? "Select at least one role to unlock role-skill tracking."
-                    : roleRadarEmpty
-                      ? "No role capability mapping available yet for selected roles."
-                      : "No role-skill evidence linked yet."
-                }
-                emptyCta={{ label: "Select role targets", href: "/student/targets" }}
-              />
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Actions</p>
-            <h2 className="mt-2 text-xl font-semibold text-[#102922] dark:text-slate-100">Strengthen your evidence signal</h2>
-            <p className="mt-2 text-sm text-[#466258] dark:text-slate-300">
-              Capabilities shown here are derived from linked artifacts and verification states.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {isLoading || !dashboard ? (
-                <>
-                  <div className={`${skeletonClass} h-9 w-36`} />
-                  <div className={`${skeletonClass} h-9 w-44`} />
-                </>
-              ) : (
-                <>
-                  <Link
-                    href={dashboard.primary_cta.href}
-                    className="inline-flex h-9 items-center rounded-xl bg-[#117b56] px-4 text-xs font-semibold uppercase tracking-[0.08em] text-white transition-colors hover:bg-[#0f6a4b]"
-                  >
-                    {dashboard.primary_cta.label}
-                  </Link>
-                  <Link
-                    href={dashboard.secondary_cta.href}
-                    className="inline-flex h-9 items-center rounded-xl border border-[#bfd2ca] bg-white px-4 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    {dashboard.secondary_cta.label}
-                  </Link>
-                </>
-              )}
-            </div>
-
-            {!isLoading && dashboard ? (
-              <div className="mt-5 rounded-xl border border-[#d9e6df] bg-[#f7fcf9] p-3 dark:border-slate-700 dark:bg-slate-900">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
-                  Role context
-                </p>
-                <p className="mt-1 text-sm text-[#2f4f44] dark:text-slate-200">
-                  {dashboard.roles.length > 0 ? dashboard.roles.join(", ") : "No selected role targets yet"}
-                </p>
-                <p className="mt-2 text-xs text-[#4f6d64] dark:text-slate-400">
-                  Evidence count: {dashboard.kpis.evidence_count}
-                </p>
-              </div>
-            ) : null}
-          </article>
         </div>
 
         <article className="mt-6 rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
@@ -518,6 +377,7 @@ export default function StudentDashboardPage() {
             <div className="mt-3 grid gap-4 lg:grid-cols-2">
               {capabilityTargets?.active_capability_profiles.map((target, index) => {
                 const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
+                const alignmentPercent = fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) : null;
                 return (
                   <section
                     key={`target-fit-${target.capability_profile_id}`}
@@ -527,9 +387,14 @@ export default function StudentDashboardPage() {
                       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
                         {target.role_label} @ {target.company_label}
                       </p>
-                      <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
-                        {index === 0 ? "Primary" : "Secondary"}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
+                          {alignmentPercent !== null ? `Alignment ${alignmentPercent}%` : "Alignment --"}
+                        </span>
+                        <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                          {index === 0 ? "Primary" : "Secondary"}
+                        </span>
+                      </div>
                     </div>
                     <div className="mt-3 flex min-h-[320px] items-center justify-center">
                       {fit?.axes && fit.axes.length > 0 ? (
@@ -561,55 +426,6 @@ export default function StudentDashboardPage() {
         </article>
       </section>
     </main>
-  );
-}
-
-function CapabilityRadarPanel({
-  title,
-  subtitle,
-  axes,
-  isLoading,
-  ariaLabel,
-  emptyMessage,
-  emptyCta,
-}: {
-  title: string;
-  subtitle: string;
-  axes: CapabilityRadarAxis[];
-  isLoading: boolean;
-  ariaLabel: string;
-  emptyMessage: string;
-  emptyCta?: { label: string; href: string };
-}) {
-  return (
-    <section className="rounded-xl border border-[#d2e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900/70">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">{title}</p>
-      <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">{subtitle}</p>
-      <div className="mt-3 flex min-h-[350px] items-center justify-center overflow-visible">
-        {isLoading ? (
-          <div className={`${skeletonClass} h-[320px] w-[320px] rounded-full`} />
-        ) : axes.length > 0 ? (
-          <CapabilityRadar
-            axes={axes}
-            ariaLabel={ariaLabel}
-            className="h-[380px] w-full max-w-[520px]"
-            labelFontSize={13}
-          />
-        ) : (
-          <div className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-            <p>{emptyMessage}</p>
-            {emptyCta ? (
-              <Link
-                href={emptyCta.href}
-                className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
-              >
-                {emptyCta.label}
-              </Link>
-            ) : null}
-          </div>
-        )}
-      </div>
-    </section>
   );
 }
 

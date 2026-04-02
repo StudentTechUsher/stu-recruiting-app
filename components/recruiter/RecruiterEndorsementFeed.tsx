@@ -89,7 +89,7 @@ export function RecruiterEndorsementFeed() {
                 {endorsement.referrer_company ? ` · ${endorsement.referrer_company}` : ""}
               </p>
               <p className="mt-2 line-clamp-3 text-xs leading-6 text-[#48635b] dark:text-slate-300">{endorsement.endorsement_text}</p>
-              <p className="mt-2 text-[11px] text-[#557168] dark:text-slate-400">Profile URL: /profile/{endorsement.student_share_slug}</p>
+              <p className="mt-2 text-[11px] text-[#557168] dark:text-slate-400">Profile URL: /u/{endorsement.student_share_slug}</p>
             </article>
           ))}
         </div>

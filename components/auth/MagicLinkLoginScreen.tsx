@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 type MagicLinkResponse = {
   ok: boolean;
@@ -9,6 +10,13 @@ type MagicLinkResponse = {
   details?: string;
   throttled?: boolean;
   retryAfterSeconds?: number;
+};
+
+type VerifyCodeResponse = {
+  ok: boolean;
+  error?: string;
+  details?: string;
+  redirectPath?: string;
 };
 
 type MagicLinkLoginScreenProps = {
@@ -25,9 +33,8 @@ type MagicLinkLoginScreenProps = {
   initialError?: string | null;
   additionalPayload?: Record<string, string>;
   googleOAuthPath?: string | null;
+  verifyPath?: string;
 };
-
-type SignInMethod = "magic_link" | "google";
 
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
@@ -61,15 +68,19 @@ export function MagicLinkLoginScreen({
   initialError = null,
   additionalPayload = {},
   googleOAuthPath = null,
+  verifyPath,
 }: MagicLinkLoginScreenProps) {
+  const router = useRouter();
   const hasGoogleOAuth = Boolean(googleOAuthPath);
+  const verifyEndpoint = verifyPath ?? `${submitPath}/verify`;
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [lastRequestedEmail, setLastRequestedEmail] = useState("");
-  const [signInMethod, setSignInMethod] = useState<SignInMethod | null>(hasGoogleOAuth ? null : "magic_link");
   const normalizedEmail = email.trim().toLowerCase();
   const isCooldownActive = cooldownSeconds > 0 && normalizedEmail !== "" && normalizedEmail === lastRequestedEmail;
 
@@ -141,12 +152,78 @@ export function MagicLinkLoginScreen({
       if (data.throttled) {
         setNotice(`A sign-in link was requested recently. Wait ${retryAfterSeconds} seconds, then try again.`);
       } else {
-        setNotice("Magic link sent. Check your inbox and open the sign-in link.");
+        setNotice("Magic link sent. Check your inbox and open the sign-in link, or enter the email code below.");
       }
     } catch {
       setError("Unable to send magic link.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onVerifyCode = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedEmailValue = email.trim();
+    const normalizedCode = code.trim();
+    if (!normalizedEmailValue) {
+      setError("Enter your email address before verifying.");
+      return;
+    }
+
+    if (!normalizedCode) {
+      setError("Enter the sign-in code from your email.");
+      return;
+    }
+
+    setVerifyingCode(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch(verifyEndpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          email: normalizedEmailValue,
+          code: normalizedCode,
+          ...additionalPayload,
+        })
+      });
+
+      const data = (await response.json().catch(() => null)) as VerifyCodeResponse | null;
+      const errorCode = data?.error;
+
+      if (!response.ok || !data?.ok || !data.redirectPath) {
+        if (errorCode === "invalid_email" || errorCode === "invalid_otp_payload") {
+          setError("Enter a valid email and code.");
+        } else if (errorCode === "invalid_otp_code") {
+          setError("Code is invalid or expired. Request a new magic link and try again.");
+        } else if (errorCode === "otp_rate_limited") {
+          setError("Too many attempts. Wait a moment and try again.");
+        } else if (errorCode === "wrong_account_type") {
+          setError("This email is assigned to a different account type. Use the matching sign-in path.");
+        } else if (errorCode === "role_unassigned") {
+          setError("Your account does not have an assigned Stu role. Contact an org admin.");
+        } else if (errorCode === "supabase_not_configured") {
+          setError("Supabase auth is not configured for this environment.");
+        } else if (errorCode && errorMessages[errorCode]) {
+          setError(errorMessages[errorCode]);
+        } else if (errorCode === "otp_verify_failed" && data?.details) {
+          setError(`Unable to verify code. ${data.details}`);
+        } else {
+          setError("Unable to verify code.");
+        }
+        return;
+      }
+
+      router.push(data.redirectPath);
+      router.refresh();
+    } catch {
+      setError("Unable to verify code.");
+    } finally {
+      setVerifyingCode(false);
     }
   };
 
@@ -158,80 +235,80 @@ export function MagicLinkLoginScreen({
         <p className="mt-2 text-sm text-[#3c5f52]">{description}</p>
 
         {hasGoogleOAuth ? (
-          <div className="mt-5 rounded-xl border border-[#d6e1db] bg-[#f8fcfa] p-2">
-            <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#48695d]">
-              Sign-in method
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setSignInMethod("magic_link")}
-                className={`rounded-lg border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
-                  signInMethod === "magic_link"
-                    ? "border-emerald-500 bg-emerald-50 text-[#0a1f1a]"
-                    : "border-[#bfd2ca] bg-white text-[#3f6055] hover:bg-[#edf5f1]"
-                }`}
+          <div className="mt-5">
+            <a
+              href={googleOAuthPath ?? undefined}
+              className="inline-flex w-full items-center justify-center gap-3 rounded-xl border border-[#dadce0] bg-white px-3 py-2 text-sm font-semibold text-[#3c4043] shadow-sm transition-colors hover:bg-[#f8f9fa]"
+            >
+              <svg
+                aria-hidden="true"
+                width="18"
+                height="18"
+                viewBox="0 0 48 48"
               >
-                Magic link
-              </button>
-              <button
-                type="button"
-                onClick={() => setSignInMethod("google")}
-                className={`rounded-lg border px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
-                  signInMethod === "google"
-                    ? "border-emerald-500 bg-emerald-50 text-[#0a1f1a]"
-                    : "border-[#bfd2ca] bg-white text-[#3f6055] hover:bg-[#edf5f1]"
-                }`}
-              >
-                Google
-              </button>
+                <path fill="#EA4335" d="M24 9.5c3.9 0 7.4 1.3 10.2 4l7.6-7.6C37.3 2 31.1 0 24 0 14.6 0 6.5 5.4 2.6 13.3l8.9 6.9C13.5 13.8 18.3 9.5 24 9.5z" />
+                <path fill="#4285F4" d="M46.1 24.5c0-1.7-.2-3.3-.5-4.8H24v9.1h12.4c-.5 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.5-4.1 6.8-10.1 6.8-17.3z" />
+                <path fill="#FBBC05" d="M11.5 28.2c-.5-1.4-.8-2.8-.8-4.2s.3-2.9.8-4.2l-8.9-6.9C.9 16.2 0 20 0 24s.9 7.8 2.6 11.1l8.9-6.9z" />
+                <path fill="#34A853" d="M24 48c7.1 0 13.1-2.3 17.5-6.3l-7.6-5.9c-2.1 1.4-4.8 2.2-9.9 2.2-5.7 0-10.5-4.3-12.2-10.1l-8.9 6.9C6.5 42.6 14.6 48 24 48z" />
+              </svg>
+              <span>Sign in with Google</span>
+            </a>
+
+            <div className="mt-4 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#56766a]">
+              <span className="h-px flex-1 bg-[#d6e1db]" />
+              <span>Or use email</span>
+              <span className="h-px flex-1 bg-[#d6e1db]" />
             </div>
           </div>
         ) : null}
 
-        {(!hasGoogleOAuth || signInMethod === "magic_link") ? (
-          <form className="mt-5 space-y-4" onSubmit={onSubmit}>
-            <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
-              {emailLabel}
+        <form className={`${hasGoogleOAuth ? "mt-4" : "mt-5"} space-y-4`} onSubmit={onSubmit}>
+          <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
+            {emailLabel}
+            <input
+              type="email"
+              autoComplete="email"
+              className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
+              placeholder={emailPlaceholder}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading || isCooldownActive}
+            className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? loadingLabel : isCooldownActive ? `Wait ${cooldownSeconds}s` : submitLabel}
+          </button>
+        </form>
+
+        {lastRequestedEmail ? (
+          <div className="mt-4 rounded-xl border border-[#d6e1db] bg-[#f8fcfa] p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#48695d]">Have a code instead?</p>
+            <p className="mt-1 text-xs text-[#3f6055]">Enter the code from your email to finish sign-in.</p>
+            <form className="mt-3 space-y-3" onSubmit={onVerifyCode}>
               <input
-                type="email"
-                autoComplete="email"
-                className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
-                placeholder={emailPlaceholder}
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                className="w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
+                placeholder="Enter code"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
                 required
               />
-            </label>
-
-            <button
-              type="submit"
-              disabled={loading || isCooldownActive}
-              className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? loadingLabel : isCooldownActive ? `Wait ${cooldownSeconds}s` : submitLabel}
-            </button>
-          </form>
-        ) : null}
-
-        {hasGoogleOAuth && signInMethod === "google" ? (
-          <a
-            href={googleOAuthPath ?? undefined}
-            className="mt-5 inline-flex w-full items-center justify-center gap-3 rounded-xl border border-[#dadce0] bg-white px-3 py-2 text-sm font-semibold text-[#3c4043] shadow-sm transition-colors hover:bg-[#f8f9fa]"
-          >
-            <svg
-              aria-hidden="true"
-              width="18"
-              height="18"
-              viewBox="0 0 48 48"
-            >
-              <path fill="#EA4335" d="M24 9.5c3.9 0 7.4 1.3 10.2 4l7.6-7.6C37.3 2 31.1 0 24 0 14.6 0 6.5 5.4 2.6 13.3l8.9 6.9C13.5 13.8 18.3 9.5 24 9.5z" />
-              <path fill="#4285F4" d="M46.1 24.5c0-1.7-.2-3.3-.5-4.8H24v9.1h12.4c-.5 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.5-4.1 6.8-10.1 6.8-17.3z" />
-              <path fill="#FBBC05" d="M11.5 28.2c-.5-1.4-.8-2.8-.8-4.2s.3-2.9.8-4.2l-8.9-6.9C.9 16.2 0 20 0 24s.9 7.8 2.6 11.1l8.9-6.9z" />
-              <path fill="#34A853" d="M24 48c7.1 0 13.1-2.3 17.5-6.3l-7.6-5.9c-2.1 1.4-4.8 2.2-9.9 2.2-5.7 0-10.5-4.3-12.2-10.1l-8.9 6.9C6.5 42.6 14.6 48 24 48z" />
-            </svg>
-            <span>Sign in with Google</span>
-          </a>
+              <button
+                type="submit"
+                disabled={verifyingCode}
+                className="w-full rounded-xl border border-[#86c8a8] bg-white px-3 py-2 text-sm font-semibold text-[#225744] transition-colors hover:bg-[#edf7f2] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {verifyingCode ? "Verifying..." : "Verify code"}
+              </button>
+            </form>
+          </div>
         ) : null}
 
         {error ? <p className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}

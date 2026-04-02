@@ -241,7 +241,7 @@ export function RecruiterCandidateExplorer() {
                       <p className="mt-1 text-xs text-[#4c6860] dark:text-slate-400">
                         Stu profile: {candidate.student_profile.full_name}
                         {candidate.student_profile.university ? ` · ${candidate.student_profile.university}` : ""}
-                        {candidate.student_profile.share_slug ? ` · /profile/${candidate.student_profile.share_slug}` : ""}
+                        {candidate.student_profile.share_slug ? ` · /u/${candidate.student_profile.share_slug}` : ""}
                       </p>
                     ) : null}
 

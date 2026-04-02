@@ -102,7 +102,7 @@ const fetchCapabilityModels = async (
     .select("*")
     ) as SupabaseQueryResult<CapabilityModelRow>;
   return {
-    data: query.data ?? [],
+    data: (query.data ?? []).filter((model) => model.is_active === true),
     error: query.error ?? null,
   };
 };
@@ -422,25 +422,6 @@ export async function GET() {
     models: modelRows,
     roles: roleRows,
   });
-
-  if (process.env.NODE_ENV !== "production") {
-    const activeModelCount = modelRows.filter((model) => model.is_active === true).length;
-    console.log("[student-capability-profiles] role query debug", {
-      profile_id: context.user_id,
-      model_count_total: modelRows.length,
-      model_count_active: activeModelCount,
-      role_row_count: roleRows.length,
-      roles_response_count: rolesResponse.length,
-      roles_response_sample: rolesResponse.slice(0, 10).map((role) => role.role_label),
-      query_errors: {
-        students: toErrorMessage(studentQuery.error),
-        capability_models: toErrorMessage(modelQuery.error),
-        companies: toErrorMessage(companyQuery.error),
-        job_roles: toErrorMessage(roleQuery.error),
-        artifacts: toErrorMessage(artifactQuery.error),
-      },
-    });
-  }
 
   const queryErrors = {
     students: toErrorMessage(studentQuery.error),

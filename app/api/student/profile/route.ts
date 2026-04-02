@@ -14,6 +14,7 @@ import {
   toActorSurrogate,
   type ObsOutcome
 } from "@/lib/observability/api";
+import { createHash } from "node:crypto";
 
 type StudentRow = { student_data: unknown };
 type ProfilePersonalInfoRow = { personal_info: unknown };
@@ -119,11 +120,31 @@ const normalizeKaggleProfileUrl = (value: string): string => {
   return trimmed;
 };
 
+const normalizeLeetcodeProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("leetcode.com")) {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const username = segments[0] === "u" || segments[0] === "profile" ? segments[1] : segments[0];
+      if (username) return `https://leetcode.com/u/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
 const normalizeProfileLinkValue = (key: string, value: string): string => {
   const normalizedKey = key.trim().toLowerCase();
   if (normalizedKey === "github") return normalizeGithubProfileUrl(value);
   if (normalizedKey === "linkedin") return normalizeLinkedinProfileUrl(value);
   if (normalizedKey === "kaggle") return normalizeKaggleProfileUrl(value);
+  if (normalizedKey === "leetcode") return normalizeLeetcodeProfileUrl(value);
   return value.trim();
 };
 
@@ -172,6 +193,26 @@ const buildOptionList = (values: string[], fallback: readonly string[]): string[
 
 const hasOwn = (record: Record<string, unknown>, key: string): boolean => Object.prototype.hasOwnProperty.call(record, key);
 
+const upsertOptionalPersonalInfoString = ({
+  source,
+  target,
+  sourceKey,
+  targetKey = sourceKey,
+}: {
+  source: Record<string, unknown>;
+  target: Record<string, unknown>;
+  sourceKey: string;
+  targetKey?: string;
+}) => {
+  if (!hasOwn(source, sourceKey)) return;
+  const value = asTrimmedString(source[sourceKey]);
+  if (value) {
+    target[targetKey] = value;
+    return;
+  }
+  delete target[targetKey];
+};
+
 const parseAvatarFileRef = (value: unknown): AvatarFileRef | null => {
   const parsed = toRecord(value);
   const bucket = asTrimmedString(parsed.bucket);
@@ -180,7 +221,38 @@ const parseAvatarFileRef = (value: unknown): AvatarFileRef | null => {
   return { bucket, path };
 };
 
-const deriveShareSlug = (profileId: string): string => profileId.toLowerCase().replace(/-/g, "");
+const slugifyShareHandle = (value: string): string => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized.slice(0, 64);
+};
+
+const deriveShareSlug = ({
+  profileId,
+  personalInfo,
+  fallbackEmail
+}: {
+  profileId: string;
+  personalInfo: Record<string, unknown>;
+  fallbackEmail?: string | null;
+}): string => {
+  const fullName = asTrimmedString(personalInfo.full_name);
+  const firstName = asTrimmedString(personalInfo.first_name);
+  const lastName = asTrimmedString(personalInfo.last_name);
+  const email = asTrimmedString(personalInfo.email) ?? asTrimmedString(fallbackEmail);
+  const emailLocalPart = email ? email.split("@")[0]?.trim() ?? "" : "";
+  const nameCandidate = fullName ?? [firstName, lastName].filter(Boolean).join(" ");
+  const baseCandidate = slugifyShareHandle(nameCandidate || emailLocalPart || "student");
+
+  if (baseCandidate.length >= 3) return baseCandidate;
+
+  const suffix = createHash("sha256").update(profileId).digest("hex").slice(0, 6);
+  return `student-${suffix}`;
+};
 
 const resolveAvatarUrl = async (supabase: unknown, personalInfo: Record<string, unknown>): Promise<string | null> => {
   const fallbackAvatarUrl = asTrimmedString(personalInfo.avatar_url) ?? asTrimmedString(personalInfo.avatarUrl);
@@ -281,13 +353,36 @@ export async function GET() {
       (companyRows ?? []).map((row) => row.company_name ?? ""),
       defaultFocusCompanyOptions
     );
-    shareSlug = asTrimmedString(shareRows?.[0]?.share_slug) ?? deriveShareSlug(context.user_id);
+    shareSlug =
+      asTrimmedString(shareRows?.[0]?.share_slug) ??
+      deriveShareSlug({
+        profileId: context.user_id,
+        personalInfo: profilePersonalInfo,
+        fallbackEmail: context.session_user?.email ?? null
+      });
     endorsements = endorsementRows ?? [];
 
     if ((shareRows?.length ?? 0) === 0) {
-      await supabase
+      const { error: primaryUpsertError } = await supabase
         .from("student_share_links")
         .upsert({ profile_id: context.user_id, share_slug: shareSlug }, { onConflict: "profile_id" });
+      if (primaryUpsertError) {
+        const conflictSafeSuffix = createHash("sha256").update(context.user_id).digest("hex").slice(0, 6);
+        const fallbackShareSlug = `${shareSlug.slice(0, 57)}-${conflictSafeSuffix}`.replace(/^-+|-+$/g, "");
+        const { error: fallbackUpsertError } = await supabase
+          .from("student_share_links")
+          .upsert({ profile_id: context.user_id, share_slug: fallbackShareSlug }, { onConflict: "profile_id" });
+        if (!fallbackUpsertError) {
+          shareSlug = fallbackShareSlug;
+        } else {
+          const { data: retryShareRows } = (await supabase
+            .from("student_share_links")
+            .select("share_slug")
+            .eq("profile_id", context.user_id)
+            .limit(1)) as { data: ShareLinkRow[] | null };
+          shareSlug = asTrimmedString(retryShareRows?.[0]?.share_slug) ?? fallbackShareSlug;
+        }
+      }
     }
   } else {
     studentData = {};
@@ -307,7 +402,7 @@ export async function GET() {
     company_options: companyOptions,
     referral_profile: {
       share_slug: shareSlug,
-      share_path: shareSlug.length > 0 ? `/profile/${shareSlug}` : null
+      share_path: shareSlug.length > 0 ? `/u/${shareSlug}` : null
     },
     endorsements: endorsements.map((endorsement) => ({
       endorsement_id: endorsement.endorsement_id,
@@ -452,6 +547,28 @@ export async function POST(req: Request) {
     if (lastName) profilePersonalInfo.last_name = lastName;
     if (fullName) profilePersonalInfo.full_name = fullName;
     if (email) profilePersonalInfo.email = email;
+
+    upsertOptionalPersonalInfoString({
+      source: personalInfoInput,
+      target: profilePersonalInfo,
+      sourceKey: "university",
+    });
+    upsertOptionalPersonalInfoString({
+      source: personalInfoInput,
+      target: profilePersonalInfo,
+      sourceKey: "field_of_study",
+    });
+    upsertOptionalPersonalInfoString({
+      source: personalInfoInput,
+      target: profilePersonalInfo,
+      sourceKey: "graduation_year",
+    });
+    upsertOptionalPersonalInfoString({
+      source: personalInfoInput,
+      target: profilePersonalInfo,
+      sourceKey: "estimated_graduation_year",
+      targetKey: "graduation_year",
+    });
 
     const hasAvatarFileRefInput = hasOwn(personalInfoInput, "avatar_file_ref") || hasOwn(personalInfoInput, "avatarFileRef");
     if (hasAvatarFileRefInput) {

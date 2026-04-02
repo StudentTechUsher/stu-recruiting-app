@@ -34,9 +34,9 @@ type StudentProfileApiData = {
   }>;
 };
 
-type ProfileLinkKey = "linkedin" | "handshake" | "github" | "kaggle" | "otherRepo" | "portfolio";
+type ProfileLinkKey = "linkedin" | "handshake" | "github" | "kaggle" | "leetcode" | "otherRepo" | "portfolio";
 type StudentManageRolesView = "all" | "profile" | "targets";
-type CapabilitySourceType = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
+type CapabilitySourceType = "resume" | "transcript" | "linkedin" | "github" | "kaggle" | "leetcode";
 
 type SourceExtractionEntry = {
   last_extracted_at?: string;
@@ -153,7 +153,8 @@ const sourceLabel: Record<CapabilitySourceType, string> = {
   transcript: "Transcript",
   linkedin: "LinkedIn",
   github: "GitHub",
-  kaggle: "Kaggle"
+  kaggle: "Kaggle",
+  leetcode: "LeetCode"
 };
 
 const sourceStateToneClass: Record<SourceDisplayState, string> = {
@@ -225,12 +226,35 @@ const normalizeKaggleProfileUrl = (value: string): string => {
   return trimmed;
 };
 
+const normalizeLeetcodeProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("leetcode.com")) {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const username = segments[0] === "u" || segments[0] === "profile" ? segments[1] : segments[0];
+      if (username) return `https://leetcode.com/u/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
 export function StudentManageRoles({ view = "all" }: { view?: StudentManageRolesView }) {
   const showProfileSections = view !== "targets";
   const showTargetSections = view !== "profile";
+  const currentYearPlusTwo = useMemo(() => new Date().getFullYear() + 2, []);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [university, setUniversity] = useState("");
+  const [fieldOfStudy, setFieldOfStudy] = useState("");
+  const [graduationYear, setGraduationYear] = useState(String(currentYearPlusTwo));
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [employerOptions, setEmployerOptions] = useState<string[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -242,6 +266,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     handshake: "",
     github: "",
     kaggle: "",
+    leetcode: "",
     otherRepo: "",
     portfolio: ""
   });
@@ -260,15 +285,25 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const [studentSharePath, setStudentSharePath] = useState("");
   const [endorsements, setEndorsements] = useState<StudentProfileApiData["endorsements"]>([]);
   const [isCopyingShareUrl, setIsCopyingShareUrl] = useState(false);
+  const [hasCopiedShareUrl, setHasCopiedShareUrl] = useState(false);
   const [appOrigin, setAppOrigin] = useState("");
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const resumeInputRef = useRef<HTMLInputElement | null>(null);
   const transcriptInputRef = useRef<HTMLInputElement | null>(null);
+  const copiedShareUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     setAppOrigin(window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copiedShareUrlTimeoutRef.current !== null) {
+        clearTimeout(copiedShareUrlTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -320,6 +355,13 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         setFirstName(resolvedNames.firstName);
         setLastName(resolvedNames.lastName);
         setEmail(asTrimmedString(personalInfo.email));
+        setUniversity(asTrimmedString(personalInfo.university));
+        setFieldOfStudy(asTrimmedString(personalInfo.field_of_study) || asTrimmedString(personalInfo.major));
+        setGraduationYear(
+          asTrimmedString(personalInfo.graduation_year) ||
+            asTrimmedString(personalInfo.estimated_graduation_year) ||
+            String(currentYearPlusTwo)
+        );
         setAvatarUrl(asTrimmedString(personalInfo.avatar_url) || asTrimmedString(personalInfo.avatarUrl));
         setStudentSharePath(asTrimmedString(referralProfile.share_path));
         setEndorsements(payload.data.endorsements ?? []);
@@ -334,6 +376,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
           handshake: asTrimmedString(savedLinks.handshake),
           github: asTrimmedString(savedLinks.github),
           kaggle: asTrimmedString(savedLinks.kaggle),
+          leetcode: asTrimmedString(savedLinks.leetcode),
           otherRepo: asTrimmedString(savedLinks.other_repo) || asTrimmedString(savedLinks.otherRepo),
           portfolio:
             asTrimmedString(savedLinks.portfolio_url) ||
@@ -356,20 +399,24 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     };
   }, []);
 
+  const graduationYearOptions = useMemo(
+    () => Array.from({ length: 11 }, (_, index) => String(currentYearPlusTwo - 2 + index)),
+    [currentYearPlusTwo]
+  );
+
   const hasNameFields = useMemo(() => firstName.trim().length > 1 && lastName.trim().length > 1, [firstName, lastName]);
   const canSaveProfileDetails = !isLoading && !isSavingProfileDetails && hasNameFields;
   const externalSignalSourceCount = useMemo(() => {
-    return (
-      Object.values(profileLinks).filter((value) => value.trim().length > 0).length + (introVideoUrl.trim().length > 0 ? 1 : 0)
-    );
-  }, [introVideoUrl, profileLinks]);
+    const hasPortfolio = profileLinks.portfolio.trim().length > 0;
+    return (hasPortfolio ? 1 : 0) + (introVideoUrl.trim().length > 0 ? 1 : 0);
+  }, [introVideoUrl, profileLinks.portfolio]);
   const visibilityReadinessChecks = useMemo(
     () => [
       { key: "name", label: "First and last name are complete", done: hasNameFields },
       { key: "photo", label: "Profile photo is uploaded", done: avatarUrl.trim().length > 0 },
       { key: "roles", label: "At least one target position is selected", done: selectedRoles.length > 0 },
       { key: "employers", label: "At least one target employer is selected", done: selectedEmployers.length > 0 },
-      { key: "signals", label: "At least one profile signal is added", done: externalSignalSourceCount > 0 }
+      { key: "signals", label: "Portfolio URL or intro video link is added", done: externalSignalSourceCount > 0 }
     ],
     [avatarUrl, externalSignalSourceCount, hasNameFields, selectedEmployers.length, selectedRoles.length]
   );
@@ -400,16 +447,21 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     if (!studentSharePath) return "";
     return appOrigin ? `${appOrigin}${studentSharePath}` : studentSharePath;
   }, [appOrigin, studentSharePath]);
+
+  useEffect(() => {
+    setHasCopiedShareUrl(false);
+  }, [studentShareUrl]);
   const normalizedExternalLinks = useMemo(
     () => ({
       linkedin: normalizeLinkedinProfileUrl(profileLinks.linkedin),
       github: normalizeGithubProfileUrl(profileLinks.github),
-      kaggle: normalizeKaggleProfileUrl(profileLinks.kaggle)
+      kaggle: normalizeKaggleProfileUrl(profileLinks.kaggle),
+      leetcode: normalizeLeetcodeProfileUrl(profileLinks.leetcode)
     }),
-    [profileLinks.github, profileLinks.kaggle, profileLinks.linkedin]
+    [profileLinks.github, profileLinks.kaggle, profileLinks.leetcode, profileLinks.linkedin]
   );
   const sourceRows = useMemo(() => {
-    const getExternalState = (source: "linkedin" | "github" | "kaggle"): SourceDisplayState => {
+    const getExternalState = (source: "linkedin" | "github" | "kaggle" | "leetcode"): SourceDisplayState => {
       const entry = sourceExtractionLog[source];
       const configuredUrl = normalizedExternalLinks[source];
       if (!configuredUrl) return "Not connected";
@@ -440,12 +492,13 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       transcript: getDocumentState("transcript"),
       linkedin: getExternalState("linkedin"),
       github: getExternalState("github"),
-      kaggle: getExternalState("kaggle")
+      kaggle: getExternalState("kaggle"),
+      leetcode: getExternalState("leetcode")
     } as Record<CapabilitySourceType, SourceDisplayState>;
   }, [extractingSources, normalizedExternalLinks, sourceExtractionLog]);
   const sourcesNeedingUpdate = useMemo(
     () =>
-      (["linkedin", "github", "kaggle"] as CapabilitySourceType[]).filter(
+      (["linkedin", "github", "kaggle", "leetcode"] as CapabilitySourceType[]).filter(
         (source) => sourceRows[source] === "Needs update"
       ),
     [sourceRows]
@@ -461,8 +514,16 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     setIsCopyingShareUrl(true);
     try {
       await navigator.clipboard.writeText(studentShareUrl);
+      setHasCopiedShareUrl(true);
+      if (copiedShareUrlTimeoutRef.current !== null) {
+        clearTimeout(copiedShareUrlTimeoutRef.current);
+      }
+      copiedShareUrlTimeoutRef.current = setTimeout(() => {
+        setHasCopiedShareUrl(false);
+      }, 2000);
       setStatusMessage("Copied your shareable profile URL.");
     } catch {
+      setHasCopiedShareUrl(false);
       setStatusMessage("Unable to copy URL automatically. You can still copy it manually from the field.");
     } finally {
       setIsCopyingShareUrl(false);
@@ -582,9 +643,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       ...current,
       [key]: value
     }));
-    setHasSavedExternalSignals(false);
-    if (key === "linkedin" || key === "github" || key === "kaggle") {
-      setStatusMessage(`Your ${key === "linkedin" ? "LinkedIn" : key === "github" ? "GitHub" : "Kaggle"} link changed. Extract to update your profile.`);
+    if (key === "portfolio") setHasSavedExternalSignals(false);
+    if (key === "linkedin" || key === "github" || key === "kaggle" || key === "leetcode") {
+      const label = key === "linkedin" ? "LinkedIn" : key === "github" ? "GitHub" : key === "kaggle" ? "Kaggle" : "LeetCode";
+      setStatusMessage(`Your ${label} link changed. Extract to update your profile.`);
     }
   };
 
@@ -604,7 +666,8 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       ...current,
       linkedin: asTrimmedString(profileLinksFromArtifacts.linkedin) || current.linkedin,
       github: asTrimmedString(profileLinksFromArtifacts.github) || current.github,
-      kaggle: asTrimmedString(profileLinksFromArtifacts.kaggle) || current.kaggle
+      kaggle: asTrimmedString(profileLinksFromArtifacts.kaggle) || current.kaggle,
+      leetcode: asTrimmedString(profileLinksFromArtifacts.leetcode) || current.leetcode
     }));
   };
 
@@ -636,18 +699,27 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     source,
     allowLowConfidence = false
   }: {
-    source: "linkedin" | "github" | "kaggle";
+    source: "linkedin" | "github" | "kaggle" | "leetcode";
     allowLowConfidence?: boolean;
   }) => {
     if (extractingSources[source]) return;
 
-    const linkValue = source === "linkedin" ? profileLinks.linkedin : source === "github" ? profileLinks.github : profileLinks.kaggle;
+    const linkValue =
+      source === "linkedin"
+        ? profileLinks.linkedin
+        : source === "github"
+          ? profileLinks.github
+          : source === "kaggle"
+            ? profileLinks.kaggle
+            : profileLinks.leetcode;
     const normalizedLink =
       source === "linkedin"
         ? normalizeLinkedinProfileUrl(linkValue)
         : source === "github"
           ? normalizeGithubProfileUrl(linkValue)
-          : normalizeKaggleProfileUrl(linkValue);
+          : source === "kaggle"
+            ? normalizeKaggleProfileUrl(linkValue)
+            : normalizeLeetcodeProfileUrl(linkValue);
     if (!normalizedLink) {
       setStatusMessage(`Add your ${sourceLabel[source]} URL first, then extract.`);
       return;
@@ -671,7 +743,14 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     }));
 
     try {
-      const endpoint = source === "linkedin" ? "/api/student/extract/linkedin" : source === "github" ? "/api/student/extract/github" : "/api/student/extract/kaggle";
+      const endpoint =
+        source === "linkedin"
+          ? "/api/student/extract/linkedin"
+          : source === "github"
+            ? "/api/student/extract/github"
+            : source === "kaggle"
+              ? "/api/student/extract/kaggle"
+              : "/api/student/extract/leetcode";
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -874,11 +953,11 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   };
 
   const saveExternalSignals = async () => {
-    const hasLinks = Object.values(profileLinks).some((value) => value.trim().length > 0);
+    const hasPortfolioLink = profileLinks.portfolio.trim().length > 0;
     const hasIntroVideo = introVideoUrl.trim().length > 0;
 
-    if (!hasLinks && !hasIntroVideo) {
-      setStatusMessage("Add at least one profile link or video URL before saving.");
+    if (!hasPortfolioLink && !hasIntroVideo) {
+      setStatusMessage("Add a portfolio URL or intro video link before saving.");
       return;
     }
 
@@ -897,17 +976,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         body: JSON.stringify({
           student_data: {
             artifact_profile_links: {
-              linkedin: profileLinks.linkedin.trim(),
-              handshake: profileLinks.handshake.trim(),
-              github: profileLinks.github.trim(),
-              kaggle: profileLinks.kaggle.trim(),
-              other_repo: profileLinks.otherRepo.trim(),
               portfolio_url: profileLinks.portfolio.trim()
-            },
-            profile_links: {
-              linkedin: profileLinks.linkedin.trim(),
-              github: profileLinks.github.trim(),
-              kaggle: profileLinks.kaggle.trim()
             },
             video_links: {
               intro_video_url: introVideoUrl.trim()
@@ -924,11 +993,9 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         throw new Error("external_links_save_failed");
       }
 
-      const sourceCount =
-        Object.values(profileLinks).filter((value) => value.trim().length > 0).length +
-        (hasIntroVideo ? 1 : 0);
+      const sourceCount = (hasPortfolioLink ? 1 : 0) + (hasIntroVideo ? 1 : 0);
       setHasSavedExternalSignals(true);
-      setStatusMessage(`Saved ${sourceCount} external signal source${sourceCount === 1 ? "" : "s"}.`);
+      setStatusMessage(`Saved ${sourceCount} recruiter-facing source${sourceCount === 1 ? "" : "s"}.`);
     } catch {
       setStatusMessage("Unable to save profile/video links right now.");
     } finally {
@@ -1032,7 +1099,10 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
             first_name: firstName.trim(),
             last_name: lastName.trim(),
             full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-            email: email.trim()
+            email: email.trim(),
+            university: university.trim(),
+            field_of_study: fieldOfStudy.trim(),
+            graduation_year: graduationYear.trim()
           }
         })
       });
@@ -1049,6 +1119,9 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       const savedPersonalInfo = toRecord(payload.data.profile?.personal_info);
       setFirstName(asTrimmedString(savedPersonalInfo.first_name) || firstName.trim());
       setLastName(asTrimmedString(savedPersonalInfo.last_name) || lastName.trim());
+      setUniversity(asTrimmedString(savedPersonalInfo.university) || university.trim());
+      setFieldOfStudy(asTrimmedString(savedPersonalInfo.field_of_study) || fieldOfStudy.trim());
+      setGraduationYear(asTrimmedString(savedPersonalInfo.graduation_year) || graduationYear.trim());
       setHasSavedProfileDetails(true);
       setStatusMessage("Profile details updated.");
       notifyStudentProfileUpdated();
@@ -1090,7 +1163,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
           <div className={`${skeletonBlockClassName} h-3 w-28`} />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, index) => (
+          {Array.from({ length: 6 }).map((_, index) => (
             <div key={`profile-detail-skeleton-${index}`} className={`${skeletonBlockClassName} h-11 w-full`} />
           ))}
         </div>
@@ -1104,7 +1177,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const renderProfileLinksSkeleton = () => (
     <>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {Array.from({ length: 6 }).map((_, index) => (
+        {Array.from({ length: 1 }).map((_, index) => (
           <div key={`profile-link-skeleton-${index}`} className={`${skeletonBlockClassName} h-11 w-full`} />
         ))}
       </div>
@@ -1225,6 +1298,47 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                           className="mt-2 h-11 w-full cursor-not-allowed rounded-xl border border-[#bfd2ca] bg-[#f3f7f5] px-3 text-sm text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
                         />
                       </label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                        University
+                        <input
+                          value={university}
+                          onChange={(event) => {
+                            setUniversity(event.target.value);
+                            setHasSavedProfileDetails(false);
+                          }}
+                          placeholder="Harvard"
+                          className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                        Field of study
+                        <input
+                          value={fieldOfStudy}
+                          onChange={(event) => {
+                            setFieldOfStudy(event.target.value);
+                            setHasSavedProfileDetails(false);
+                          }}
+                          placeholder="Computer Science"
+                          className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                        Grad year (estimated)
+                        <select
+                          value={graduationYear}
+                          onChange={(event) => {
+                            setGraduationYear(event.target.value);
+                            setHasSavedProfileDetails(false);
+                          }}
+                          className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                          {graduationYearOptions.map((year) => (
+                            <option key={`grad-year-${year}`} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                   </div>
                   <div className="mt-4 flex justify-end">
@@ -1242,65 +1356,15 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
             </div>
 
             <div className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Profile links and intro video</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Portfolio and intro video</h3>
               <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
-                Add profile links and an optional YouTube/Loom intro video so recruiters can review context quickly.
+                Keep this section focused on the links recruiters should review directly.
               </p>
               {isLoading ? (
                 renderProfileLinksSkeleton()
               ) : (
                 <>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      LinkedIn URL
-                      <input
-                        value={profileLinks.linkedin}
-                        onChange={(event) => handleProfileLinkChange("linkedin", event.target.value)}
-                        placeholder="https://linkedin.com/in/username"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-
-                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Handshake URL
-                      <input
-                        value={profileLinks.handshake}
-                        onChange={(event) => handleProfileLinkChange("handshake", event.target.value)}
-                        placeholder="https://joinhandshake.com/..."
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-
-                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      GitHub URL
-                      <input
-                        value={profileLinks.github}
-                        onChange={(event) => handleProfileLinkChange("github", event.target.value)}
-                        placeholder="https://github.com/username"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-
-                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Kaggle URL
-                      <input
-                        value={profileLinks.kaggle}
-                        onChange={(event) => handleProfileLinkChange("kaggle", event.target.value)}
-                        placeholder="https://www.kaggle.com/username"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-
-                    <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
-                      Other repo URL
-                      <input
-                        value={profileLinks.otherRepo}
-                        onChange={(event) => handleProfileLinkChange("otherRepo", event.target.value)}
-                        placeholder="GitLab / Bitbucket / other"
-                        className="mt-2 h-11 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                    </label>
-
                     <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
                       Portfolio URL
                       <input
@@ -1335,7 +1399,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       disabled={isLoading || isSavingExternalSignals}
                       className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      {isSavingExternalSignals ? "Saving links..." : hasSavedExternalSignals ? "Saved" : "Save profile and video links"}
+                      {isSavingExternalSignals ? "Saving..." : hasSavedExternalSignals ? "Saved" : "Save portfolio and intro video"}
                     </button>
                   </div>
                 </>
@@ -1345,7 +1409,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
             <div id="capability-sources" className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4 scroll-mt-24 dark:border-slate-700 dark:bg-slate-900">
               <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#3f6055] dark:text-slate-300">Capability Sources</h3>
               <p className="mt-2 text-xs text-[#557168] dark:text-slate-400">
-                Manage source extraction here. Resume and transcript are primary artifacts; LinkedIn, GitHub, and Kaggle add supporting evidence.
+                Manage source extraction here. Resume and transcript are primary artifacts; LinkedIn, GitHub, Kaggle, and LeetCode add supporting evidence.
               </p>
               {sourcesNeedingUpdate.length > 0 ? (
                 <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
@@ -1423,7 +1487,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">External sources</p>
                   <div className="mt-2 space-y-2">
-                    {(["linkedin", "github", "kaggle"] as const).map((source) => {
+                    {(["linkedin", "github", "kaggle", "leetcode"] as const).map((source) => {
                       const state = sourceRows[source];
                       const entry = sourceExtractionLog[source];
                       const urlValue =
@@ -1431,7 +1495,9 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                           ? normalizedExternalLinks.linkedin
                           : source === "github"
                             ? normalizedExternalLinks.github
-                            : normalizedExternalLinks.kaggle;
+                            : source === "kaggle"
+                              ? normalizedExternalLinks.kaggle
+                              : normalizedExternalLinks.leetcode;
                       const isExtracting = Boolean(extractingSources[source] || state === "Extracting");
                       const lastExtractedAt = asTrimmedString(entry?.last_extracted_at);
                       const lastSummary = asTrimmedString(entry?.last_run_summary);
@@ -1445,12 +1511,48 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
                               <p className="text-sm font-semibold text-[#0a1f1a] dark:text-slate-100">{sourceLabel[source]}</p>
-                              <p className="text-xs text-[#557168] dark:text-slate-400">{urlValue || "Add URL in Profile links above"}</p>
+                              <p className="text-xs text-[#557168] dark:text-slate-400">Paste profile URL and extract from this card.</p>
                             </div>
                             <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sourceStateToneClass[state]}`}>
                               {state}
                             </span>
                           </div>
+                          <label className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
+                            {sourceLabel[source]} URL
+                            <input
+                              value={
+                                source === "linkedin"
+                                  ? profileLinks.linkedin
+                                  : source === "github"
+                                    ? profileLinks.github
+                                    : source === "kaggle"
+                                      ? profileLinks.kaggle
+                                      : profileLinks.leetcode
+                              }
+                              onChange={(event) =>
+                                handleProfileLinkChange(
+                                  source === "linkedin"
+                                    ? "linkedin"
+                                    : source === "github"
+                                      ? "github"
+                                      : source === "kaggle"
+                                        ? "kaggle"
+                                        : "leetcode",
+                                  event.target.value
+                                )
+                              }
+                              placeholder={
+                                source === "linkedin"
+                                  ? "https://linkedin.com/in/username"
+                                  : source === "github"
+                                    ? "https://github.com/username"
+                                    : source === "kaggle"
+                                      ? "https://www.kaggle.com/username"
+                                      : "https://leetcode.com/u/username"
+                              }
+                              className="mt-1 h-10 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 text-sm normal-case text-[#0a1f1a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                            />
+                          </label>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
                             <button
                               type="button"
@@ -1514,7 +1616,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       disabled={!canCopyShareUrl}
                       className="rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      {isCopyingShareUrl ? "Copying..." : "Copy URL"}
+                      {isCopyingShareUrl ? "Copying..." : hasCopiedShareUrl ? "Copied" : "Copy URL"}
                     </button>
                   </div>
 

@@ -1,4 +1,4 @@
-const SHARE_SLUG_PATTERN = /^[a-z0-9]{8,64}$/i;
+const SHARE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{1,62}[a-z0-9])?$/i;
 
 export const normalizeShareSlug = (value: string): string | null => {
   const normalized = value.trim().toLowerCase();
@@ -21,7 +21,7 @@ export const resolveShareSlugFromProfileInput = (value: string): string | null =
   const directSlug = normalizeShareSlug(raw);
   if (directSlug) return directSlug;
 
-  const relativePathMatch = raw.match(/^\/profile\/([a-z0-9_-]+)\/?$/i);
+  const relativePathMatch = raw.match(/^\/(?:profile|u)\/([a-z0-9_-]+)\/?$/i);
   if (relativePathMatch?.[1]) {
     return normalizeShareSlug(relativePathMatch[1]);
   }
@@ -29,7 +29,7 @@ export const resolveShareSlugFromProfileInput = (value: string): string | null =
   const parsedUrl = parseUrl(raw);
   if (!parsedUrl) return null;
 
-  const pathMatch = parsedUrl.pathname.match(/^\/profile\/([a-z0-9_-]+)\/?$/i);
+  const pathMatch = parsedUrl.pathname.match(/^\/(?:profile|u)\/([a-z0-9_-]+)\/?$/i);
   if (pathMatch?.[1]) {
     return normalizeShareSlug(pathMatch[1]);
   }

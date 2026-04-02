@@ -51,7 +51,7 @@ describe("upsertStudentExtractionMetadata", () => {
     expect(profileLinks.github).toBe("https://github.com/octocat");
   });
 
-  it("normalizes linkedin and kaggle profile urls when present", async () => {
+  it("normalizes linkedin, kaggle, and leetcode profile urls when present", async () => {
     const { supabase, upsertMock } = createSupabaseMock({
       profile_links: {}
     });
@@ -64,7 +64,8 @@ describe("upsertStudentExtractionMetadata", () => {
       status: "succeeded",
       profileLinks: {
         linkedin: "linkedin.com/in/student-name/",
-        kaggle: "www.kaggle.com/student-name/projects"
+        kaggle: "www.kaggle.com/student-name/projects",
+        leetcode: "leetcode.com/student-name/"
       }
     });
 
@@ -72,6 +73,7 @@ describe("upsertStudentExtractionMetadata", () => {
     const profileLinks = payload.student_data.profile_links as Record<string, unknown>;
     expect(profileLinks.linkedin).toBe("https://www.linkedin.com/in/student-name");
     expect(profileLinks.kaggle).toBe("https://www.kaggle.com/student-name");
+    expect(profileLinks.leetcode).toBe("https://leetcode.com/u/student-name");
   });
 
   it("stores confidence and run summary metadata on source log entries", async () => {

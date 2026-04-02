@@ -15,14 +15,14 @@ type ArtifactType =
   | "employment"
   | "test";
 
-type ExtractionSource = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
+type ExtractionSource = "resume" | "transcript" | "linkedin" | "github" | "kaggle" | "leetcode";
 
 type ArtifactDraft = {
   artifact_type: ArtifactType;
   artifact_data: Record<string, unknown>;
 };
 
-type SourceLogKey = "resume" | "transcript" | "linkedin" | "github" | "kaggle";
+type SourceLogKey = "resume" | "transcript" | "linkedin" | "github" | "kaggle" | "leetcode";
 type StorageFileRef = { bucket: string; path: string; kind?: string };
 type SourceExtractionStatus = "extracting" | "succeeded" | "failed";
 export type SourceOwnershipConfidence = "high" | "medium" | "low";
@@ -278,11 +278,31 @@ const normalizeKaggleProfileUrl = (value: string): string => {
   return trimmed;
 };
 
+const normalizeLeetcodeProfileUrl = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("leetcode.com")) {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const username = segments[0] === "u" || segments[0] === "profile" ? segments[1] : segments[0];
+      if (username) return `https://leetcode.com/u/${username}`;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
 const normalizeExtractionProfileLinkValue = (key: string, value: string): string => {
   const normalizedKey = key.trim().toLowerCase();
   if (normalizedKey === "github") return normalizeGithubProfileUrl(value);
   if (normalizedKey === "linkedin") return normalizeLinkedinProfileUrl(value);
   if (normalizedKey === "kaggle") return normalizeKaggleProfileUrl(value);
+  if (normalizedKey === "leetcode") return normalizeLeetcodeProfileUrl(value);
   return value.trim();
 };
 
@@ -425,6 +445,18 @@ const extractLinkedinSlug = (value: string): string | null => {
   }
 };
 
+const extractLeetcodeUsernameFromUrl = (value: string): string | null => {
+  try {
+    const parsed = new URL(value);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const username = segments[0] === "u" || segments[0] === "profile" ? segments[1] : segments[0];
+    const normalized = toTrimmedString(username)?.toLowerCase() ?? null;
+    return normalized && normalized.length > 0 ? normalized : null;
+  } catch {
+    return null;
+  }
+};
+
 const assessNameMatchConfidence = ({
   expectedName,
   candidateName,
@@ -479,6 +511,20 @@ const extractLinkedinDisplayNameFromHtml = (html: string): string | null => {
 
   const withoutLinkedInSuffix = titleRaw.replace(/\s*[-|]\s*.*linkedin.*$/i, "").trim();
   return withoutLinkedInSuffix.length > 0 ? withoutLinkedInSuffix : null;
+};
+
+const extractLeetcodeDisplayNameFromHtml = (html: string): string | null => {
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (!titleMatch) return null;
+  const titleRaw = titleMatch[1]
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .trim();
+  if (!titleRaw) return null;
+
+  const withoutLeetcodeSuffix = titleRaw.replace(/\s*[-|]\s*.*leetcode.*$/i, "").trim();
+  return withoutLeetcodeSuffix.length > 0 ? withoutLeetcodeSuffix : null;
 };
 
 const containsLinkedinUrl = ({
@@ -673,12 +719,40 @@ const fetchKagglePage = async (profileUrl: string): Promise<{ status: number; ht
   }
 };
 
+const fetchLeetcodePage = async (profileUrl: string): Promise<{ status: number; html: string }> => {
+  const headers: Record<string, string> = {
+    "user-agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9",
+    "accept-encoding": "identity"
+  };
+
+  try {
+    const response = await fetch(profileUrl, {
+      headers,
+      redirect: "follow",
+      cache: "no-store"
+    });
+    return {
+      status: response.status,
+      html: await response.text().catch(() => "")
+    };
+  } catch {
+    return fetchPageWithNodeHttp({
+      pageUrl: profileUrl,
+      headers
+    });
+  }
+};
+
 const sourceLabelFromKind = (source: ExtractionSource) => {
   if (source === "resume") return "Resume extraction";
   if (source === "transcript") return "Transcript extraction";
   if (source === "linkedin") return "LinkedIn profile";
   if (source === "github") return "GitHub profile";
-  return "Kaggle profile";
+  if (source === "kaggle") return "Kaggle profile";
+  return "LeetCode profile";
 };
 
 const firstNonEmptyString = (...values: unknown[]): string | null => {
@@ -751,14 +825,16 @@ const sanitizeArtifactDraft = ({
     artifactData.position = position;
   }
 
-  if (sourceKind === "transcript" || sourceKind === "github" || sourceKind === "kaggle") {
+  if (sourceKind === "transcript" || sourceKind === "github" || sourceKind === "kaggle" || sourceKind === "leetcode") {
     artifactData.verification_status = "verified";
     artifactData.verification_method =
       sourceKind === "transcript"
         ? "transcript_extraction"
         : sourceKind === "github"
           ? "github_extraction"
-          : "kaggle_extraction";
+          : sourceKind === "kaggle"
+            ? "kaggle_extraction"
+            : "leetcode_extraction";
   } else {
     artifactData.verification_status = "unverified";
     artifactData.verification_method = sourceKind === "linkedin" ? "linkedin_extraction" : "resume_extraction";
@@ -1143,6 +1219,75 @@ export async function extractArtifactsFromKaggle({
       { type: "input_text", text: `Scraped page text:\n${scrapedText}` }
     ]
   });
+}
+
+export async function extractArtifactsFromLeetcode({
+  profileUrl,
+  expectedStudentName,
+  allowLowConfidence = false
+}: {
+  profileUrl: string;
+  expectedStudentName?: string | null;
+  allowLowConfidence?: boolean;
+}): Promise<ExternalSourceExtractionResult> {
+  const { status, html } = await fetchLeetcodePage(profileUrl);
+  if (!html.trim()) {
+    throw new Error(`leetcode_fetch_failed:status_${status || "unknown"}:empty_response`);
+  }
+
+  const leetcodeDisplayName = extractLeetcodeDisplayNameFromHtml(html);
+  const leetcodeUsername = extractLeetcodeUsernameFromUrl(profileUrl);
+  const confidence = assessNameMatchConfidence({
+    expectedName: expectedStudentName ?? null,
+    candidateName: leetcodeDisplayName,
+    candidateHandle: leetcodeUsername
+  });
+  const warningCode =
+    confidence === "medium"
+      ? "leetcode_name_match_medium_confidence"
+      : confidence === "low"
+        ? "leetcode_name_match_low_confidence"
+        : null;
+  const warningMessage =
+    confidence === "medium"
+      ? "LeetCode profile match is not fully certain. Extraction will continue with a warning."
+      : confidence === "low"
+        ? "We couldn't confidently match this LeetCode profile to your name."
+        : null;
+  if (confidence === "low" && !allowLowConfidence) {
+    return {
+      artifacts: [],
+      confidence,
+      warningCode,
+      warningMessage,
+      requiresConfirmation: true
+    };
+  }
+
+  const scrapedText = stripHtmlToText(html).slice(0, 100_000);
+  const artifacts = await callOpenAIExtraction({
+    sourceKind: "leetcode",
+    systemPrompt:
+      "Extract capability artifacts from a LeetCode profile capture. " +
+      "Prioritize project, competition, certification, and test artifacts grounded in visible profile evidence. " +
+      "Use artifact type 'club' for memberships without leadership role. " +
+      "Use artifact type 'leadership' only for leadership roles. " +
+      "For club and leadership artifacts, always include organization and position fields. " +
+      "Do not invent contest ranks, acceptance rates, scores, or activity not present in the profile text. " +
+      "If evidence is weak, return an empty artifacts array.",
+    userContent: [
+      { type: "input_text", text: `LeetCode URL: ${profileUrl}` },
+      { type: "input_text", text: `HTTP status: ${status}` },
+      { type: "input_text", text: `Scraped page text:\n${scrapedText}` }
+    ]
+  });
+  return {
+    artifacts,
+    confidence,
+    warningCode,
+    warningMessage,
+    requiresConfirmation: false
+  };
 }
 
 export async function extractArtifactsFromGithub({

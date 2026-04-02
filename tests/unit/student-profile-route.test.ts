@@ -91,7 +91,8 @@ describe("student profile route nested link merge", () => {
     const { supabase, studentsUpsertMock, profilesUpsertMock } = buildSupabaseMock({
       profile_links: {
         linkedin: "https://www.linkedin.com/in/existing",
-        github: "https://github.com/existing-user"
+        github: "https://github.com/existing-user",
+        leetcode: "https://leetcode.com/u/existing-user"
       }
     });
     getSupabaseServerClientMock.mockResolvedValue(supabase);
@@ -103,7 +104,8 @@ describe("student profile route nested link merge", () => {
         body: JSON.stringify({
           student_data: {
             profile_links: {
-              linkedin: "linkedin.com/in/new-user/"
+              linkedin: "linkedin.com/in/new-user/",
+              leetcode: "leetcode.com/new-user/"
             }
           }
         })
@@ -118,6 +120,7 @@ describe("student profile route nested link merge", () => {
     const profileLinks = upsertPayload.student_data.profile_links as Record<string, unknown>;
     expect(profileLinks.github).toBe("https://github.com/existing-user");
     expect(profileLinks.linkedin).toBe("https://www.linkedin.com/in/new-user");
+    expect(profileLinks.leetcode).toBe("https://leetcode.com/u/new-user");
     expect(profilesUpsertMock).toHaveBeenCalled();
   });
 

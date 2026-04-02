@@ -12,13 +12,16 @@ type ProfilePayload = {
   profile?: {
     personal_info?: Record<string, unknown>;
   };
+  student_data?: Record<string, unknown>;
 };
 
 type ArtifactsPayload = {
   artifacts?: Array<{
     artifact_type?: string;
     artifact_data?: Record<string, unknown>;
+    source_provenance?: Record<string, unknown>;
   }>;
+  source_extraction_log?: Record<string, unknown>;
 };
 
 type ResumeExtractionResponse = {
@@ -38,6 +41,13 @@ type ResumeExtractionResponse = {
   };
 };
 
+type ResumeProcessingSummary = {
+  processed: number;
+  verified: number;
+};
+
+const onboardingNameDraftStorageKey = "stu-onboarding-name-draft-v1";
+
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
@@ -46,6 +56,23 @@ const toRecord = (value: unknown): Record<string, unknown> => {
 const toTrimmedString = (value: unknown): string => {
   if (typeof value !== "string") return "";
   return value.trim();
+};
+
+const summarizeProcessedArtifacts = (artifacts: Array<Record<string, unknown>>): ResumeProcessingSummary => {
+  const processed = artifacts.length;
+  const verified = artifacts.reduce((count, artifact) => {
+    const artifactData = toRecord(artifact.artifact_data);
+    const verificationStatus = toTrimmedString(artifactData.verification_status).toLowerCase();
+    return verificationStatus === "verified" ? count + 1 : count;
+  }, 0);
+  return { processed, verified };
+};
+
+const formatArtifactCountLabel = (count: number): string => `${count} artifact${count === 1 ? "" : "s"}`;
+
+const isResumeSourcedArtifact = (artifact: Record<string, unknown>): boolean => {
+  const provenance = toRecord(artifact.source_provenance);
+  return toTrimmedString(provenance.source).toLowerCase() === "resume";
 };
 
 export function StudentPhase1Onboarding({
@@ -71,6 +98,7 @@ export function StudentPhase1Onboarding({
   const [resumeFileName, setResumeFileName] = useState<string | null>(null);
   const [transcriptFileName, setTranscriptFileName] = useState<string | null>(null);
   const [resumeAccepted, setResumeAccepted] = useState(false);
+  const [resumeProcessingSummary, setResumeProcessingSummary] = useState<ResumeProcessingSummary | null>(null);
   const [lowExtractionConfidence, setLowExtractionConfidence] = useState(false);
   const [resumeMismatchWarning, setResumeMismatchWarning] = useState<{
     authEmail: string | null;
@@ -81,7 +109,6 @@ export function StudentPhase1Onboarding({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!claimMode) return;
     let active = true;
 
     const loadClaimSignals = async () => {
@@ -104,12 +131,71 @@ export function StudentPhase1Onboarding({
         if (!active) return;
 
         const personalInfo = toRecord(profilePayload?.ok ? profilePayload.data?.profile?.personal_info : {});
+        const studentData = toRecord(profilePayload?.ok ? profilePayload.data?.student_data : {});
+        const onboardingIntake = toRecord(studentData.onboarding_artifact_intake);
+        const onboardingSignals = toRecord(studentData.onboarding_signals);
+        const lowConfidenceSignal = toRecord(onboardingSignals.low_extraction_confidence);
+        const mismatchSignal = toRecord(onboardingSignals.resume_email_mismatch);
         const firstName = toTrimmedString(personalInfo.first_name);
         const lastName = toTrimmedString(personalInfo.last_name);
-        const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-        if (firstName.length > 0) setFirstNameInput(firstName);
-        if (lastName.length > 0) setLastNameInput(lastName);
+        let draftFirstName = "";
+        let draftLastName = "";
+        try {
+          const rawDraft = window.localStorage.getItem(onboardingNameDraftStorageKey);
+          const parsedDraft = rawDraft ? toRecord(JSON.parse(rawDraft)) : {};
+          draftFirstName = toTrimmedString(parsedDraft.first_name);
+          draftLastName = toTrimmedString(parsedDraft.last_name);
+        } catch {
+          draftFirstName = "";
+          draftLastName = "";
+        }
+        const resolvedFirstName = firstName || draftFirstName;
+        const resolvedLastName = lastName || draftLastName;
+        const fullName = [resolvedFirstName, resolvedLastName].filter(Boolean).join(" ").trim();
+        if (resolvedFirstName.length > 0) setFirstNameInput(resolvedFirstName);
+        if (resolvedLastName.length > 0) setLastNameInput(resolvedLastName);
         if (fullName.length > 0) setProfileName(fullName);
+
+        const artifactRows = artifactsPayload?.ok ? (artifactsPayload.data?.artifacts ?? []).map((entry) => toRecord(entry)) : [];
+        const resumeArtifacts = artifactRows.filter((artifact) => isResumeSourcedArtifact(artifact));
+        if (resumeArtifacts.length > 0) {
+          setResumeProcessingSummary(
+            summarizeProcessedArtifacts(resumeArtifacts.map((artifact) => ({ artifact_data: toRecord(artifact.artifact_data) })))
+          );
+        }
+
+        const extractionLog = toRecord(artifactsPayload?.ok ? artifactsPayload.data?.source_extraction_log : {});
+        const resumeLog = toRecord(extractionLog.resume);
+        const intakeResumeFileName = toTrimmedString(onboardingIntake.resume_file_name);
+        const loggedResumeFileName = toTrimmedString(resumeLog.extracted_from_filename);
+        const persistedResumeFileName = intakeResumeFileName || loggedResumeFileName;
+        if (persistedResumeFileName.length > 0) setResumeFileName(persistedResumeFileName);
+
+        const extractionStatus = toTrimmedString(onboardingIntake.resume_extraction_status).toLowerCase();
+        const intakeResumeUploadedAt = toTrimmedString(onboardingIntake.resume_uploaded_at);
+        const lowConfidenceFromSignals = lowConfidenceSignal.active === true || extractionStatus === "low_confidence";
+        setLowExtractionConfidence(lowConfidenceFromSignals);
+
+        const hasPersistedResume =
+          intakeResumeUploadedAt.length > 0 ||
+          persistedResumeFileName.length > 0 ||
+          extractionStatus === "succeeded" ||
+          extractionStatus === "low_confidence" ||
+          resumeArtifacts.length > 0;
+        if (hasPersistedResume) {
+          setResumeAccepted(true);
+        }
+
+        const mismatchStatus = toTrimmedString(mismatchSignal.status).toLowerCase();
+        if (mismatchStatus === "active") {
+          setResumeMismatchWarning({
+            authEmail: toTrimmedString(mismatchSignal.auth_email) || null,
+            resumeEmail: toTrimmedString(mismatchSignal.resume_email) || null,
+            message:
+              toTrimmedString(mismatchSignal.message) ||
+              "Resume email does not match your account email. Employer linking may fail when emails differ.",
+          });
+        }
 
         const firstArtifact = artifactsPayload?.ok ? artifactsPayload.data?.artifacts?.[0] : null;
         const firstArtifactData = toRecord(firstArtifact?.artifact_data);
@@ -131,7 +217,27 @@ export function StudentPhase1Onboarding({
     return () => {
       active = false;
     };
-  }, [claimMode]);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const normalizedFirstName = firstNameInput.trim();
+      const normalizedLastName = lastNameInput.trim();
+      if (normalizedFirstName.length === 0 && normalizedLastName.length === 0) {
+        window.localStorage.removeItem(onboardingNameDraftStorageKey);
+        return;
+      }
+      window.localStorage.setItem(
+        onboardingNameDraftStorageKey,
+        JSON.stringify({
+          first_name: normalizedFirstName,
+          last_name: normalizedLastName,
+        })
+      );
+    } catch {
+      // Ignore storage failures (private mode, restricted browser context).
+    }
+  }, [firstNameInput, lastNameInput]);
 
   const claimWarning = useMemo(() => {
     if (!claimStatus) return null;
@@ -146,6 +252,7 @@ export function StudentPhase1Onboarding({
 
   const handleResumeUpload = async (file: File) => {
     setErrorMessage(null);
+    setResumeProcessingSummary(null);
     setStatusMessage("Uploading your resume...");
     setIsUploadingResume(true);
     setResumeUploadPhase("uploading");
@@ -168,6 +275,7 @@ export function StudentPhase1Onboarding({
         if (payload?.error === "document_extraction_failed") {
           setResumeAccepted(true);
           setResumeFileName(file.name);
+          setResumeProcessingSummary({ processed: 0, verified: 0 });
           setLowExtractionConfidence(true);
           setStatusMessage("Resume received. Extraction needs follow-up after onboarding.");
           return;
@@ -178,6 +286,8 @@ export function StudentPhase1Onboarding({
       setResumeAccepted(true);
       setResumeFileName(file.name);
       setAllowResumeReplacement(false);
+      const extractedArtifacts = Array.isArray(payload.data?.artifacts) ? payload.data.artifacts.map((artifact) => toRecord(artifact)) : [];
+      setResumeProcessingSummary(summarizeProcessedArtifacts(extractedArtifacts));
       const lowConfidence = Boolean(payload.data?.signals?.low_extraction_confidence);
       setLowExtractionConfidence(lowConfidence);
       const mismatch = payload.data?.signals?.resume_email_mismatch;
@@ -298,6 +408,11 @@ export function StudentPhase1Onboarding({
           },
         },
       });
+      try {
+        window.localStorage.removeItem(onboardingNameDraftStorageKey);
+      } catch {
+        // Ignore storage failures.
+      }
     } catch (error) {
       if (error instanceof Error && error.message === "claim_under_review") {
         setErrorMessage("Claim is under review. Onboarding cannot be completed until review resolves.");
@@ -317,7 +432,7 @@ export function StudentPhase1Onboarding({
         <header className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#4c6860] dark:text-slate-400">Student onboarding</p>
           <h1 id="student-onboarding-phase-1-title" className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl">
-            Build your Evidence Profile from artifacts
+            Let's help you understand your hiring signal
           </h1>
           <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
             Upload your resume to start. Stu extracts structured evidence automatically so you do not need to manually fill profile fields.
@@ -403,14 +518,16 @@ export function StudentPhase1Onboarding({
         </article>
 
         <article className="mt-5 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Required artifact</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Required source</p>
           <h2 className="mt-2 text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">Upload resume</h2>
           <p className="mt-2 text-sm text-[#4f6a62] dark:text-slate-300">
             Resume upload is required for onboarding completion. Extraction runs immediately and usually finishes within 1 to 2 minutes.
           </p>
           {resumeAccepted && !allowResumeReplacement && !isUploadingResume ? (
-            <div className="mt-3 inline-flex rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-              Resume accepted
+            <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
+              {resumeProcessingSummary
+                ? `Resume parsed; ${formatArtifactCountLabel(resumeProcessingSummary.processed)} processed; ${formatArtifactCountLabel(resumeProcessingSummary.verified)} verified.`
+                : "Resume parsed."}
             </div>
           ) : (
             <label className="mt-3 inline-flex cursor-pointer rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#21453a] transition-colors hover:bg-[#eef5f2] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
@@ -429,7 +546,27 @@ export function StudentPhase1Onboarding({
               {isUploadingResume
                 ? resumeUploadPhase === "uploading"
                   ? "Uploading resume..."
-                  : "Extracting evidence..."
+                  : (
+                    <span className="inline-flex items-center justify-center" aria-live="polite" aria-label="Extracting evidence">
+                      <svg
+                        className="h-4 w-4 animate-spin text-[#21453a] dark:text-slate-200"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="9" className="opacity-25" stroke="currentColor" strokeWidth="3" />
+                        <path
+                          d="M21 12a9 9 0 0 0-9-9"
+                          className="opacity-90"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <span className="sr-only">Extracting evidence...</span>
+                    </span>
+                  )
                 : allowResumeReplacement
                   ? "Choose replacement resume"
                   : "Choose resume file"}
@@ -450,9 +587,6 @@ export function StudentPhase1Onboarding({
           {resumeFileName ? (
             <p className="mt-2 text-xs text-[#4f6a62] dark:text-slate-300">Latest resume: {resumeFileName}</p>
           ) : null}
-          {resumeAccepted ? (
-            <p className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">Resume accepted.</p>
-          ) : null}
           {isUploadingResume ? (
             <div className="mt-3 rounded-xl border border-[#c2e2d5] bg-[#ebf8f2] px-3 py-2 text-xs font-medium text-[#245648] dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
               Extracting your capability evidence. This usually takes 1 to 2 minutes. Please keep this page open.
@@ -461,7 +595,7 @@ export function StudentPhase1Onboarding({
         </article>
 
         <article className="mt-4 rounded-2xl border border-[#d2dfd9] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Optional artifact</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">Optional sources</p>
           <h2 className="mt-2 text-lg font-semibold text-[#0a1f1a] dark:text-slate-100">Upload transcript</h2>
           <p className="mt-2 text-sm text-[#4f6a62] dark:text-slate-300">
             Transcript upload is optional in onboarding and can improve evidence completeness.

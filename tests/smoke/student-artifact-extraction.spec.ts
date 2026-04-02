@@ -260,7 +260,7 @@ test("profile LinkedIn and GitHub links persist after extraction flows", async (
   await page.goto("/student/profile");
   await page.getByLabel("LinkedIn URL").fill("https://www.linkedin.com/in/jarom-student");
   await page.getByLabel("GitHub URL").fill("https://github.com/jaromstudent");
-  await page.getByRole("button", { name: "Save profile and video links" }).click();
+  await page.getByRole("button", { name: "Save portfolio and intro video" }).click();
   await expect(page.getByText("Saved", { exact: false })).toBeVisible();
 
   await page.goto("/student/artifacts?openExtractSource=1&extractSource=linkedin");

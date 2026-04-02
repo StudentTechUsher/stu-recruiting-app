@@ -12,7 +12,7 @@ test("login route renders chooser", async ({ page }) => {
 
 test("student, recruiter, and staff login routes render", async ({ page }) => {
   await page.goto("/login/student");
-  await expect(page.getByText("Get magic link")).toBeVisible();
+  await expect(page.getByText("Sign in")).toBeVisible();
 
   await page.goto("/login/recruiter");
   await expect(page.getByText("Get magic link")).toBeVisible();
@@ -29,6 +29,15 @@ test("student, recruiter, and staff login routes render", async ({ page }) => {
 test("root forwards to login when unauthenticated", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
+});
+
+test("public share profile routes are accessible without auth", async ({ page }) => {
+  await page.goto("/u/non-existent-share-slug");
+  await expect(page).toHaveURL(/\/u\/non-existent-share-slug$/);
+  await expect(page.getByRole("heading", { name: "Profile not found" })).toBeVisible();
+
+  await page.goto("/profile/non-existent-share-slug");
+  await expect(page).toHaveURL(/\/u\/non-existent-share-slug$/);
 });
 
 test("recruiter routes render with Storybook nav", async ({ page }) => {

@@ -91,7 +91,7 @@ export async function POST(req: Request) {
     student: {
       profile_id: studentCard.profile_id,
       share_slug: studentCard.share_slug,
-      share_path: `/profile/${studentCard.share_slug}`,
+      share_path: `/u/${studentCard.share_slug}`,
       full_name: studentCard.full_name,
       avatar_url: studentCard.avatar_url
     },

@@ -52,7 +52,7 @@ describe("referrer students resolve route", () => {
       new Request("https://app.example.com/api/referrer/students/resolve", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ profile_url: "not-a-url" })
+        body: JSON.stringify({ profile_url: "not a url" })
       })
     );
     const payload = await response.json();

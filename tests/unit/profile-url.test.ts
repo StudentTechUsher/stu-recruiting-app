@@ -6,12 +6,20 @@ describe("profile URL parsing", () => {
     expect(normalizeShareSlug("ABC123xyz890")).toBe("abc123xyz890");
   });
 
+  it("normalizes hyphenated professional handles", () => {
+    expect(normalizeShareSlug("Vin-Jones-Profile")).toBe("vin-jones-profile");
+  });
+
   it("resolves share slug from full profile URL", () => {
     expect(resolveShareSlugFromProfileInput("https://app.example.com/profile/abc123xyz890")).toBe("abc123xyz890");
   });
 
   it("resolves share slug from relative profile path", () => {
     expect(resolveShareSlugFromProfileInput("/profile/abc123xyz890")).toBe("abc123xyz890");
+  });
+
+  it("resolves share slug from canonical /u path", () => {
+    expect(resolveShareSlugFromProfileInput("https://app.example.com/u/vin-jones")).toBe("vin-jones");
   });
 
   it("returns null for malformed input", () => {

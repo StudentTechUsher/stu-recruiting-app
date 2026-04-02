@@ -159,10 +159,6 @@ describe("student capability profiles GET route", () => {
 
     expect(payload.data.roles).toEqual([
       {
-        role_id: "name:product manager",
-        role_label: "Product Manager",
-      },
-      {
         role_id: "name:software engineer",
         role_label: "Software Engineer",
       },
@@ -175,14 +171,6 @@ describe("student capability profiles GET route", () => {
     ]);
 
     expect(payload.data.capability_profiles).toEqual([
-      {
-        capability_profile_id: "profile-3",
-        company_id: "company-3",
-        company_label: "GitHub",
-        role_id: "name:product manager",
-        role_label: "Product Manager",
-        capability_ids: [],
-      },
       {
         capability_profile_id: "profile-2",
         company_id: "company-2",
