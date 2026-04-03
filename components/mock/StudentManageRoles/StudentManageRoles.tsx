@@ -1207,7 +1207,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       <div className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[32px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
         <header className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#4c6860] dark:text-slate-400">
-            {showTargetSections && !showProfileSections ? "Student Coaching Targets" : "Student Profile"}
+            {showTargetSections && !showProfileSections ? "Candidate Coaching Targets" : "Candidate Profile"}
           </p>
           <h2 id="student-manage-roles-title" className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl">
             {showProfileSections && showTargetSections
