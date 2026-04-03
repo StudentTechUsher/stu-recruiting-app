@@ -46,8 +46,8 @@ const resolveStudentDisplayName = (personalInfo: Record<string, unknown>): strin
   const derivedName = `${firstName} ${lastName}`.trim();
   if (derivedName.length > 0) return derivedName;
   if (fullName.length > 0) return fullName;
-  if (email.length > 0) return email.split("@")[0]?.trim() ?? "Student";
-  return "Student";
+  if (email.length > 0) return email.split("@")[0]?.trim() ?? "Candidate";
+  return "Candidate";
 };
 
 const toInitials = (value: string): string => {
@@ -202,7 +202,7 @@ const adminNavItems: NavItem[] = [
 const referrerNavItems: NavItem[] = [
   {
     key: "referrer-endorsements",
-    label: "Student Endorsements",
+    label: "Candidate Endorsements",
     shortLabel: "Endorsements",
     description: "Look up student profiles and submit endorsements",
     icon: CandidateIcon,
@@ -244,7 +244,7 @@ export function AppNavigationShell({
       : [];
   const showMobileBottomNav = showNavigation && audience === "student" && mobileBottomNavItems.length > 0;
   const showMobileTopBar = showNavigation && audience === "student";
-  const studentInitials = useMemo(() => toInitials(studentIdentity?.displayName ?? "Student"), [studentIdentity?.displayName]);
+  const studentInitials = useMemo(() => toInitials(studentIdentity?.displayName ?? "Candidate"), [studentIdentity?.displayName]);
 
   useEffect(() => {
     if (audience !== "student") return;
@@ -274,7 +274,7 @@ export function AppNavigationShell({
         });
       } catch {
         if (!isActive) return;
-        setStudentIdentity((current) => current ?? { displayName: "Student", avatarUrl: "" });
+        setStudentIdentity((current) => current ?? { displayName: "Candidate", avatarUrl: "" });
       }
     };
 
@@ -309,17 +309,17 @@ export function AppNavigationShell({
                   <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e5f2ec] text-xs font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
                     {studentIdentity?.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={studentIdentity.avatarUrl} alt="Student avatar" className="h-full w-full object-cover" />
+                      <img src={studentIdentity.avatarUrl} alt="Candidate avatar" className="h-full w-full object-cover" />
                     ) : (
                       studentInitials
                     )}
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#5a776e] dark:text-slate-400">
-                      Student
+                      Candidate
                     </span>
                     <span className="block truncate text-sm font-semibold text-[#173f33] dark:text-slate-100">
-                      {studentIdentity?.displayName ?? "Student"}
+                      {studentIdentity?.displayName ?? "Candidate"}
                     </span>
                   </span>
                 </div>
@@ -329,7 +329,7 @@ export function AppNavigationShell({
             <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-[#446258] dark:text-slate-400">
               {audience === "admin"
                 ? "Admin Navigation"
-                : `${audience === "recruiter" ? "Recruiter" : audience === "referrer" ? "Referrer" : "Student"} Navigation`}
+                : `${audience === "recruiter" ? "Recruiter" : audience === "referrer" ? "Referrer" : "Candidate"} Navigation`}
             </p>
 
             <nav className="mt-2 space-y-2">
@@ -408,7 +408,7 @@ export function AppNavigationShell({
             >
               {studentIdentity?.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={studentIdentity.avatarUrl} alt="Student avatar" className="h-full w-full object-cover" />
+                <img src={studentIdentity.avatarUrl} alt="Candidate avatar" className="h-full w-full object-cover" />
               ) : (
                 studentInitials
               )}

@@ -431,7 +431,7 @@ export const ProfileBuilder = ({ defaultMode = 'guided', defaultAgentOpen = fals
             </h2>
             <p className="mt-3 text-sm leading-7 text-[#436059] dark:text-slate-300">
               Translate hiring standards into a reusable capability profile, weight what matters most, then publish to
-              student cohorts so readiness pathways align before applications open.
+              candidate cohorts so readiness pathways align before applications open.
             </p>
           </div>
           <Badge className="bg-[#e9fef3] text-[#0a402d] ring-1 ring-[#b8e9ce] dark:bg-emerald-500/20 dark:text-emerald-100 dark:ring-emerald-400/35">
@@ -586,7 +586,7 @@ export const ProfileBuilder = ({ defaultMode = 'guided', defaultAgentOpen = fals
 
                 <Card
                   className="bg-white/95 p-5 dark:bg-slate-900/80"
-                  header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">4. Share with student cohorts</h3>}
+                  header={<h3 className="text-xl font-semibold text-[#0a1f1a] dark:text-slate-100">4. Share with candidate cohorts</h3>}
                 >
                   <label className="mb-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62] dark:text-slate-400">
                     Profile name

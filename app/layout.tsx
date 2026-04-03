@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Stu Recruiting",
-  description: "Official Stu Recruiting platform for students and recruiters"
+  description: "Official Stu Recruiting platform for early-talent candidates and recruiters"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

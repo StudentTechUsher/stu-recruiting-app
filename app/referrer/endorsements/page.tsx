@@ -71,9 +71,9 @@ function ReferrerEndorsementsPageContent() {
 
       if (!response.ok || !payload || !payload.ok) {
         const errorCode = !payload || payload.ok ? "" : payload.error ?? "";
-        if (errorCode === "invalid_profile_url") setLookupError("Enter a valid student profile URL or share slug.");
-        else if (errorCode === "student_not_found") setLookupError("No student profile matched that URL.");
-        else setLookupError("Unable to resolve that student profile right now.");
+        if (errorCode === "invalid_profile_url") setLookupError("Enter a valid candidate profile URL or share slug.");
+        else if (errorCode === "student_not_found") setLookupError("No candidate profile matched that URL.");
+        else setLookupError("Unable to resolve that candidate profile right now.");
         return;
       }
 
@@ -81,11 +81,11 @@ function ReferrerEndorsementsPageContent() {
       setEndorsementText(payload.data.existing_endorsement?.endorsement_text ?? "");
       setSaveNotice(
         payload.data.existing_endorsement
-          ? "Loaded your existing endorsement for this student. You can edit and save."
-          : "Student resolved. Add your endorsement below."
+          ? "Loaded your existing endorsement for this candidate. You can edit and save."
+          : "Candidate resolved. Add your endorsement below."
       );
     } catch {
-      setLookupError("Unable to resolve that student profile right now.");
+      setLookupError("Unable to resolve that candidate profile right now.");
     } finally {
       setIsResolving(false);
     }
@@ -132,15 +132,15 @@ function ReferrerEndorsementsPageContent() {
       <section className="rounded-[32px] border border-[#cfddd6] bg-[#f8fcfa] p-6 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)]">
         <header className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#4c6860]">Referrer workspace</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] md:text-4xl">Submit student endorsement</h1>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] md:text-4xl">Submit candidate endorsement</h1>
           <p className="mt-3 text-sm leading-7 text-[#436059]">
-            Paste the student&apos;s shared profile URL. We&apos;ll resolve their profile and let you submit or update your endorsement.
+            Paste the candidate&apos;s shared profile URL. We&apos;ll resolve their profile and let you submit or update your endorsement.
           </p>
         </header>
 
         <section className="mt-6 rounded-2xl border border-[#d2dfd9] bg-white p-4">
           <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62]">
-            Student profile URL or share slug
+            Candidate profile URL or share slug
             <div className="mt-2 flex flex-wrap gap-2">
               <input
                 value={profileInput}
@@ -155,7 +155,7 @@ function ReferrerEndorsementsPageContent() {
                 disabled={!canResolve}
                 className="rounded-xl bg-[#12f987] px-4 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#0a1f1a] transition-colors hover:bg-[#0ed978] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isResolving ? "Resolving..." : "Resolve Student"}
+                {isResolving ? "Resolving..." : "Resolve Candidate"}
               </button>
             </div>
           </label>
@@ -179,7 +179,7 @@ function ReferrerEndorsementsPageContent() {
             </div>
           ) : student ? (
             <>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62]">Resolved student</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6a62]">Resolved candidate</p>
               <div className="mt-3 flex items-center gap-3 rounded-xl border border-[#d2dfd9] bg-[#f8fcfa] p-3">
                 <span className="inline-flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e8f2ed] text-sm font-semibold text-[#1f4338]">
                   {student.avatar_url ? (
@@ -207,7 +207,7 @@ function ReferrerEndorsementsPageContent() {
                   onChange={(event) => setEndorsementText(event.target.value)}
                   rows={6}
                   className="mt-2 w-full rounded-xl border border-[#bfd2ca] bg-white px-3 py-2 text-sm normal-case text-[#0a1f1a]"
-                  placeholder="Describe this student's strengths, outcomes, and readiness."
+                  placeholder="Describe this candidate's strengths, outcomes, and readiness."
                   disabled={isSaving}
                 />
               </label>
@@ -222,7 +222,7 @@ function ReferrerEndorsementsPageContent() {
               </button>
             </>
           ) : (
-            <p className="text-sm text-[#557168]">Resolve a student profile URL to start writing an endorsement.</p>
+            <p className="text-sm text-[#557168]">Resolve a candidate profile URL to start writing an endorsement.</p>
           )}
         </section>
 
