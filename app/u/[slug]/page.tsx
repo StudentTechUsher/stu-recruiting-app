@@ -163,7 +163,7 @@ export default async function PublicStudentShareProfilePage({ params }: PageProp
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
               <p className="mt-1 text-xs text-[#557168] dark:text-slate-400">
-                Current evidence coverage mapped to selected role and employer targets.
+                Current evidence coverage mapped to selected role-target axes for each employer target.
               </p>
             </div>
             <p className="text-xs text-[#557168] dark:text-slate-400">
@@ -187,10 +187,50 @@ export default async function PublicStudentShareProfilePage({ params }: PageProp
                         {target.priority_label}
                       </span>
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-                        {target.alignment_percent !== null ? `Alignment ${target.alignment_percent}%` : "Alignment --"}
+                        {target.alignment_score !== null
+                          ? `Alignment ${Math.round(target.alignment_score * 100)}%`
+                          : target.alignment_percent !== null
+                            ? `Alignment ${target.alignment_percent}%`
+                            : "Alignment --"}
                       </span>
                     </div>
                   </div>
+                  {target.confidence_summary ? (
+                    <p className="mt-2 text-[11px] text-[#557168] dark:text-slate-400">
+                      Confidence {Math.round(target.confidence_summary.average_confidence * 100)}% ·{" "}
+                      {target.confidence_summary.low_confidence_axis_count}/{target.confidence_summary.axis_count} axes low confidence
+                    </p>
+                  ) : null}
+                  {target.axes.length > 0 ? (
+                    <div className="mt-3 space-y-1.5">
+                      {target.axes
+                        .slice()
+                        .sort((a, b) => a.gap - b.gap)
+                        .map((axis) => {
+                          const deficitSeverity = Math.abs(Math.round(axis.gap * 100));
+                          const gapToneClass =
+                            axis.gap < 0
+                              ? deficitSeverity >= 20
+                                ? "text-rose-700 dark:text-rose-300"
+                                : "text-amber-700 dark:text-amber-300"
+                              : axis.gap > 0
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : "text-[#557168] dark:text-slate-400";
+                          return (
+                            <div
+                              key={`public-axis-summary-${target.capability_profile_id}-${axis.capability_id}`}
+                              className="flex items-center justify-between gap-2 rounded-md border border-[#d5e3dc] bg-white px-2 py-1.5 text-[11px] dark:border-slate-700 dark:bg-slate-900"
+                            >
+                              <span className="font-semibold text-[#1a4337] dark:text-slate-200">{axis.label}</span>
+                              <span className={gapToneClass}>
+                                {Math.round(axis.candidate_score * 100)}% / {Math.round(axis.required_level * 100)}% ·{" "}
+                                {axis.gap < 0 ? "Deficit" : axis.gap > 0 ? "Surplus" : "Met"} · {axis.confidence_level}
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex min-h-[300px] items-center justify-center">
                     {target.axes.length > 0 ? (
                       <EvidenceTargetRadar

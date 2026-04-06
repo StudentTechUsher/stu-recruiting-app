@@ -128,6 +128,7 @@ describe("student capability targeting utils", () => {
           role_id: "role-1",
           role_label: "Software Engineer",
           capability_ids: ["technical_depth"],
+          target_axes: [],
           target_weights: {},
           updated_at: "2026-04-01T00:00:00.000Z",
         },
@@ -138,6 +139,7 @@ describe("student capability targeting utils", () => {
           role_id: "role-2",
           role_label: "Data Analyst",
           capability_ids: ["data_management"],
+          target_axes: [],
           target_weights: {},
           updated_at: "2026-04-01T00:00:00.000Z",
         },
@@ -157,6 +159,22 @@ describe("student capability targeting utils", () => {
         role_id: "role-1",
         role_label: "Software Engineer",
         capability_ids: ["technical_depth", "systems_thinking"],
+        target_axes: [
+          {
+            axis_id: "technical_depth",
+            required_level: 0.8,
+            weight: 0.8,
+            required_level_source: "authored",
+            is_active: true,
+          },
+          {
+            axis_id: "systems_thinking",
+            required_level: 0.4,
+            weight: 0.4,
+            required_level_source: "authored",
+            is_active: true,
+          },
+        ],
         target_weights: { technical_depth: 0.8, systems_thinking: 0.4 },
         updated_at: "2026-04-01T00:00:00.000Z",
       },
@@ -179,7 +197,41 @@ describe("student capability targeting utils", () => {
     });
 
     expect(fit.axes).toHaveLength(2);
-    expect(fit.axes.find((axis) => axis.capability_id === "technical_depth")?.evidence_state).toBe("strong");
+    expect(fit.axes.find((axis) => axis.capability_id === "technical_depth")?.evidence_state).toBe("tentative");
     expect(fit.axes.find((axis) => axis.capability_id === "systems_thinking")?.target_magnitude).toBeGreaterThan(0);
+    expect(fit.alignment_score).toBeGreaterThan(0);
+    expect(fit.overall_alignment).toBe(fit.alignment_score);
+    expect(fit.axes[0]).toHaveProperty("required_level");
+  });
+
+  it("treats required_level=0 as automatically attained", () => {
+    const fit = computeCapabilityProfileFit({
+      profile: {
+        capability_profile_id: "profile-2",
+        company_id: "company-1",
+        company_label: "Adobe",
+        role_id: "role-1",
+        role_label: "Software Engineer",
+        capability_ids: ["communication"],
+        target_axes: [
+          {
+            axis_id: "communication",
+            required_level: 0,
+            weight: 1,
+            required_level_source: "authored",
+            is_active: true,
+          },
+        ],
+        target_weights: { communication: 1 },
+        updated_at: "2026-04-01T00:00:00.000Z",
+      },
+      artifacts: [],
+      evidenceFreshnessMarker: "0:0:seed",
+    });
+
+    expect(fit.axes).toHaveLength(1);
+    expect(fit.axes[0]?.required_level).toBe(0);
+    expect(fit.axes[0]?.attainment).toBe(1);
+    expect(fit.alignment_score).toBe(1);
   });
 });

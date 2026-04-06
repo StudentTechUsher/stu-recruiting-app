@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFeatureFlags } from "@/components/FeatureFlagsProvider";
+import { fetchStudentQuery, setStudentQueryCacheScope } from "@/lib/client/student-query-cache";
+import { endCandidateBoundary, startCandidateBoundary } from "@/lib/client/student-perf";
 import {
   getFirstReleasedStudentRoute,
   isStudentPathReleased,
@@ -30,24 +32,12 @@ type NavItem = {
 type StudentIdentity = {
   displayName: string;
   avatarUrl: string;
+  initialsFallback: string;
 };
 
 const asTrimmedString = (value: unknown): string => {
   if (typeof value !== "string") return "";
   return value.trim();
-};
-
-const resolveStudentDisplayName = (personalInfo: Record<string, unknown>): string => {
-  const firstName = asTrimmedString(personalInfo.first_name);
-  const lastName = asTrimmedString(personalInfo.last_name);
-  const fullName = asTrimmedString(personalInfo.full_name);
-  const email = asTrimmedString(personalInfo.email);
-
-  const derivedName = `${firstName} ${lastName}`.trim();
-  if (derivedName.length > 0) return derivedName;
-  if (fullName.length > 0) return fullName;
-  if (email.length > 0) return email.split("@")[0]?.trim() ?? "Candidate";
-  return "Candidate";
 };
 
 const toInitials = (value: string): string => {
@@ -230,6 +220,7 @@ export function AppNavigationShell({
   const router = useRouter();
   const { recruiterViewReleaseFlags, studentViewReleaseFlags } = useFeatureFlags();
   const [studentIdentity, setStudentIdentity] = useState<StudentIdentity | null>(null);
+  const shellPerfHandleRef = useRef<ReturnType<typeof startCandidateBoundary> | null>(null);
   const baseNavItems = getNavItems(audience);
   const navItems = baseNavItems.filter((item) => {
     if (audience === "student" && item.releaseKey) return studentViewReleaseFlags[item.releaseKey];
@@ -257,24 +248,49 @@ export function AppNavigationShell({
     if (audience !== "student") return;
 
     let isActive = true;
+    if (!shellPerfHandleRef.current) {
+      shellPerfHandleRef.current = startCandidateBoundary("shell");
+    }
     const loadStudentIdentity = async () => {
       try {
-        const response = await fetch("/api/student/profile", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as
-          | { ok: true; data?: { profile?: { personal_info?: Record<string, unknown> } } }
+        const payload = (await fetchStudentQuery({
+          path: "/api/student/profile?view=identity",
+          resource: "profile_identity",
+        })) as
+          | {
+              ok: true;
+              data?: {
+                identity?: {
+                  display_name?: string;
+                  avatar_url?: string;
+                  initials_fallback?: string;
+                  cache_scope?: string;
+                };
+              };
+            }
           | { ok: false; error?: string }
           | null;
 
-        if (!isActive || !response.ok || !payload || !payload.ok) return;
+        if (!isActive || !payload || !payload.ok || !payload.data?.identity) return;
 
-        const personalInfo = payload.data?.profile?.personal_info ?? {};
+        const identity = payload.data.identity;
+        const cacheScope = asTrimmedString(identity.cache_scope);
+        if (cacheScope.length > 0) {
+          setStudentQueryCacheScope(cacheScope);
+        }
         setStudentIdentity({
-          displayName: resolveStudentDisplayName(personalInfo),
-          avatarUrl: asTrimmedString(personalInfo.avatar_url) || asTrimmedString(personalInfo.avatarUrl)
+          displayName: asTrimmedString(identity.display_name) || "Candidate",
+          avatarUrl: asTrimmedString(identity.avatar_url),
+          initialsFallback: asTrimmedString(identity.initials_fallback) || "ST",
         });
       } catch {
         if (!isActive) return;
-        setStudentIdentity((current) => current ?? { displayName: "Candidate", avatarUrl: "" });
+        setStudentIdentity((current) => current ?? { displayName: "Candidate", avatarUrl: "", initialsFallback: "ST" });
+      } finally {
+        if (shellPerfHandleRef.current) {
+          endCandidateBoundary(shellPerfHandleRef.current);
+          shellPerfHandleRef.current = null;
+        }
       }
     };
 
@@ -311,7 +327,7 @@ export function AppNavigationShell({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={studentIdentity.avatarUrl} alt="Candidate avatar" className="h-full w-full object-cover" />
                     ) : (
-                      studentInitials
+                      studentIdentity?.initialsFallback ?? studentInitials
                     )}
                   </span>
                   <span className="min-w-0">
@@ -410,7 +426,7 @@ export function AppNavigationShell({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={studentIdentity.avatarUrl} alt="Candidate avatar" className="h-full w-full object-cover" />
               ) : (
-                studentInitials
+                studentIdentity?.initialsFallback ?? studentInitials
               )}
             </Link>
           </div>

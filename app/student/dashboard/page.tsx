@@ -1,12 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   EvidenceTargetRadar,
   calculateEvidenceTargetAlignmentPercent,
   type EvidenceTargetRadarAxis,
 } from "@/components/student/EvidenceTargetRadar";
+import {
+  fetchStudentQuery,
+  invalidateStudentCacheForMutation,
+  setStudentQueryCacheScope,
+} from "@/lib/client/student-query-cache";
+import { endCandidateBoundary, startCandidateBoundary } from "@/lib/client/student-perf";
 
 type VerificationBreakdown = {
   verified: number;
@@ -24,6 +30,13 @@ type DashboardAxis = {
 };
 
 type DashboardPayload = {
+  identity: {
+    display_name: string;
+    first_name: string | null;
+    initials_fallback: string;
+    avatar_url: string | null;
+    cache_scope: string;
+  };
   roles: string[];
   axes: DashboardAxis[];
   alerts?: {
@@ -88,6 +101,13 @@ type CapabilityProfileFit = {
   capability_profile_id: string;
   company_label: string;
   role_label: string;
+  alignment_score: number;
+  overall_alignment?: number;
+  confidence_summary: {
+    average_confidence: number;
+    low_confidence_axis_count: number;
+    axis_count: number;
+  };
   axes: EvidenceTargetRadarAxis[];
   generated_at: string;
   evidence_freshness_marker: string;
@@ -98,42 +118,12 @@ type CapabilityTargetsPayload = {
   fit_by_capability_profile_id: Record<string, CapabilityProfileFit>;
 };
 
-type ProfilePayload = {
-  profile?: {
-    personal_info?: Record<string, unknown>;
-  };
-};
-
 type MetricTone = "neutral" | "success" | "warning" | "danger";
 type HiringSignalLevel = "Weak" | "Weak-leaning" | "Moderate" | "Strong-leaning" | "Strong";
 
 const skeletonClass = "animate-pulse rounded-xl bg-[#dde9e3] dark:bg-slate-700/70";
 
 const asPercent = (value: number): string => `${Math.round(value * 100)}%`;
-
-const asTrimmedString = (value: unknown): string => {
-  if (typeof value !== "string") return "";
-  return value.trim();
-};
-
-const resolveFirstName = (personalInfo: Record<string, unknown>): string | null => {
-  const explicitFirstName = asTrimmedString(personalInfo.first_name);
-  if (explicitFirstName.length > 0) return explicitFirstName;
-
-  const fullName = asTrimmedString(personalInfo.full_name);
-  if (fullName.length > 0) {
-    const firstToken = fullName.split(/\s+/).filter(Boolean)[0] ?? "";
-    if (firstToken.length > 0) return firstToken;
-  }
-
-  const email = asTrimmedString(personalInfo.email);
-  if (email.length > 0) {
-    const local = email.split("@")[0]?.trim() ?? "";
-    if (local.length > 0) return local;
-  }
-
-  return null;
-};
 
 const resolveVerifiedShareTone = (share: number): MetricTone => {
   if (share >= 0.7) return "success";
@@ -180,43 +170,45 @@ export default function StudentDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [capabilityTargets, setCapabilityTargets] = useState<CapabilityTargetsPayload | null>(null);
-  const [firstName, setFirstName] = useState<string | null>(null);
   const [isDismissingMismatch, setIsDismissingMismatch] = useState(false);
+  const dashboardPerfHandleRef = useRef<ReturnType<typeof startCandidateBoundary> | null>(null);
 
   useEffect(() => {
     let active = true;
+    if (!dashboardPerfHandleRef.current) {
+      dashboardPerfHandleRef.current = startCandidateBoundary("dashboard");
+    }
     const load = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const [dashboardResponse, profileResponse] = await Promise.all([
-          fetch("/api/student/dashboard", { cache: "no-store" }),
-          fetch("/api/student/profile", { cache: "no-store" }),
-        ]);
-        const payload = (await dashboardResponse.json().catch(() => null)) as
+        const payload = (await fetchStudentQuery({
+          path: "/api/student/dashboard",
+          resource: "dashboard",
+        })) as
           | { ok: true; data?: { dashboard?: DashboardPayload } }
           | { ok: false; error?: string }
           | null;
-        if (!dashboardResponse.ok || !payload || !payload.ok || !payload.data?.dashboard) {
+        if (!payload || !payload.ok || !payload.data?.dashboard) {
           throw new Error("dashboard_load_failed");
         }
 
-        const profilePayload = (await profileResponse.json().catch(() => null)) as
-          | { ok: true; data?: ProfilePayload }
-          | { ok: false; error?: string }
-          | null;
-        const maybeFirstName = profilePayload?.ok
-          ? resolveFirstName(profilePayload.data?.profile?.personal_info ?? {})
-          : null;
-
         if (!active) return;
         setDashboard(payload.data.dashboard);
-        setFirstName(maybeFirstName);
+        if (payload.data.dashboard.identity?.cache_scope) {
+          setStudentQueryCacheScope(payload.data.dashboard.identity.cache_scope);
+        }
       } catch {
         if (!active) return;
         setError("Unable to load dashboard right now.");
       } finally {
-        if (active) setIsLoading(false);
+        if (active) {
+          setIsLoading(false);
+          if (dashboardPerfHandleRef.current) {
+            endCandidateBoundary(dashboardPerfHandleRef.current);
+            dashboardPerfHandleRef.current = null;
+          }
+        }
       }
     };
 
@@ -231,12 +223,14 @@ export default function StudentDashboardPage() {
     const loadTargets = async () => {
       setIsTargetsLoading(true);
       try {
-        const response = await fetch("/api/student/capability-profiles", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as
+        const payload = (await fetchStudentQuery({
+          path: "/api/student/capability-profiles",
+          resource: "capability_profiles",
+        })) as
           | { ok: true; data?: CapabilityTargetsPayload }
           | { ok: false; error?: string }
           | null;
-        if (!response.ok || !payload || !payload.ok || !payload.data) {
+        if (!payload || !payload.ok || !payload.data) {
           throw new Error("capability_targets_load_failed");
         }
         if (!active) return;
@@ -270,6 +264,7 @@ export default function StudentDashboardPage() {
       });
       const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
       if (!response.ok || !payload?.ok) throw new Error("dismiss_failed");
+      invalidateStudentCacheForMutation("/api/student/onboarding/signals");
 
       setDashboard((current) => {
         if (!current?.alerts) return current;
@@ -301,7 +296,7 @@ export default function StudentDashboardPage() {
     const fit = capabilityTargets?.fit_by_capability_profile_id?.[primaryTarget.capability_profile_id];
     const axes = fit?.axes ?? [];
     if (axes.length === 0) return null;
-    const covered = axes.filter((axis) => axis.evidence_state !== "missing" && axis.evidence_magnitude > 0).length;
+    const covered = axes.filter((axis) => (axis.attainment ?? 0) >= 1).length;
     const total = axes.length;
     return {
       covered,
@@ -346,6 +341,7 @@ export default function StudentDashboardPage() {
         ? { label: "Generate map", href: "/student/artifacts#ai-literacy-map" }
         : { label: "Select role target", href: "/student/targets" }
       : undefined;
+  const firstName = dashboard?.identity?.first_name ?? null;
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
@@ -411,7 +407,7 @@ export default function StudentDashboardPage() {
                       ? `${primaryTargetCoverage.covered}/${primaryTargetCoverage.total} capability axes covered for your primary role target.`
                       : undefined
                 }
-                tooltipText="Calculated as covered capability axes divided by total required axes for your primary selected role target. An axis is covered when evidence magnitude is above zero (tentative or strong)."
+                tooltipText="Calculated as met capability axes divided by total required axes for your primary selected role target. An axis is met when candidate score reaches the required level."
               />
               <MetricCard
                 label="Verified evidence share"
@@ -448,7 +444,7 @@ export default function StudentDashboardPage() {
         <article className="mt-6 rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
           <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">
-            Explanatory view only. It compares target expectations against current evidence coverage by capability axis.
+            Explanatory view only. It compares target expectations against current evidence coverage for the selected role target axes.
           </p>
           {isTargetsLoading ? (
             <div className="mt-3 grid gap-4 lg:grid-cols-2">
@@ -463,7 +459,9 @@ export default function StudentDashboardPage() {
             >
               {capabilityTargets?.active_capability_profiles.map((target, index) => {
                 const fit = capabilityTargets.fit_by_capability_profile_id[target.capability_profile_id];
-                const alignmentPercent = fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) : null;
+                const alignmentPercent = fit
+                  ? Math.round((fit.alignment_score ?? fit.overall_alignment ?? (fit?.axes?.length ? calculateEvidenceTargetAlignmentPercent(fit.axes) / 100 : 0)) * 100)
+                  : null;
                 const showPriorityBadge = (capabilityTargets?.active_capability_profiles?.length ?? 0) > 1;
                 return (
                   <section
@@ -485,6 +483,62 @@ export default function StudentDashboardPage() {
                         ) : null}
                       </div>
                     </div>
+                    {fit?.confidence_summary ? (
+                      <p className="mt-2 text-[11px] text-[#4f6d64] dark:text-slate-400">
+                        Confidence {Math.round(fit.confidence_summary.average_confidence * 100)}% ·{" "}
+                        {fit.confidence_summary.low_confidence_axis_count}/{fit.confidence_summary.axis_count} axes low confidence
+                      </p>
+                    ) : null}
+                    {fit?.axes?.length ? (
+                      <div className="mt-3 space-y-2">
+                        {fit.axes
+                          .slice()
+                          .sort((a, b) => (a.gap ?? 0) - (b.gap ?? 0))
+                          .map((axis) => {
+                            const gapValue = axis.gap ?? 0;
+                            const gapLabel = gapValue < 0 ? "Deficit" : gapValue > 0 ? "Surplus" : "Met";
+                            const deficitSeverity = Math.abs(Math.round(gapValue * 100));
+                            const gapToneClass =
+                              gapValue < 0
+                                ? deficitSeverity >= 20
+                                  ? "text-rose-700 dark:text-rose-300"
+                                  : "text-amber-700 dark:text-amber-300"
+                                : gapValue > 0
+                                  ? "text-emerald-700 dark:text-emerald-300"
+                                  : "text-[#4f6d64] dark:text-slate-400";
+                            const contributionPercent = Math.round(((axis.weighted_contribution ?? 0) * 100 + Number.EPSILON) * 10) / 10;
+                            return (
+                              <div key={`fit-axis-${target.capability_profile_id}-${axis.capability_id}`} className="rounded-lg border border-[#d7e4de] bg-white px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                                <div className="flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="font-semibold text-[#1d483c] dark:text-slate-200">{axis.label}</span>
+                                  <span className={gapToneClass}>
+                                    {gapLabel} {Math.abs(Math.round(gapValue * 100))} pts
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 h-2 w-full rounded-full bg-[#e4efe9] dark:bg-slate-800">
+                                  <div
+                                    className={`h-2 rounded-full ${
+                                      gapValue < 0
+                                        ? deficitSeverity >= 20
+                                          ? "bg-rose-500"
+                                          : "bg-amber-500"
+                                        : gapValue > 0
+                                          ? "bg-emerald-500"
+                                          : "bg-slate-400"
+                                    }`}
+                                    style={{ width: `${Math.max(0, Math.min(100, Math.round((axis.candidate_score ?? axis.evidence_magnitude ?? 0) * 100)))}%` }}
+                                  />
+                                </div>
+                                <div className="mt-1 flex items-center justify-between text-[10px] text-[#5a766d] dark:text-slate-400">
+                                  <span>Score {Math.round((axis.candidate_score ?? axis.evidence_magnitude ?? 0) * 100)}%</span>
+                                  <span>Req {Math.round((axis.required_level ?? axis.target_magnitude ?? 0) * 100)}%</span>
+                                  <span>Contribution {contributionPercent}%</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ) : null}
                     <div className="mt-3 flex min-h-[320px] items-center justify-center">
                       {fit?.axes && fit.axes.length > 0 ? (
                         <EvidenceTargetRadar

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { POST } from "@/app/api/student/profile/route";
+import { GET, POST } from "@/app/api/student/profile/route";
 
-const { getAuthContextMock, hasPersonaMock, getSupabaseServerClientMock } = vi.hoisted(() => ({
+const { getAuthContextMock, hasPersonaMock, getSupabaseServerClientMock, buildStudentIdentitySnapshotMock } = vi.hoisted(() => ({
   getAuthContextMock: vi.fn(),
   hasPersonaMock: vi.fn(),
-  getSupabaseServerClientMock: vi.fn()
+  getSupabaseServerClientMock: vi.fn(),
+  buildStudentIdentitySnapshotMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-context", () => ({
@@ -17,6 +18,10 @@ vi.mock("@/lib/authorization", () => ({
 
 vi.mock("@/lib/supabase/server", () => ({
   getSupabaseServerClient: getSupabaseServerClientMock
+}));
+
+vi.mock("@/lib/student/identity", () => ({
+  buildStudentIdentitySnapshot: buildStudentIdentitySnapshotMock,
 }));
 
 const buildSupabaseMock = (existingStudentData: Record<string, unknown>) => {
@@ -70,9 +75,17 @@ describe("student profile route nested link merge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hasPersonaMock.mockReturnValue(true);
+    buildStudentIdentitySnapshotMock.mockResolvedValue({
+      display_name: "Jarom M",
+      first_name: "Jarom",
+      initials_fallback: "JM",
+      avatar_url: "https://cdn.example.com/avatar.png",
+      cache_scope: "student-1:org-1",
+    });
     getAuthContextMock.mockResolvedValue({
       authenticated: true,
       user_id: "student-1",
+      org_id: "org-1",
       profile: {
         personal_info: {
           first_name: "Jarom",
@@ -85,6 +98,41 @@ describe("student profile route nested link merge", () => {
       },
       session_source: "supabase"
     });
+  });
+
+  it("returns lightweight identity payload in identity view mode", async () => {
+    const profileLimitMock = vi.fn().mockResolvedValue({
+      data: [
+        {
+          personal_info: {
+            first_name: "Jarom",
+            last_name: "M",
+            full_name: "Jarom M",
+            email: "jarom@school.edu",
+          },
+        },
+      ],
+    });
+    const profileEqMock = vi.fn().mockReturnValue({ limit: profileLimitMock });
+    const profileSelectMock = vi.fn().mockReturnValue({ eq: profileEqMock });
+    const fromMock = vi.fn().mockImplementation((table: string) => {
+      if (table === "profiles") return { select: profileSelectMock };
+      throw new Error(`unexpected_table_${table}`);
+    });
+    getSupabaseServerClientMock.mockResolvedValue({ from: fromMock });
+
+    const response = await GET(new Request("https://app.example.com/api/student/profile?view=identity"));
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.ok).toBe(true);
+    expect(payload.data.resource).toBe("student_profile_identity");
+    expect(payload.data.identity).toMatchObject({
+      display_name: "Jarom M",
+      cache_scope: "student-1:org-1",
+    });
+    expect(buildStudentIdentitySnapshotMock).toHaveBeenCalledTimes(1);
+    expect(fromMock).toHaveBeenCalledWith("profiles");
   });
 
   it("preserves unrelated profile links when partial updates are posted", async () => {

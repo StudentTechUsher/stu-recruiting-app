@@ -2,6 +2,11 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } f
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
+  fetchStudentQuery,
+  invalidateStudentCacheForMutation
+} from '@/lib/client/student-query-cache';
+import { endCandidateBoundary, startCandidateBoundary } from '@/lib/client/student-perf';
+import {
   EvidenceTargetRadar,
   calculateEvidenceTargetAlignmentPercent,
   type EvidenceTargetRadarAxis
@@ -284,7 +289,6 @@ const artifactTypeToneClass: Record<ArtifactType, string> = {
   test: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
 };
 
-const minArtifactsSkeletonMs = 350;
 const artifactIntroTourStorageKey = 'stu_artifact_intro_seen_v1';
 
 const tagToneClass: Record<ArtifactTag, string> = {
@@ -895,6 +899,7 @@ export const StudentArtifactRepository = () => {
   const [draftAttachmentName, setDraftAttachmentName] = useState('');
   const documentInputRef = useRef<HTMLInputElement | null>(null);
   const verificationDocumentInputRef = useRef<HTMLInputElement | null>(null);
+  const artifactsPerfHandleRef = useRef<ReturnType<typeof startCandidateBoundary> | null>(null);
   const calculatedDraftTags = artifactTypeTagPreset[draftType];
 
   const filteredArtifacts = useMemo(() => {
@@ -1006,12 +1011,14 @@ export const StudentArtifactRepository = () => {
   const loadCapabilityTargets = useCallback(async () => {
     setIsTargetsLoading(true);
     try {
-      const response = await fetch('/api/student/capability-profiles', { cache: 'no-store' });
-      const payload = (await response.json().catch(() => null)) as
+      const payload = (await fetchStudentQuery({
+        path: '/api/student/capability-profiles',
+        resource: 'capability_profiles'
+      })) as
         | { ok: true; data?: CapabilityTargetsPayload }
         | { ok: false; error?: string }
         | null;
-      if (!response.ok || !payload || !payload.ok || !payload.data) {
+      if (!payload || !payload.ok || !payload.data) {
         throw new Error('capability_targets_fetch_failed');
       }
       setCapabilityTargets(payload.data);
@@ -1025,13 +1032,15 @@ export const StudentArtifactRepository = () => {
   const loadAiLiteracyMap = useCallback(async () => {
     setIsAiLiteracyLoading(true);
     try {
-      const response = await fetch('/api/student/ai-literacy-map', { cache: 'no-store' });
-      const payload = (await response.json().catch(() => null)) as
+      const payload = (await fetchStudentQuery({
+        path: '/api/student/ai-literacy-map',
+        resource: 'ai_literacy_map'
+      })) as
         | { ok: true; data: AiLiteracyPayload }
         | { ok: false; error?: string }
         | null;
 
-      if (!response.ok || !payload || !payload.ok || !payload.data.ai_literacy) {
+      if (!payload || !payload.ok || !payload.data.ai_literacy) {
         throw new Error('ai_literacy_fetch_failed');
       }
 
@@ -1057,16 +1066,17 @@ export const StudentArtifactRepository = () => {
   }, []);
 
   const loadArtifacts = useCallback(async () => {
-    const loadStartedAt = Date.now();
     setIsLoadingArtifacts(true);
     try {
-      const response = await fetch('/api/student/artifacts', { cache: 'no-store' });
-      const payload = (await response.json().catch(() => null)) as
+      const payload = (await fetchStudentQuery({
+        path: '/api/student/artifacts',
+        resource: 'artifacts'
+      })) as
         | { ok: true; data: ArtifactsApiPayload }
         | { ok: false; error?: string }
         | null;
 
-      if (!response.ok || !payload || !payload.ok) {
+      if (!payload || !payload.ok) {
         throw new Error('artifacts_fetch_failed');
       }
 
@@ -1093,15 +1103,18 @@ export const StudentArtifactRepository = () => {
       setSelectedArtifactId(null);
       setStatusMessage('Unable to load artifacts right now. Try refreshing in a moment.');
     } finally {
-      const elapsed = Date.now() - loadStartedAt;
-      if (elapsed < minArtifactsSkeletonMs) {
-        await new Promise((resolve) => setTimeout(resolve, minArtifactsSkeletonMs - elapsed));
-      }
       setIsLoadingArtifacts(false);
+      if (artifactsPerfHandleRef.current) {
+        endCandidateBoundary(artifactsPerfHandleRef.current);
+        artifactsPerfHandleRef.current = null;
+      }
     }
   }, []);
 
   useEffect(() => {
+    if (!artifactsPerfHandleRef.current) {
+      artifactsPerfHandleRef.current = startCandidateBoundary('artifacts');
+    }
     void loadArtifacts();
   }, [loadArtifacts]);
 
@@ -1293,6 +1306,7 @@ export const StudentArtifactRepository = () => {
           setStatusMessage('Could not upload verification file. Try again.');
           return;
         }
+        invalidateStudentCacheForMutation('/api/student/artifacts/files');
 
         mergedFileRefs = [...mergedFileRefs, uploadPayload.data.file_ref];
       }
@@ -1352,6 +1366,7 @@ export const StudentArtifactRepository = () => {
         setStatusMessage('Unable to submit verification right now. Please try again.');
         return;
       }
+      invalidateStudentCacheForMutation('/api/student/artifacts');
 
       const mappedArtifact = mapApiArtifactToRecord(payload.data.artifact);
       if (mappedArtifact) {
@@ -1424,6 +1439,7 @@ export const StudentArtifactRepository = () => {
       if (!response.ok || !payload || !payload.ok || !payload.data.ai_literacy) {
         throw new Error('ai_literacy_generation_failed');
       }
+      invalidateStudentCacheForMutation('/api/student/ai-literacy-map');
 
       const aiLiteracy = payload.data.ai_literacy;
       setAiLiteracyStatus(aiLiteracy.status);
@@ -1712,6 +1728,7 @@ export const StudentArtifactRepository = () => {
           setStatusMessage('Could not upload file. Verify storage bucket setup and try again.');
           return;
         }
+        invalidateStudentCacheForMutation('/api/student/artifacts/files');
 
         fileRefs = [uploadPayload.data.file_ref];
       }
@@ -1764,6 +1781,7 @@ export const StudentArtifactRepository = () => {
         setStatusMessage(isEditingExistingArtifact ? 'Unable to update artifact right now. Please try again.' : 'Unable to save artifact right now. Please try again.');
         return;
       }
+      invalidateStudentCacheForMutation('/api/student/artifacts');
 
       const mappedArtifact = mapApiArtifactToRecord(payload.data.artifact);
       if (mappedArtifact) {
@@ -1811,6 +1829,7 @@ export const StudentArtifactRepository = () => {
         setStatusMessage('Unable to delete artifact right now. Please try again.');
         return;
       }
+      invalidateStudentCacheForMutation('/api/student/artifacts');
 
       setArtifacts((current) => current.filter((artifact) => artifact.id !== artifactIdToDelete));
       setSelectedArtifactId((current) => (current === artifactIdToDelete ? null : current));

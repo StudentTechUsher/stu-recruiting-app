@@ -7,6 +7,7 @@ import { extractTargetCompanyNames, extractTargetRoleNames } from "@/lib/auth/on
 import { notifyOnNewRolesForMapping } from "@/lib/capabilities/role-mapping-alerts";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveOptionSelections } from "@/lib/text/fuzzy-option-match";
+import { buildStudentIdentitySnapshot } from "@/lib/student/identity";
 import {
   attachRequestIdHeader,
   createApiObsContext,
@@ -297,12 +298,44 @@ const normalizeProfilePersonalInfo = (personalInfo: Record<string, unknown>): Re
   return normalized;
 };
 
-export async function GET() {
+export async function GET(req: Request) {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"], { requireOnboarding: false })) return forbidden();
 
+  const viewParam = new URL(req.url).searchParams.get("view");
+  const view = typeof viewParam === "string" ? viewParam.trim().toLowerCase() : "";
   const supabase = await getSupabaseServerClient();
   let profilePersonalInfo = toRecord(context.profile?.personal_info);
+
+  if (view === "identity") {
+    if (supabase) {
+      const { data: profileRows } = (await supabase
+        .from("profiles")
+        .select("personal_info")
+        .eq("id", context.user_id)
+        .limit(1)) as { data: ProfilePersonalInfoRow[] | null };
+      const persistedProfilePersonalInfo = toRecord(profileRows?.[0]?.personal_info);
+      if (isNonEmptyRecord(persistedProfilePersonalInfo)) {
+        profilePersonalInfo = persistedProfilePersonalInfo;
+      }
+    }
+
+    const normalizedProfilePersonalInfo = normalizeProfilePersonalInfo(profilePersonalInfo);
+    const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, normalizedProfilePersonalInfo);
+    const identity = await buildStudentIdentitySnapshot({
+      profileId: context.user_id,
+      orgId: context.org_id,
+      personalInfo: hydratedProfilePersonalInfo,
+      fallbackEmail: context.session_user?.email ?? null,
+    });
+
+    return ok({
+      resource: "student_profile_identity",
+      identity,
+      session_source: context.session_source ?? "none",
+    });
+  }
+
   let studentData: Record<string, unknown> = {};
   let roleOptions: string[] = [...defaultFocusRoleOptions];
   let companyOptions: string[] = [...defaultFocusCompanyOptions];
@@ -390,9 +423,16 @@ export async function GET() {
 
   const normalizedProfilePersonalInfo = normalizeProfilePersonalInfo(profilePersonalInfo);
   const hydratedProfilePersonalInfo = await hydrateProfilePersonalInfo(supabase, normalizedProfilePersonalInfo);
+  const identity = await buildStudentIdentitySnapshot({
+    profileId: context.user_id,
+    orgId: context.org_id,
+    personalInfo: hydratedProfilePersonalInfo,
+    fallbackEmail: context.session_user?.email ?? null,
+  });
 
   return ok({
     resource: "student_profile",
+    identity,
     profile: {
       id: context.user_id,
       personal_info: hydratedProfilePersonalInfo

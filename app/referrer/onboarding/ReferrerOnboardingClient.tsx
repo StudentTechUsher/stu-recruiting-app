@@ -97,7 +97,7 @@ export function ReferrerOnboardingClient({
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#4c6860]">Referrer onboarding</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] md:text-4xl">Set up your endorsement profile</h1>
         <p className="mt-3 text-sm leading-7 text-[#436059]">
-          Complete this once. Then you can look up students by their shared profile URL and submit endorsements.
+          Complete this once. Then you can look up candidates by their shared profile URL and submit endorsements.
         </p>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">

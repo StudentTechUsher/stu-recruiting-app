@@ -6,7 +6,7 @@ Define lifecycle, constraints, and handoff behavior from candidate onboarding to
 ## MVP and Future-State Scope
 | Scope | Definition |
 | --- | --- |
-| MVP | Candidate selects up to 2 active Capability Profiles, receives coaching, and submits one target-specific visibility request routed through operators. |
+| MVP | Candidate selects up to 2 active role targets, receives coaching, and submits one target-specific visibility request routed through operators. |
 | Future state | Rich employer-side workflow integration, automated routing policies, and package lifecycle analytics. |
 
 ## Lifecycle State Machine
@@ -14,9 +14,9 @@ Define lifecycle, constraints, and handoff behavior from candidate onboarding to
 | --- | --- |
 | `onboarding_incomplete` | Candidate baseline not complete |
 | `evidence_profile_initializing` | Initial artifacts and sources being connected |
-| `target_selection_required` | Candidate has no active Capability Profile |
+| `target_selection_required` | Candidate has no active role target |
 | `target_selection_in_progress` | Capability Selection Agent flow active |
-| `active_targets_set` | Candidate has 1 or 2 active Capability Profiles |
+| `active_targets_set` | Candidate has 1 or 2 active role targets |
 | `coaching_active` | Capability Fit Coaching in progress |
 | `evidence_improvement` | Candidate executing actions and updating evidence |
 | `visibility_ready_check` | Preconditions evaluated for selected target visibility action |
@@ -28,12 +28,12 @@ Define lifecycle, constraints, and handoff behavior from candidate onboarding to
 State diagram:
 `ONBOARDING_INCOMPLETE -> EVIDENCE_PROFILE_INITIALIZING -> TARGET_SELECTION_REQUIRED -> TARGET_SELECTION_IN_PROGRESS -> ACTIVE_TARGETS_SET -> COACHING_ACTIVE -> EVIDENCE_IMPROVEMENT -> VISIBILITY_READY_CHECK -> VISIBILITY_REQUESTED -> OPERATOR_REVIEW_QUEUE -> DECISION_READY_PACKAGE_SHARED -> VISIBILITY_CLOSED`
 
-## Active Capability Profile Rules
+## Active Role Target Rules
 | Rule ID | Rule |
 | --- | --- |
-| CTV-001 | Candidate must maintain at least 1 and at most 2 active Capability Profiles. |
+| CTV-001 | Candidate must maintain at least 1 and at most 2 active role targets. |
 | CTV-002 | Attempting to activate a third profile requires explicit replacement or archive action. |
-| CTV-003 | Visibility request references exactly one selected active Capability Profile. |
+| CTV-003 | Visibility request references exactly one selected active role target. |
 | CTV-004 | Status transitions must be auditable with timestamp and actor context. |
 
 ## Permissions and Confirmations

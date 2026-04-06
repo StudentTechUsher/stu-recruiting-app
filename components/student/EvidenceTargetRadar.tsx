@@ -1,6 +1,16 @@
 type EvidenceTargetRadarAxis = {
   capability_id: string;
   label: string;
+  candidate_score?: number;
+  required_level?: number;
+  gap?: number;
+  attainment?: number;
+  weighted_contribution?: number;
+  confidence?: number;
+  evidence_count?: number;
+  low_confidence?: boolean;
+  confidence_reason?: string[];
+  confidence_level?: "low" | "medium" | "high";
   target_magnitude: number;
   evidence_magnitude: number;
   evidence_state: "missing" | "tentative" | "strong";

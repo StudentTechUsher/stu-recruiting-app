@@ -256,6 +256,8 @@ describe("getPublicStudentShareProfileBySlug", () => {
     });
     expect(result?.targets).toHaveLength(1);
     expect(result?.targets[0]?.role_label).toBe("Software Engineer");
+    expect(result?.targets[0]?.alignment_score).toBeGreaterThanOrEqual(0);
+    expect(result?.targets[0]?.confidence_summary).toBeTruthy();
     expect(result?.signals.capability_coverage_percent).toBeGreaterThanOrEqual(0);
     expect(result?.signals.verified_evidence_share).toBeGreaterThanOrEqual(0);
     expect(result?.signals.overall_hiring_signal).toBeDefined();

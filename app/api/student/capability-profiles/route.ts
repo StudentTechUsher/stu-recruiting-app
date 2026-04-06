@@ -15,6 +15,8 @@ import {
   type CapabilityProfileFit,
   type CapabilityProfileOption,
 } from "@/lib/student/capability-targeting";
+import { getActiveRoleCapabilityAxes, normalizeRoleCapabilityAxes, toLegacyWeights } from "@/lib/recruiter/capability-axes";
+import { materializeCandidateCapabilitySnapshot } from "@/lib/student/candidate-capability-profile";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
@@ -192,7 +194,14 @@ const createCapabilityProfileOptions = ({
     const roleKey = `name:${normalizeLabelKey(roleLabel)}`;
 
     const targetWeights = toNumericRecord(modelData.weights);
-    const weightedCapabilityIds = Object.keys(targetWeights).filter((capabilityId) => capabilityId.length > 0);
+    const normalizedAxes = getActiveRoleCapabilityAxes(
+      normalizeRoleCapabilityAxes({
+        axes: modelData.axes,
+        weights: targetWeights,
+      })
+    );
+    const canonicalWeights = toLegacyWeights(normalizedAxes);
+    const weightedCapabilityIds = Object.keys(canonicalWeights).filter((capabilityId) => capabilityId.length > 0);
     const capabilityIds =
       weightedCapabilityIds.length > 0
         ? weightedCapabilityIds
@@ -205,7 +214,8 @@ const createCapabilityProfileOptions = ({
       role_id: roleKey,
       role_label: roleLabel,
       capability_ids: Array.from(new Set(capabilityIds)),
-      target_weights: targetWeights,
+      target_axes: normalizedAxes,
+      target_weights: canonicalWeights,
       updated_at: model.updated_at,
     });
   }
@@ -391,6 +401,24 @@ export async function GET() {
       artifact_data: toRecord(artifact.artifact_data),
       updated_at: artifact.updated_at,
     }));
+  const candidateSnapshot = await materializeCandidateCapabilitySnapshot({
+    supabase: capabilityModelsClient,
+    profileId: context.user_id,
+    artifacts: activeArtifacts,
+  });
+  const candidateAxisScoresById = Object.fromEntries(
+    candidateSnapshot.axis_scores.map((axisScore) => [
+      axisScore.axis_id,
+      {
+        score_normalized: axisScore.score_normalized,
+        confidence: axisScore.confidence,
+        evidence_count: axisScore.evidence_count,
+        low_confidence: axisScore.low_confidence,
+        confidence_reason: axisScore.confidence_reason,
+        confidence_level: axisScore.confidence_level,
+      },
+    ])
+  );
 
   const selectionFingerprint = buildSelectionFingerprint(activeCapabilityProfiles);
   const evidenceFreshnessMarker = buildEvidenceFreshnessMarker(activeArtifacts);
@@ -409,6 +437,7 @@ export async function GET() {
           profile,
           artifacts: activeArtifacts,
           evidenceFreshnessMarker,
+          candidateAxisScoresById,
         }),
       ])
     );
@@ -464,6 +493,15 @@ export async function GET() {
       existingStudentData.employer_visibility_opt_in ?? existingStudentData.target_employer_visibility_opt_in,
       false
     ),
+    candidate_capability_profile: {
+      snapshot_id: candidateSnapshot.snapshot_id,
+      state: candidateSnapshot.state,
+      input_state_hash: candidateSnapshot.input_state_hash,
+      ontology_version: candidateSnapshot.ontology_version,
+      scoring_version: candidateSnapshot.scoring_version,
+      computed_at: candidateSnapshot.computed_at,
+      persisted: candidateSnapshot.persisted,
+    },
     fit_by_capability_profile_id: fitByCapabilityProfileId,
     ...(debugPayload ? { debug: debugPayload } : {}),
   });

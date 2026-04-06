@@ -1,87 +1,104 @@
-# Capability Model Contract
+# Role Capability Model Contract
 
 ## Purpose
-Define the company-role-specific Capability Profile contract and active target rules used by candidate selection, coaching, and recruiter decision readiness workflows.
+Define the company-and-role target contract used for alignment and fit calculation against a persistent Candidate capability profile.
 
 ## Replacement Note
-Role-only capability framing from earlier phase documents is deprecated.
+Legacy phrasing that treated role targets as generic "Capability Profiles" is replaced by **Role capability model** terminology.
 
-All new target modeling must use Capability Profile semantics where one profile represents one company plus one role target.
+Implementation-facing schema fields may still use `capability_model_*` names during migration, but product and spec language should use Role capability model.
 
-## Capability Profile Definition
+## Role Capability Model Definition
 | Field | Requirement |
 | --- | --- |
-| `capability_profile_id` | Required stable identifier for one company-role capability profile. |
+| `capability_model_id` | Required stable identifier for one company-role target model. |
 | `company_id` | Required company identifier. |
-| `company_label` | Required display label. |
-| `role_id` | Required role identifier scoped to company context. |
-| `role_label` | Required role display label. |
-| `capabilities` | Required list of capability expectations. |
-| `capabilities[].capability_id` | Required stable capability identifier. |
-| `capabilities[].label` | Required capability display label. |
-| `capabilities[].priority` | Required priority class (`core`, `supporting`, `contextual`). |
-| `capabilities[].expected_evidence_types` | Required list of preferred evidence types for credibility. |
-| `version` | Required version number or semantic label. |
-| `is_active` | Required publish status. |
+| `role_id` | Required role identifier in company context. |
+| `role_name` | Required role display label. |
+| `model_name` | Required human-readable model label. |
+| `description` | Optional model intent description. |
+| `required_evidence` | Optional role-level evidence expectations. |
+| `thresholds` | Optional labeled thresholds for readiness interpretation (not ranking). |
+| `axes` | Required array of ontology-bound axis definitions. |
+| `axes[].axis_id` | Required ontology axis identifier. |
+| `axes[].required_level` | Required expected level on axis, normalized `0..1`. |
+| `axes[].weight` | Required axis importance for rollup contribution. |
+| `axes[].required_evidence_types` | Optional axis-level preferred evidence types. |
+| `is_active` | Required publish flag. |
+| `version_number` | Required version number. |
 
-## Capability Classes
-| Class | Description | Source |
-| --- | --- | --- |
-| Baseline capability | Cross-role baseline capability family used for low-data orientation. | Shared taxonomy |
-| Target capability | Capability expectation from selected Capability Profiles. | Capability Profile contract |
-| Derived capability | Capability inferred from evidence linkage with deterministic mapping. | Derivation contract |
-
-## Candidate Active Target Contract
-| Field | Requirement |
+## Axis Semantics (Locked)
+| Term | Meaning |
 | --- | --- |
-| `active_capability_profiles` | Required array of active selected profile records. |
-| `active_capability_profiles[].capability_profile_id` | Required selected profile ID. |
-| `active_capability_profiles[].selection_status` | Required status (`recommended`, `candidate`, `active`, `archived`). |
-| `active_capability_profiles[].selected_at` | Required timestamp when active. |
-| `active_capability_profiles[].selection_source` | Required source (`self_select`, `selection_agent`, `operator_assist`). |
+| `required_level` | Target proficiency/evidence-backed level expected for the role on one axis. |
+| `weight` | Relative importance of that axis in rollup alignment. |
 
-## Active Target Constraints
-| Constraint ID | Rule |
-| --- | --- |
-| CAP-PROFILE-001 | Candidate may have at most 2 `active` Capability Profiles at any time. |
-| CAP-PROFILE-002 | Candidate must have at least 1 `active` Capability Profile before visibility action. |
-| CAP-PROFILE-003 | Status transitions are explicit and auditable. |
-| CAP-PROFILE-004 | When attempting to activate a third target, system must require archiving or replacing one active target first. |
+`required_level` and `weight` are distinct and must never be conflated.
 
-## Selection Status and Transition Rules
-| From | Trigger | To | Rule |
-| --- | --- | --- | --- |
-| `recommended` | Candidate accepts recommendation | `candidate` | Candidate acknowledges target for consideration. |
-| `candidate` | Candidate confirms focus | `active` | Enforce max-2 constraint. |
-| `active` | Candidate replaces or retires target | `archived` | Preserve history and rationale. |
-| `archived` | Candidate reactivates | `active` | Enforce max-2 constraint and record new timestamp. |
+## Weight Normalization
+Role model rollup math must normalize weights using one of the equivalent forms:
 
-Text diagram:
-`RECOMMENDED -> CANDIDATE -> ACTIVE -> ARCHIVED`
+1. `normalized_weight_i = weight_i / sum(all_weights)` and `alignment_score = sum(normalized_weight_i * attainment_i)`
+2. `alignment_score = sum(weight_i * attainment_i) / sum(all_weights)`
 
-## Shared ID Invariants
-| Invariant ID | Rule |
-| --- | --- |
-| CAP-ID-001 | `capability_profile_id` is stable across candidate and recruiter contexts. |
-| CAP-ID-002 | `capability_id` values remain stable across derivation, coaching, and recruiter review. |
-| CAP-ID-003 | Display labels may evolve, IDs remain backward compatible. |
+Both yield alignment in `0..1` when `attainment_i` is in `0..1`.
 
-## Compatibility Rules
+## Required-Level Edge Behavior
+- If `required_level > 0`: `attainment = min(candidate_score / required_level, 1)`.
+- If `required_level = 0`: `attainment = 1` by definition.
+
+## Compatibility and Versioning Rules
 | Rule ID | Rule |
 | --- | --- |
-| CAP-COMP-001 | Candidate and recruiter systems must resolve the same capability IDs for the same capability profile version. |
-| CAP-COMP-002 | Evidence linkage semantics are shared across dashboard, coaching, and recruiter package views. |
-| CAP-COMP-003 | Capability Profile updates must not introduce ranking behavior. |
+| RCM-001 | Every `axis_id` must resolve in the active Capability ontology version. |
+| RCM-002 | Axis IDs are stable across model versions; labels may evolve in ontology metadata. |
+| RCM-003 | Role model updates create a new versioned record. |
+| RCM-004 | Role model changes do not mutate historical Candidate capability snapshots. |
+| RCM-005 | Role model evaluation must use Candidate capability snapshots computed for the current ontology/scoring version. |
+
+## Legacy Compatibility Note
+Existing payloads with `weights` maps remain valid during transition, but canonical contract is `axes[]` with explicit `required_level` and `weight`.
+
+## Example Role Capability Model
+```json
+{
+  "capability_model_id": "a2ab5f88-1111-4ac7-9d2f-111111111111",
+  "company_id": "e5af10c9-59b6-498c-acb9-86a66ab5de81",
+  "role_id": "4d62c9c3-2222-41a4-9e4e-222222222222",
+  "role_name": "Business Operations Analyst",
+  "model_name": "Lucid Software - Business Operations Analyst",
+  "description": "Early-career operations profile focused on planning, coordination, process clarity, and reliable execution.",
+  "required_evidence": [
+    "Planning, coordination, or process project artifacts",
+    "Evidence of workflow ownership or process improvement",
+    "Examples of stakeholder coordination and dependable follow-through",
+    "Communication of process insights or operational recommendations"
+  ],
+  "thresholds": {
+    "emerging_max": 0.54,
+    "developing_max": 0.69,
+    "ready_max": 0.84
+  },
+  "axes": [
+    { "axis_id": "collaboration", "required_level": 0.7, "weight": 16 },
+    { "axis_id": "problem_solving", "required_level": 0.75, "weight": 18 },
+    { "axis_id": "business_judgment", "required_level": 0.65, "weight": 12 },
+    { "axis_id": "data_communication", "required_level": 0.7, "weight": 14 },
+    { "axis_id": "execution_reliability", "required_level": 0.8, "weight": 22 },
+    { "axis_id": "operational_coordination", "required_level": 0.75, "weight": 18 }
+  ],
+  "version_number": 4,
+  "is_active": true
+}
+```
 
 ## Explicit Exclusions
-| Exclusion | Rule |
-| --- | --- |
-| Generic role template as final target | Not allowed as final target object in new workflows. |
-| Ranking score fields | Not allowed in Capability Profile user-facing outputs. |
-| Automated hiring decisions | Not allowed. Capability Profiles guide readiness and evidence planning only. |
+- Using `weight` as a target-shape proxy.
+- Candidate ranking or automated hiring decisions.
+- Opaque score-only framing without evidence traceability and confidence context.
 
 ## Cross-References
-- `docs/system/evidence-profile-terminology.md`
+- `docs/system/capability-ontology.md`
+- `docs/system/candidate-capability-profile.md`
 - `docs/system/capability-derivation.md`
-- `docs/features/capability-selection-agent-spec.md`
-- `docs/features/candidate-targeting-visibility-workflow-spec.md`
+- `docs/system/evidence-model.md`

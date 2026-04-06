@@ -1,70 +1,137 @@
-# Capability Derivation Contract
+# Capability Derivation and Fit Contract
 
 ## Purpose
-Define how Evidence Profile records are deterministically mapped to capability coverage against selected Capability Profiles without ranking or score-centric user framing.
+Define the two-stage deterministic pipeline:
+1. derive a versioned Candidate capability profile snapshot from artifacts
+2. evaluate role-conditioned fit by comparing that snapshot against a Role capability model
 
-## Inputs
+This contract is evidence-first and explainable. It is not a ranking system.
+
+## Stage A: Candidate Capability Derivation
+
+### Inputs
 | Input | Source |
 | --- | --- |
-| Evidence records (`artifact_id`, `artifact_type`, `artifact_data`) | Evidence model |
-| Artifact provenance and metadata | Evidence model |
-| Verification state and verification tier | Verification model |
-| Selected Capability Profiles (`active_capability_profiles`) | Capability model |
-| Baseline capability set for low-data fallback | Capability model |
+| Active artifacts and active artifact versions | Evidence model |
+| Artifact provenance and verification metadata | Evidence model + verification model |
+| Capability ontology (`ontology_version`) | Capability ontology contract |
+| Scoring logic (`scoring_version`) | Derivation runtime config |
+| Identity association state | Canonical profile / identity model |
 
-## Outputs
+### Outputs
 | Output | Definition |
 | --- | --- |
-| Capability coverage | Presence and evidence sufficiency per capability within each selected profile. |
-| Capability evidence linkage | Evidence IDs mapped to each capability and capability profile context. |
-| Capability trust breakdown | Counts by verification state and verification tier per capability. |
-| Coaching derivation context | Structured strength and gap candidates for Capability Fit Coaching. |
-| Explainability payload | Traceable references used in dashboard, coaching, and recruiter package summaries. |
+| Candidate capability snapshot | Immutable versioned snapshot with axis scores and trace links |
+| Axis confidence + evidence counts | Per-axis quality context |
+| Snapshot rollup summary | Coverage and confidence summary inputs |
+| `input_state_hash` | Hash of effective inference input state |
 
-## Derivation Scope Rules
+### Derivation Rules
 | Rule ID | Rule |
 | --- | --- |
-| CD-SCOPE-001 | Primary derivation scope is the set of selected active Capability Profiles. |
-| CD-SCOPE-002 | If no active profile exists, derivation uses baseline capabilities for onboarding-safe guidance only. |
-| CD-SCOPE-003 | Capability coverage is derived from linked evidence presence and quality metadata, not candidate rank signals. |
-| CD-SCOPE-004 | Verification state and tier affect trust interpretation, not candidate inclusion or ordering. |
+| CD-A-001 | Derivation must run against active evidence state only. |
+| CD-A-002 | Axis scores must be normalized to `0..1`. |
+| CD-A-003 | Snapshot must record `ontology_version` and `scoring_version`. |
+| CD-A-004 | Every axis claim must remain evidence-traceable through snapshot evidence-link records. |
+| CD-A-005 | Snapshot writes are immutable; recomputation creates new snapshot versions. |
 
-## Deterministic Derivation Rules
+## Stage B: Role-Conditioned Fit Evaluation
+
+### Inputs
+| Input | Source |
+| --- | --- |
+| Candidate capability snapshot (latest fresh) | Candidate capability profile contract |
+| Role capability model | Capability model contract |
+
+### Per-Axis Outputs
+For each `axis_id` present in the role model:
+- `candidate_score`
+- `required_level`
+- `gap`
+- `attainment`
+- `weighted_contribution`
+- `confidence_flag` (for example `low_confidence`)
+
+### Rollup and Explanation Outputs
+- Rollup: `alignment_score` (`0..1`)
+- Legacy alias: `overall_alignment` may be emitted for compatibility
+- Explanation: `confidence_summary`, `evidence_summary`
+
+## Fit Math (Locked)
+```text
+normalized_weight_i = weight_i / sum(all_weights)
+
+gap_i = candidate_score_i - required_level_i
+- gap_i < 0: deficit
+- gap_i = 0: meets expectation
+- gap_i > 0: surplus (informational only)
+
+if required_level_i > 0:
+  attainment_i = min(candidate_score_i / required_level_i, 1)
+if required_level_i = 0:
+  attainment_i = 1
+
+weighted_contribution_i = normalized_weight_i * attainment_i
+
+alignment_score = sum(weighted_contribution_i)   // range 0..1
+```
+
+Surplus does not increase attainment beyond `1`.
+
+## Confidence Guardrails
 | Rule ID | Rule |
 | --- | --- |
-| CD-001 | Capability set equals union of capabilities from active Capability Profiles, deduplicated by `capability_id`. |
-| CD-002 | Evidence links use explicit `capability_id` mapping when present, then deterministic artifact-type mapping, then `other_evidence` fallback. |
-| CD-003 | Capability presence requires one or more linked evidence records. |
-| CD-004 | Evidence sufficiency classification uses explicit rules for weak, pending, and verified evidence tiers. |
-| CD-005 | No probabilistic ranking or hidden weighting is allowed in user-facing interpretation. |
+| CD-B-001 | Axis must be flagged `low_confidence` when confidence is below threshold or evidence count is below minimum evidence rule. |
+| CD-B-002 | Low-confidence axes cannot be presented as strong support in user-facing summaries. |
+| CD-B-003 | Rollup outputs must publish confidence context (`confidence_summary`) alongside `alignment_score`. |
+| CD-B-004 | Weak evidence must not silently inflate interpretation confidence. |
 
-## Internal Computation vs User-Facing Interpretation
-| Category | Internal computation allowed | User-facing requirement |
-| --- | --- | --- |
-| Coverage computation | Compute counts, sufficiency flags, and trust breakdowns. | Present strengths, gaps, and evidence clarity. |
-| Similarity and fit heuristics | Allowed for internal prioritization and agent orchestration. | Do not expose opaque numeric fit scores as primary UX narrative. |
-| Prioritization | Allowed to order suggested actions in coaching. | Explain priority with evidence-backed rationale and expected artifact outcomes. |
+## Ontology and Version Compatibility (Locked)
+- Production evaluation does not project snapshots across ontology versions.
+- Ontology or scoring version change is a recompute trigger.
+- Historical snapshots remain auditable in their native version context.
 
-## Traceability Requirements
-| Rule ID | Requirement |
+## Freshness and Fallback Rules
+- Prefer latest `fresh` snapshot for fit evaluation.
+- If head state is `stale` or `recomputing`, evaluate against latest fresh snapshot and surface staleness.
+- If head state is `failed`, return fallback with retry signal and no silent freshness claim.
+
+## Recompute Trigger Matrix
+| Trigger | Recompute required |
 | --- | --- |
-| CD-TR-001 | Every derived capability entry must include linked evidence IDs. |
-| CD-TR-002 | No strength or gap claim may be emitted without traceable evidence references or explicit no-evidence marker. |
-| CD-TR-003 | Student dashboard, coaching surfaces, and recruiter package summaries must reference the same linkage model for a given profile state. |
+| Artifact add/update/delete/deactivate/reactivate | Yes |
+| Active artifact version pointer change | Yes |
+| Verification status or tier change | Yes |
+| Ontology version change | Yes |
+| Scoring version change | Yes |
+| Identity merge/split/re-association altering effective artifact set | Yes |
 
-## No-Scoring and No-Ranking Constraints
-| Constraint ID | Rule |
-| --- | --- |
-| CD-NR-001 | Do not compute or expose candidate ranking from capability derivation outputs. |
-| CD-NR-002 | Do not expose opaque composite scores as primary user-facing framing. |
-| CD-NR-003 | Do not use derivation outputs for automated accept or reject actions. |
+## Worked Example (Business Operations Analyst)
+Given one axis:
 
-## Compatibility Invariant
-`Recruiter-facing Decision-Ready Candidate Package capability claims must be explainable by the same evidence linkage and trust semantics shown in candidate-facing surfaces.`
+```json
+{
+  "axis_id": "execution_reliability",
+  "required_level": 0.8,
+  "weight": 22,
+  "candidate_score": 0.6
+}
+```
+
+Derived values:
+- `gap = 0.6 - 0.8 = -0.2` (deficit)
+- `attainment = min(0.6 / 0.8, 1) = 0.75`
+- `weighted_contribution = normalized_weight * 0.75`
+
+## Explicit Exclusions
+- Candidate ranking or automated filtering.
+- Weight-as-target-shape modeling.
+- Max-based user capability scoring as primary fit method.
+- Mixing raw evidence payloads directly into capability axes without ontology mapping.
+- Opaque single-score output without explanation and confidence context.
 
 ## Cross-References
-- `docs/system/evidence-profile-terminology.md`
+- `docs/system/capability-ontology.md`
 - `docs/system/capability-model.md`
+- `docs/system/candidate-capability-profile.md`
 - `docs/system/evidence-model.md`
-- `docs/features/capability-fit-coaching-agent-spec.md`
-- `docs/features/recruiter-review-experience.md`

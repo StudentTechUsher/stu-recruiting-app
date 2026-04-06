@@ -10,6 +10,13 @@ const defaultWeights = {
   collaboration: 15,
   business_judgment: 10,
 };
+const defaultAxes = Object.entries(defaultWeights).map(([axisId, weight]) => ({
+  axis_id: axisId,
+  required_level: 0.7,
+  weight,
+  required_level_source: "authored" as const,
+  is_active: true,
+}));
 
 const defaultThresholds = {
   emerging_max: 54,
@@ -152,6 +159,7 @@ export function RecruiterCapabilityModelsWorkspace() {
         body: JSON.stringify({
           model_name: newModelName.trim(),
           description: newModelDescription.trim() || undefined,
+          axes: defaultAxes,
           weights: defaultWeights,
           thresholds: defaultThresholds,
           required_evidence: defaultEvidence,
@@ -193,6 +201,7 @@ export function RecruiterCapabilityModelsWorkspace() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          axes: defaultAxes,
           weights: defaultWeights,
           thresholds: defaultThresholds,
           required_evidence: defaultEvidence,

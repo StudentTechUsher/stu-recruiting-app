@@ -97,6 +97,30 @@ describe("recruiter capability model routes", () => {
     expect(payload).toEqual({ ok: false, error: "invalid_capability_model_payload" });
   });
 
+  it("rejects unknown capability axis ids", async () => {
+    const response = await createModelPOST(
+      new Request("http://localhost/api/recruiter/capability-models", {
+        method: "POST",
+        body: JSON.stringify({
+          model_name: "Bad axis model",
+          axes: [
+            {
+              axis_id: "not_in_ontology",
+              required_level: 0.7,
+              weight: 10,
+            },
+          ],
+          thresholds: { recommended: 0.8 },
+          required_evidence: [],
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ ok: false, error: "capability_axis_unknown" });
+  });
+
   it("returns not found for model detail when missing", async () => {
     getCapabilityModelMock.mockResolvedValue({ model: null, versions: [] });
 
@@ -128,6 +152,9 @@ describe("recruiter capability model routes", () => {
       org_id: "org-1",
       version_number: 2,
       status: "draft",
+      axes: [
+        { axis_id: "communication", required_level: 0.7, weight: 0.4, required_level_source: "authored", is_active: true },
+      ],
       weights: { communication: 0.4 },
       thresholds: { recommended: 0.8 },
       required_evidence: [],
@@ -141,6 +168,9 @@ describe("recruiter capability model routes", () => {
       org_id: "org-1",
       version_number: 2,
       status: "published",
+      axes: [
+        { axis_id: "communication", required_level: 0.7, weight: 0.4, required_level_source: "authored", is_active: true },
+      ],
       weights: { communication: 0.4 },
       thresholds: { recommended: 0.8 },
       required_evidence: [],
@@ -208,6 +238,9 @@ describe("recruiter capability model routes", () => {
         org_id: "org-1",
         version_number: 1,
         status: "draft",
+        axes: [
+          { axis_id: "execution", required_level: 0.7, weight: 40, required_level_source: "authored", is_active: true },
+        ],
         weights: { execution: 40 },
         thresholds: { ready_max: 80 },
         required_evidence: [],

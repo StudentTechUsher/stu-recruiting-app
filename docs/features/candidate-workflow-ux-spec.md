@@ -1,7 +1,7 @@
 # Candidate Workflow UX Specification
 
 ## Purpose
-Define responsive UX requirements for onboarding, evidence review, capability selection, coaching, and visibility authorization.
+Define responsive UX requirements for onboarding, evidence review, role capability model selection, coaching, and visibility authorization.
 
 This spec provides concrete product design and frontend implementation guidance for desktop and mobile, with Storybook and accessibility expectations.
 
@@ -17,7 +17,7 @@ This spec provides concrete product design and frontend implementation guidance 
 | --- | --- | --- |
 | Onboarding | Capture baseline identity, preferences, and source intent | Continue onboarding, connect first source |
 | Evidence Profile review | Inspect and manage artifacts, trust state, and provenance | Add evidence, verify evidence, resolve weak evidence |
-| Capability Profile selection | Choose focused 1 to 2 active targets | Compare targets, commit selection, replace active target |
+| Role capability model selection | Choose focused 1 to 2 active targets | Compare targets, commit selection, replace active target |
 | Capability Fit Coaching | Review strengths, gaps, and actionable recommendations | Start action, link resulting evidence, request refresh |
 | Profile visibility authorization | Confirm target-specific visibility request | Confirm consent, submit request, review status |
 
@@ -32,7 +32,7 @@ This spec provides concrete product design and frontend implementation guidance 
 - Show verification state and verification tier badges on every artifact card.
 - Show weak-evidence callouts with direct improvement actions.
 
-### Capability Profile Selection
+### Role Capability Model Selection
 - Use comparison list with up to 4 candidate targets at once on desktop.
 - On mobile, use stacked cards with expandable comparison rows.
 - Enforce max-2 active target rule in UI with explicit replace flow.
@@ -41,6 +41,7 @@ This spec provides concrete product design and frontend implementation guidance 
 - Use sectioned output: strengths, gaps, recommended actions, expected evidence.
 - Show action-to-evidence linkage inline.
 - Support action checklist with completion state and evidence attach shortcut.
+- Default to gap and contribution framing before compact shape summaries.
 
 ### Profile Visibility Authorization
 - Present single target summary, package preview, and explicit consent text.
@@ -52,7 +53,7 @@ This spec provides concrete product design and frontend implementation guidance 
 | --- | --- |
 | Navigation | Keep primary workflow actions reachable within one thumb range. |
 | Layout density | Prefer one-card-per-row and progressive disclosure for detail content. |
-| Compare interactions | Use segmented toggle for target A or target B rather than dense side-by-side tables. |
+| Compare interactions | Use segmented toggle for target A or target B with gap/contribution chart switcher rather than dense side-by-side tables. |
 | Input ergonomics | Use larger touch targets and short inline forms. |
 
 ## Desktop-Specific Interaction Patterns
@@ -70,6 +71,22 @@ This spec provides concrete product design and frontend implementation guidance 
 | Detail panel | Must preserve source context and provide provenance links. |
 | Stepper | Must expose current step, completion states, and resumable progress. |
 | Agent chat panel | Must render structured sections, status updates, and action artifacts without raw reasoning traces. |
+
+## Capability Fit Visualization Guidance (Locked)
+| Priority | Visualization | Requirement |
+| --- | --- | --- |
+| 1 | Gap bar chart | Primary decision visual for deficit/surplus by axis. |
+| 1 | Contribution chart | Primary explanation of what drives alignment score. |
+| 1 | Confidence view | Primary uncertainty view with low-confidence flags. |
+| 1 | Evidence drill-down | Required transparency path from axis claim to evidence. |
+| 2 | Radar chart | Secondary summary only when radar gating rules are satisfied. |
+
+### Radar Gating Rules
+- Axis set must be fixed.
+- Axis order must be fixed.
+- Scale normalization must be shared across compared targets.
+- Every displayed axis must have defined `required_level`.
+- Radar is summary-only and must never be used as a ranking or decision engine.
 
 ## Empty States
 | Context | Required copy behavior |
@@ -105,6 +122,8 @@ This spec provides concrete product design and frontend implementation guidance 
 | Evidence references | Every guidance claim links to evidence IDs or explicit no-evidence marker. |
 | Language | Use strengths, gaps, and next actions language. Avoid ranking and score-centric framing. |
 | Uncertainty cues | Explicitly label weak or unverifiable evidence and suggest improvement paths. |
+| Freshness cues | Show stale/recomputing/failed profile states when latest compute is not fresh. |
+| Confidence guardrail | Low-confidence axes cannot be presented as strong support. |
 
 ## Accessibility Expectations
 | Area | Requirement |
@@ -145,3 +164,5 @@ This spec provides concrete product design and frontend implementation guidance 
 - `docs/features/capability-fit-coaching-agent-spec.md`
 - `docs/features/candidate-targeting-visibility-workflow-spec.md`
 - `docs/system/evidence-profile-terminology.md`
+- `docs/system/capability-ontology.md`
+- `docs/system/candidate-capability-profile.md`

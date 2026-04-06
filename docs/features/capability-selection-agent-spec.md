@@ -1,7 +1,7 @@
 # Capability Selection Agent Specification
 
 ## Purpose
-Define the Capability Selection Agent that helps candidates select a focused set of 1 to 2 Capability Profiles based on evidence, interests, and practical tradeoffs.
+Define the Capability Selection Agent that helps candidates select a focused set of 1 to 2 Role capability models based on evidence, interests, and practical tradeoffs.
 
 ## User Problem
 Candidates often start with broad role interest and fragmented evidence.
@@ -11,7 +11,7 @@ Without guidance, target selection becomes unfocused and evidence-building effor
 ## MVP and Future-State Scope
 | Scope | Definition |
 | --- | --- |
-| MVP | Agent compares a bounded candidate target set and guides candidate to commit to at most 2 active Capability Profiles. |
+| MVP | Agent compares a bounded candidate target set and guides candidate to commit to at most 2 active role targets. |
 | Future state | Agent supports richer longitudinal target planning, seasonal market context, and multi-session strategy memory. |
 
 ## Inputs
@@ -20,7 +20,7 @@ Without guidance, target selection becomes unfocused and evidence-building effor
 | Evidence Profile snapshot | Yes | Artifact set, verification state, verification tier, capability linkage summaries |
 | Candidate preferences | Yes | Interests, motivations, preferred work attributes, constraints |
 | Candidate goals | Yes | Near-term role direction, timeline, location or domain preferences where available |
-| Available Capability Profiles | Yes | Bounded set of candidate-relevant company-role targets |
+| Available role capability models | Yes | Bounded set of candidate-relevant company-role targets |
 | Current active targets | Yes | Enforce max-2 constraint |
 
 ## Outputs

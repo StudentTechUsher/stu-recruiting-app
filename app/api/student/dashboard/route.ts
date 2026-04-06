@@ -3,8 +3,10 @@ import { forbidden, ok } from "@/lib/api-response";
 import { hasPersona } from "@/lib/authorization";
 import { deriveCapabilitiesFromEvidence, type RoleCapabilityMap } from "@/lib/capabilities/derivation";
 import { getAiLiteracyMapForAudience } from "@/lib/ai-literacy/map";
+import { getActiveRoleCapabilityAxes, normalizeRoleCapabilityAxes, toLegacyWeights } from "@/lib/recruiter/capability-axes";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
+import { buildStudentIdentitySnapshot } from "@/lib/student/identity";
 
 type StudentRow = { student_data: unknown };
 type ArtifactRow = {
@@ -55,7 +57,13 @@ const toTrimmedString = (value: unknown): string | null => {
 
 const extractCapabilityIdsFromCapabilityModel = (modelData: unknown): string[] => {
   const record = toRecord(modelData);
-  const weights = toNumericRecord(record.weights);
+  const axes = getActiveRoleCapabilityAxes(
+    normalizeRoleCapabilityAxes({
+      axes: record.axes,
+      weights: record.weights,
+    })
+  );
+  const weights = Object.keys(toLegacyWeights(axes)).length > 0 ? toLegacyWeights(axes) : toNumericRecord(record.weights);
   const weightedCapabilityIds = Object.keys(weights).filter((capabilityId) => capabilityId.length > 0);
   if (weightedCapabilityIds.length > 0) return weightedCapabilityIds;
 
@@ -146,12 +154,19 @@ const determineDashboardState = ({
 export async function GET() {
   const context = await getAuthContext();
   if (!hasPersona(context, ["student"])) return forbidden();
+  const identity = await buildStudentIdentitySnapshot({
+    profileId: context.user_id,
+    orgId: context.org_id,
+    personalInfo: toRecord(context.profile?.personal_info),
+    fallbackEmail: context.session_user?.email ?? null,
+  });
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) {
     return ok({
       resource: "student_dashboard",
       dashboard: {
+        identity,
         roles: [],
         axes: [],
         kpis: {
@@ -372,6 +387,7 @@ export async function GET() {
   return ok({
     resource: "student_dashboard",
     dashboard: {
+      identity,
       roles: selectedRolesForCoverage,
       axes: derived.axes,
       unmapped_artifact_ids: derived.unmapped_artifact_ids,

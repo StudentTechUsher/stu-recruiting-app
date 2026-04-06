@@ -1,13 +1,13 @@
 # Evidence Model Contract
 
 ## Purpose
-Define the shared artifact and evidence structure used by candidate and recruiter workflows, including Capability Profile context and coaching-ready evidence semantics.
+Define the shared artifact and evidence structure used by candidate and recruiter workflows, including role capability model context and coaching-ready evidence semantics.
 
 ## Terminology
 | Context | Term | Definition |
 | --- | --- | --- |
 | User-facing | Evidence Profile | Candidate-facing representation of capabilities and linked evidence. |
-| User-facing | Capability Profile | Company-role-specific target model used to interpret evidence readiness. |
+| User-facing | Role capability model | Company-role-specific target model used to interpret evidence readiness. |
 | Internal | Artifact | Typed evidence record with provenance and verification metadata. |
 | Internal | Artifact version | Source-specific artifact version preserved for auditability. |
 
@@ -90,7 +90,9 @@ Define the shared artifact and evidence structure used by candidate and recruite
 
 ## Cross-References
 - `docs/system/evidence-profile-terminology.md`
+- `docs/system/capability-ontology.md`
 - `docs/system/capability-model.md`
+- `docs/system/candidate-capability-profile.md`
 - `docs/system/capability-derivation.md`
 - `docs/system/artifact-verification-model.md`
 - `docs/features/capability-fit-coaching-agent-spec.md`

@@ -4,6 +4,7 @@ import type {
   RecommendationReasonCode,
   RecommendationState,
 } from "@/lib/ats/types";
+import type { RoleCapabilityAxis } from "@/lib/recruiter/capability-axes";
 
 export type RecruiterStudentProfile = {
   profile_id: string;
@@ -67,6 +68,7 @@ export type CapabilityModelVersion = {
   org_id: string;
   version_number: number;
   status: "draft" | "published" | "archived";
+  axes: RoleCapabilityAxis[];
   weights: Record<string, number>;
   thresholds: Record<string, number>;
   required_evidence: string[];

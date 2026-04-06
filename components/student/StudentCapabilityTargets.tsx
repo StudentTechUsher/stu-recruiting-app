@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchStudentQuery, invalidateStudentCacheForMutation } from "@/lib/client/student-query-cache";
+import { endCandidateBoundary, startCandidateBoundary } from "@/lib/client/student-perf";
 
 type RoleOption = {
   role_id: string;
@@ -66,26 +68,36 @@ export function StudentCapabilityTargets() {
   const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  const targetsPerfHandleRef = useRef<ReturnType<typeof startCandidateBoundary> | null>(null);
 
   const loadCapabilityProfiles = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/student/capability-profiles", { cache: "no-store" });
-      const body = (await response.json().catch(() => null)) as
+      const body = (await fetchStudentQuery({
+        path: "/api/student/capability-profiles",
+        resource: "capability_profiles",
+      })) as
         | { ok: true; data: CapabilityProfilesPayload }
         | { ok: false; error?: string }
         | null;
-      if (!response.ok || !body || !body.ok) throw new Error("capability_profiles_load_failed");
+      if (!body || !body.ok) throw new Error("capability_profiles_load_failed");
       setPayload(body.data);
     } catch {
       setError("Unable to load role targets.");
     } finally {
       setIsLoading(false);
+      if (targetsPerfHandleRef.current) {
+        endCandidateBoundary(targetsPerfHandleRef.current);
+        targetsPerfHandleRef.current = null;
+      }
     }
   };
 
   useEffect(() => {
+    if (!targetsPerfHandleRef.current) {
+      targetsPerfHandleRef.current = startCandidateBoundary("targets");
+    }
     void loadCapabilityProfiles();
   }, []);
 
@@ -191,6 +203,7 @@ export function StudentCapabilityTargets() {
         | { ok: false; error?: string }
         | null;
       if (!response.ok || !body || !body.ok) throw new Error("selection_save_failed");
+      invalidateStudentCacheForMutation("/api/student/capability-profiles/selection");
       setStatusMessage("Selections saved.");
       setPayload((current) => {
         if (!current) return current;
@@ -261,6 +274,7 @@ export function StudentCapabilityTargets() {
         setRequestStatusMessage("You already requested this role and employer recently.");
         return;
       }
+      invalidateStudentCacheForMutation("/api/student/capability-profiles/request");
 
       setRequestRoleLabel("");
       setRequestCompanyLabel("");
@@ -463,7 +477,7 @@ export function StudentCapabilityTargets() {
             </div>
 
             <p className="mt-2 text-sm text-[#557168] dark:text-slate-400">
-              Submit the missing target and we'll notify the team.
+              Submit the missing target and we&apos;ll notify the team.
             </p>
 
             <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={submitNewTargetRequest}>

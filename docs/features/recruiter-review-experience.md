@@ -24,7 +24,7 @@ Define recruiter-side review behavior for evidence-backed candidate evaluation, 
 | `candidate_id` | string | Canonical candidate identifier |
 | `application_id` | string or null | ATS application identifier when available |
 | `employer_id` | string | Employer context identifier |
-| `capability_profile_id` | string or null | Selected target capability profile context |
+| `capability_profile_id` | string or null | Selected target role capability model context (legacy field name retained) |
 | `company_role_target` | object | Company and role labels for selected target |
 | `capability_summary` | array or object | Capability strengths and gap cues |
 | `evidence_indicator` | object | Verification state and tier indicators |

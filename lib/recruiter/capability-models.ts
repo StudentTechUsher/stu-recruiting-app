@@ -1,5 +1,12 @@
 import type { CapabilityModelVersion, RecruiterCapabilityModel } from "@/lib/recruiter/types";
 import { getDevRecruiterIdentity, isDevIdentitiesEnabled } from "@/lib/dev-auth";
+import {
+  getActiveRoleCapabilityAxes,
+  normalizeRoleCapabilityAxes,
+  toLegacyWeights,
+  validateRoleCapabilityAxes,
+  type RoleCapabilityAxis,
+} from "@/lib/recruiter/capability-axes";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
 type CapabilityModelRow = {
@@ -88,7 +95,14 @@ const buildSyntheticCapabilityModelVersion = (input: {
   status: CapabilityModelVersion["status"];
   createdAt: string;
   versionNumber?: number;
-}): CapabilityModelVersion => ({
+}): CapabilityModelVersion => {
+  const axes = normalizeRoleCapabilityAxes({
+    axes: input.modelPayload.axes,
+    weights: input.modelPayload.weights,
+  });
+  const explicitWeights = toNumberRecord(input.modelPayload.weights);
+  const weights = Object.keys(explicitWeights).length > 0 ? explicitWeights : toLegacyWeights(getActiveRoleCapabilityAxes(axes));
+  return ({
   capability_model_version_id:
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -97,13 +111,15 @@ const buildSyntheticCapabilityModelVersion = (input: {
   org_id: input.companyId,
   version_number: input.versionNumber ?? 1,
   status: input.status,
-  weights: toNumberRecord(input.modelPayload.weights),
+  axes,
+  weights,
   thresholds: toNumberRecord(input.modelPayload.thresholds),
   required_evidence: toStringArray(input.modelPayload.required_evidence),
   notes: toStringOrNull(input.modelPayload.notes),
   created_at: input.createdAt,
   published_at: input.status === "published" ? input.createdAt : null,
-});
+  });
+};
 
 const toVersionRowFromLegacy = (row: LegacyCapabilityModelVersionRow): CapabilityModelVersionRow => ({
   capability_model_version_id: row.capability_model_version_id,
@@ -111,6 +127,10 @@ const toVersionRowFromLegacy = (row: LegacyCapabilityModelVersionRow): Capabilit
   version_number: row.version_number,
   model_payload: {
     company_id: row.org_id,
+    axes: normalizeRoleCapabilityAxes({
+      axes: null,
+      weights: row.weights ?? {},
+    }),
     weights: row.weights ?? {},
     thresholds: row.thresholds ?? {},
     required_evidence: row.required_evidence ?? [],
@@ -327,7 +347,7 @@ const buildModelPayload = (input: {
   modelName: string;
   description?: string | null;
   roleId?: string | null;
-  weights: Record<string, number>;
+  axes: RoleCapabilityAxis[];
   thresholds: Record<string, number>;
   requiredEvidence: string[];
   notes?: string | null;
@@ -337,7 +357,8 @@ const buildModelPayload = (input: {
   role_id: input.roleId ?? null,
   model_name: input.modelName,
   description: input.description ?? null,
-  weights: input.weights,
+  axes: input.axes,
+  weights: toLegacyWeights(input.axes),
   thresholds: input.thresholds,
   required_evidence: input.requiredEvidence,
   notes: input.notes ?? null,
@@ -372,7 +393,19 @@ const toVersion = (
     org_id: toStringOrNull(payload.company_id) ?? "",
     version_number: versionNumber,
     status,
-    weights: toNumberRecord(payload.weights),
+    axes: normalizeRoleCapabilityAxes({
+      axes: payload.axes,
+      weights: payload.weights,
+    }),
+    weights: (() => {
+      const explicitWeights = toNumberRecord(payload.weights);
+      if (Object.keys(explicitWeights).length > 0) return explicitWeights;
+      const normalizedAxes = normalizeRoleCapabilityAxes({
+        axes: payload.axes,
+        weights: payload.weights,
+      });
+      return toLegacyWeights(getActiveRoleCapabilityAxes(normalizedAxes));
+    })(),
     thresholds: toNumberRecord(payload.thresholds),
     required_evidence: toStringArray(payload.required_evidence),
     notes: toStringOrNull(payload.notes),
@@ -505,7 +538,8 @@ export async function createCapabilityModel(input: {
   modelName: string;
   description?: string | null;
   roleId?: string | null;
-  weights: Record<string, number>;
+  axes?: RoleCapabilityAxis[];
+  weights?: Record<string, number>;
   thresholds: Record<string, number>;
   requiredEvidence: string[];
   notes?: string | null;
@@ -518,13 +552,20 @@ export async function createCapabilityModel(input: {
     throw new Error("capability_model_company_not_found");
   }
 
+  const normalizedAxes = normalizeRoleCapabilityAxes({
+    axes: input.axes ?? null,
+    weights: input.weights ?? {},
+  });
+  const validationError = validateRoleCapabilityAxes(normalizedAxes);
+  if (validationError) throw new Error(validationError);
+
   const modelPayload = buildModelPayload({
     companyId: scopedCompanyId,
     recruiterId: input.recruiterId,
     modelName: input.modelName,
     description: input.description ?? null,
     roleId: input.roleId ?? null,
-    weights: input.weights,
+    axes: normalizedAxes,
     thresholds: input.thresholds,
     requiredEvidence: input.requiredEvidence,
     notes: input.notes ?? null,
@@ -625,7 +666,8 @@ export async function createCapabilityModelVersion(input: {
   orgId: string;
   userId: string;
   modelId: string;
-  weights: Record<string, number>;
+  axes?: RoleCapabilityAxis[];
+  weights?: Record<string, number>;
   thresholds: Record<string, number>;
   requiredEvidence: string[];
   notes?: string | null;
@@ -653,10 +695,18 @@ export async function createCapabilityModelVersion(input: {
 
   const currentModelData = toRecord(modelRow.model_data);
   const nextVersionNumber = toVersionNumber(modelRow.current_version) + 1;
+  const normalizedAxes = normalizeRoleCapabilityAxes({
+    axes: input.axes ?? null,
+    weights: input.weights ?? {},
+  });
+  const validationError = validateRoleCapabilityAxes(normalizedAxes);
+  if (validationError) throw new Error(validationError);
+
   const modelPayload = {
     ...currentModelData,
     company_id: scopedCompanyId,
-    weights: input.weights,
+    axes: normalizedAxes,
+    weights: toLegacyWeights(normalizedAxes),
     thresholds: input.thresholds,
     required_evidence: input.requiredEvidence,
     notes: input.notes ?? null,

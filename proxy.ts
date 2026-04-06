@@ -37,6 +37,14 @@ const isPublicPath = (pathname: string) => {
   );
 };
 
+const isAuthRequiredApiPath = (pathname: string) =>
+  pathname.startsWith("/api/student") ||
+  pathname.startsWith("/api/recruiter") ||
+  pathname.startsWith("/api/admin") ||
+  pathname.startsWith("/api/referrer");
+
+const isSpecialInternalApiPath = (pathname: string) => pathname.startsWith("/api/onboarding/");
+
 export async function proxy(request: NextRequest) {
   if (!isEnabled()) {
     return NextResponse.next();
@@ -131,6 +139,14 @@ export async function proxy(request: NextRequest) {
     return redirectResponse;
   };
 
+  const isApiPath = pathname.startsWith("/api/");
+  const useApiAuthOnlyPath = isApiPath && (isAuthRequiredApiPath(pathname) || isSpecialInternalApiPath(pathname));
+
+  if (useApiAuthOnlyPath) {
+    if (error || !user) return toLoginRedirect();
+    return response;
+  }
+
   const profile = user ? await getProfileByUserId(supabase, user.id) : null;
   const persona = user ? resolvePersonaFromProfileOrUser(profile?.role, user) : null;
   const postAuthRoute = persona
@@ -143,7 +159,6 @@ export async function proxy(request: NextRequest) {
   const onboardingRoute = persona ? getOnboardingRouteForPersona(persona) : null;
   const isOnboardingRoute = onboardingRoute ? pathname === onboardingRoute || pathname.startsWith(`${onboardingRoute}/`) : false;
   const isOnboarded = Boolean(profile?.onboarding_completed_at);
-  const isApiPath = pathname.startsWith("/api/");
 
   if (pathname === "/") {
     if (!error && user && persona && postAuthRoute) {

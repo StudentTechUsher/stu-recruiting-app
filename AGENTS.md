@@ -83,3 +83,27 @@ RECRUITER_APPROVAL_FUNCTION_URL
 - Unit tests use `vi.mock()` heavily — Supabase client and other dependencies are mocked at the module level
 - Smoke tests in `playwright.config.ts` auto-start the dev server and run against `localhost:3000`
 - Vitest is configured in `vitest.config.ts` with Node environment and `@/*` path alias resolution
+
+## Database Change Rigor (Required)
+
+Before adding any new DB table/column/migration, you must evaluate all three options and document the decision in the PR or migration comment:
+
+1. Reuse existing JSON field.
+2. Add a new column to an existing table.
+3. Add a new table.
+
+Use this decision rule:
+
+- Prefer **existing JSON** when shape is still evolving, low query/filter/index needs, no strict relational integrity, and write/read is mostly document-style.
+- Prefer **new column** when the field is stable, frequently filtered/sorted/joined, needs constraints/defaults, or must be visible to SQL policies/analytics.
+- Prefer **new table** when the data has its own lifecycle/state machine, 1-to-many growth, independent auditing/versioning, cross-entity relationships, or dedicated indexing/access patterns.
+
+Minimum checklist before schema expansion:
+
+- Define access/query paths: which endpoints/jobs will read/filter this data.
+- Define integrity needs: uniqueness, foreign keys, NOT NULL/check constraints.
+- Define lifecycle semantics: mutability, versioning, archival, and deletion behavior.
+- Define operational cost: migration complexity, backfill requirements, and rollback path.
+- Confirm why JSON/column/table alternatives were rejected.
+
+Hard rule: do not add a new table by default when an existing JSON contract can safely satisfy current requirements without harming queryability, integrity, or auditability.

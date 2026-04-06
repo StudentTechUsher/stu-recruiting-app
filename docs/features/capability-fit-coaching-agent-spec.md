@@ -1,7 +1,7 @@
 # Capability Fit Coaching Agent Specification
 
 ## Purpose
-Define Capability Fit Coaching behavior that converts Evidence Profile and Capability Profile gaps into concrete, evidence-oriented next actions.
+Define Capability Fit Coaching behavior that converts Evidence Profile and Role capability model gaps into concrete, evidence-oriented next actions.
 
 ## User Problem
 Candidates can see they are not yet decision-ready for a selected target but may not know which evidence gaps matter most or what to do next.
@@ -9,14 +9,14 @@ Candidates can see they are not yet decision-ready for a selected target but may
 ## MVP and Future-State Scope
 | Scope | Definition |
 | --- | --- |
-| MVP | Generate structured strengths, gaps, recommended actions, and expected evidence for one selected Capability Profile at a time. |
+| MVP | Generate structured strengths, gaps, recommended actions, and expected evidence for one selected role target at a time. |
 | Future state | Multi-target planning, adaptive sequencing, and richer verification-path optimization. |
 
 ## Inputs
 | Input | Required | Notes |
 | --- | --- | --- |
 | Evidence Profile snapshot | Yes | Artifacts, provenance, verification state and tier |
-| Selected Capability Profile | Yes | `capability_profile_id` and target capability expectations |
+| Selected role capability model | Yes | `capability_profile_id` (legacy field name) and target capability expectations |
 | Candidate preferences and constraints | Yes | Time, resource, and work-style constraints |
 | Prior coaching history | Optional | Previous action completion and evidence outcomes |
 

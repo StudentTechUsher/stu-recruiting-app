@@ -10,6 +10,7 @@ import {
   type ActiveCapabilityProfileSelection,
   type CapabilityProfileOption,
 } from "@/lib/student/capability-targeting";
+import { getActiveRoleCapabilityAxes, normalizeRoleCapabilityAxes, toLegacyWeights } from "@/lib/recruiter/capability-axes";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 
@@ -86,6 +87,12 @@ const createCapabilityProfileOptions = ({
       toTrimmedString(modelData.model_name);
     const companyLabel = companyNameById.get(companyId) ?? `Unknown (${companyId.slice(0, 8)})`;
     const roleLabel = roleLabelFromModel ?? "Unknown role";
+    const normalizedAxes = getActiveRoleCapabilityAxes(
+      normalizeRoleCapabilityAxes({
+        axes: modelData.axes,
+        weights: modelData.weights,
+      })
+    );
 
     const comboRoleKey = normalizeLabelKey(roleLabel);
     options.push({
@@ -95,7 +102,8 @@ const createCapabilityProfileOptions = ({
       role_id: `name:${comboRoleKey}`,
       role_label: roleLabel,
       capability_ids: [],
-      target_weights: {},
+      target_axes: normalizedAxes,
+      target_weights: toLegacyWeights(normalizedAxes),
       updated_at: "",
     });
   }

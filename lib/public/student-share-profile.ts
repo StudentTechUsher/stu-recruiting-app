@@ -9,6 +9,8 @@ import {
   type CapabilityProfileFitAxis,
   type CapabilityProfileOption,
 } from "@/lib/student/capability-targeting";
+import { getActiveRoleCapabilityAxes, normalizeRoleCapabilityAxes, toLegacyWeights } from "@/lib/recruiter/capability-axes";
+import { materializeCandidateCapabilitySnapshot } from "@/lib/student/candidate-capability-profile";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/service-role";
 import { createHash } from "node:crypto";
 
@@ -77,6 +79,11 @@ export type PublicVerificationState = "verified" | "pending" | "unverified";
 export type PublicEvidenceTargetAxis = {
   capability_id: string;
   label: string;
+  candidate_score: number;
+  required_level: number;
+  gap: number;
+  confidence_level: "low" | "medium" | "high";
+  evidence_count: number;
   target_magnitude: number;
   evidence_magnitude: number;
   evidence_state: "missing" | "tentative" | "strong";
@@ -88,6 +95,12 @@ export type PublicStudentTarget = {
   company_label: string;
   priority_label: "Primary" | "Secondary";
   alignment_percent: number | null;
+  alignment_score: number | null;
+  confidence_summary: {
+    average_confidence: number;
+    low_confidence_axis_count: number;
+    axis_count: number;
+  } | null;
   axes: PublicEvidenceTargetAxis[];
 };
 
@@ -524,6 +537,11 @@ const toRadarAxes = (axes: CapabilityProfileFitAxis[]): PublicEvidenceTargetAxis
   axes.map((axis) => ({
     capability_id: axis.capability_id,
     label: axis.label,
+    candidate_score: axis.candidate_score,
+    required_level: axis.required_level,
+    gap: axis.gap,
+    confidence_level: axis.confidence_level,
+    evidence_count: axis.evidence_count,
     target_magnitude: axis.target_magnitude,
     evidence_magnitude: axis.evidence_magnitude,
     evidence_state: axis.evidence_state,
@@ -575,7 +593,13 @@ const toCapabilityProfileOption = ({
   capabilityIdsByRole: Map<string, string[]>;
 }): CapabilityProfileOption => {
   const modelData = toRecord(modelById.get(selection.capability_profile_id)?.model_data);
-  const weights = toNumericRecord(modelData.weights);
+  const normalizedAxes = getActiveRoleCapabilityAxes(
+    normalizeRoleCapabilityAxes({
+      axes: modelData.axes,
+      weights: modelData.weights,
+    })
+  );
+  const weights = toLegacyWeights(normalizedAxes);
   const weightedCapabilityIds = Object.keys(weights).filter((capabilityId) => capabilityId.trim().length > 0);
   const mappedRoleCapabilities = capabilityIdsByRole.get(normalizeRoleName(selection.role_label)) ?? [];
   const fallbackRoleCapabilities = mappedRoleCapabilities.length > 0
@@ -590,6 +614,7 @@ const toCapabilityProfileOption = ({
     role_id: selection.role_id,
     role_label: selection.role_label,
     capability_ids: Array.from(new Set(capabilityIds)),
+    target_axes: normalizedAxes,
     target_weights: weights,
     updated_at: "",
   };
@@ -654,6 +679,24 @@ export async function getPublicStudentShareProfileBySlug(inputSlug: string): Pro
     artifact_data: toRecord(artifact.artifact_data),
     updated_at: artifact.updated_at,
   }));
+  const candidateSnapshot = await materializeCandidateCapabilitySnapshot({
+    supabase,
+    profileId: shareLink.profile_id,
+    artifacts: derivationArtifacts,
+  });
+  const candidateAxisScoresById = Object.fromEntries(
+    candidateSnapshot.axis_scores.map((axisScore) => [
+      axisScore.axis_id,
+      {
+        score_normalized: axisScore.score_normalized,
+        confidence: axisScore.confidence,
+        evidence_count: axisScore.evidence_count,
+        low_confidence: axisScore.low_confidence,
+        confidence_reason: axisScore.confidence_reason,
+        confidence_level: axisScore.confidence_level,
+      },
+    ])
+  );
   const evidenceFreshnessMarker = buildEvidenceFreshnessMarker(derivationArtifacts);
 
   const activeSelections = parseActiveCapabilityProfiles(studentData.active_capability_profiles);
@@ -723,6 +766,7 @@ export async function getPublicStudentShareProfileBySlug(inputSlug: string): Pro
         profile: profileOption,
         artifacts: derivationArtifacts,
         evidenceFreshnessMarker,
+        candidateAxisScoresById,
       });
       const axes = toRadarAxes(fit.axes);
       targetProfiles.push({
@@ -731,6 +775,8 @@ export async function getPublicStudentShareProfileBySlug(inputSlug: string): Pro
         company_label: selection.company_label,
         priority_label: index === 0 ? "Primary" : "Secondary",
         alignment_percent: calculateAlignmentPercent(axes),
+        alignment_score: fit.alignment_score,
+        confidence_summary: fit.confidence_summary,
         axes,
       });
     }

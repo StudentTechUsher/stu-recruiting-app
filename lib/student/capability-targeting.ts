@@ -1,3 +1,10 @@
+import { getCapabilityAxisDefinition } from "@/lib/capabilities/ontology";
+import {
+  getActiveRoleCapabilityAxes,
+  normalizeRoleCapabilityAxes,
+  type RoleCapabilityAxis,
+} from "@/lib/recruiter/capability-axes";
+
 type VerificationState = "verified" | "pending" | "unverified";
 
 export const capabilityProfileSelectionSources = [
@@ -48,6 +55,7 @@ export type CapabilityProfileOption = {
   role_id: string;
   role_label: string;
   capability_ids: string[];
+  target_axes: RoleCapabilityAxis[];
   target_weights: Record<string, number>;
   updated_at: string;
 };
@@ -64,6 +72,17 @@ export type CapabilityFitEvidenceState = "missing" | "tentative" | "strong";
 export type CapabilityProfileFitAxis = {
   capability_id: string;
   label: string;
+  candidate_score: number;
+  required_level: number;
+  gap: number;
+  attainment: number;
+  weighted_contribution: number;
+  confidence: number;
+  evidence_count: number;
+  low_confidence: boolean;
+  confidence_reason: string[];
+  confidence_level: "low" | "medium" | "high";
+  weight: number;
   target_magnitude: number;
   evidence_magnitude: number;
   evidence_state: CapabilityFitEvidenceState;
@@ -74,6 +93,13 @@ export type CapabilityProfileFit = {
   capability_profile_id: string;
   company_label: string;
   role_label: string;
+  alignment_score: number;
+  overall_alignment: number;
+  confidence_summary: {
+    average_confidence: number;
+    low_confidence_axis_count: number;
+    axis_count: number;
+  };
   axes: CapabilityProfileFitAxis[];
   generated_at: string;
   evidence_freshness_marker: string;
@@ -471,7 +497,18 @@ export const buildEvidenceFreshnessMarker = (artifacts: DerivationArtifact[]): s
 
 const capabilityLabel = (capabilityId: string): string => {
   const normalized = capabilityId.trim().toLowerCase();
-  return capabilityLabelById[normalized] ?? capabilityId;
+  const mapped = capabilityLabelById[normalized];
+  if (mapped) return mapped;
+  const ontologyDefinition = getCapabilityAxisDefinition(normalized);
+  if (ontologyDefinition?.label) return ontologyDefinition.label;
+  const humanized = normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+  return humanized.length > 0 ? humanized : capabilityId;
 };
 
 const toNumericRecord = (value: unknown): Record<string, number> => {
@@ -488,22 +525,50 @@ export const computeCapabilityProfileFit = ({
   profile,
   artifacts,
   evidenceFreshnessMarker,
+  candidateAxisScoresById,
 }: {
   profile: CapabilityProfileOption;
   artifacts: DerivationArtifact[];
   evidenceFreshnessMarker: string;
+  candidateAxisScoresById?: Record<
+    string,
+    {
+      score_normalized: number;
+      confidence: number;
+      evidence_count: number;
+      low_confidence: boolean;
+      confidence_reason: string[];
+      confidence_level: "low" | "medium" | "high";
+    }
+  >;
 }): CapabilityProfileFit => {
-  const weights = toNumericRecord(profile.target_weights);
-  const weightedCapabilityIds = Object.keys(weights).filter((id) => id.trim().length > 0);
-  const targetCapabilityIds = weightedCapabilityIds.length > 0 ? weightedCapabilityIds : profile.capability_ids;
-
-  const maxWeight = Object.values(weights).reduce((max, weight) => (weight > max ? weight : max), 0);
+  const normalizedTargetAxes = getActiveRoleCapabilityAxes(
+    normalizeRoleCapabilityAxes({
+      axes: profile.target_axes ?? [],
+      weights: profile.target_weights,
+    })
+  );
+  const fallbackTargetAxes =
+    normalizedTargetAxes.length > 0
+      ? normalizedTargetAxes
+      : profile.capability_ids.map((capabilityId) => ({
+          axis_id: capabilityId,
+          required_level: 0.7,
+          required_level_source: "legacy_default" as const,
+          weight: 1,
+          required_evidence_types: [],
+          is_active: true,
+        }));
+  const targetCapabilityIds = fallbackTargetAxes.map((axis) => axis.axis_id);
+  const axisById = new Map(fallbackTargetAxes.map((axis) => [axis.axis_id, axis]));
+  const activeWeightSum = fallbackTargetAxes.reduce((sum, axis) => sum + Math.max(axis.weight, 0), 0);
   const evidenceByCapability = new Map<
     string,
     {
       magnitude: number;
       supportingEvidenceIds: Set<string>;
       hasVerified: boolean;
+      verificationBreakdown: Record<VerificationState, number>;
     }
   >();
 
@@ -512,6 +577,11 @@ export const computeCapabilityProfileFit = ({
       magnitude: 0,
       supportingEvidenceIds: new Set<string>(),
       hasVerified: false,
+      verificationBreakdown: {
+        verified: 0,
+        pending: 0,
+        unverified: 0,
+      },
     });
   }
 
@@ -530,32 +600,93 @@ export const computeCapabilityProfileFit = ({
       current.magnitude = clamp01(current.magnitude + contribution);
       current.supportingEvidenceIds.add(artifact.artifact_id);
       if (verificationState === "verified") current.hasVerified = true;
+      current.verificationBreakdown[verificationState] += 1;
     }
   }
 
   const axes: CapabilityProfileFitAxis[] = targetCapabilityIds.map((capabilityId) => {
-    const targetMagnitude =
-      weightedCapabilityIds.length > 0 && maxWeight > 0 ? clamp01(weights[capabilityId] / maxWeight) : 1;
     const evidenceState = evidenceByCapability.get(capabilityId) ?? {
       magnitude: 0,
       supportingEvidenceIds: new Set<string>(),
       hasVerified: false,
+      verificationBreakdown: {
+        verified: 0,
+        pending: 0,
+        unverified: 0,
+      },
     };
+    const targetAxis = axisById.get(capabilityId) ?? {
+      axis_id: capabilityId,
+      required_level: 0.7,
+      required_level_source: "legacy_default" as const,
+      weight: 1,
+      is_active: true,
+      required_evidence_types: [],
+    };
+    const candidateSnapshotScore = candidateAxisScoresById?.[capabilityId];
+    const candidateScore = clamp01(candidateSnapshotScore?.score_normalized ?? evidenceState.magnitude);
+    const requiredLevel = clamp01(targetAxis.required_level);
+    const evidenceCount = Math.max(candidateSnapshotScore?.evidence_count ?? evidenceState.supportingEvidenceIds.size, 0);
+    const verifiedCount = evidenceState.verificationBreakdown.verified;
+    const verifiedRatio = evidenceCount > 0 ? verifiedCount / evidenceCount : 0;
+    const inferredConfidence = clamp01(evidenceCount === 0 ? 0 : 0.35 + Math.min(evidenceCount, 4) * 0.1 + verifiedRatio * 0.25);
+    const confidence = clamp01(candidateSnapshotScore?.confidence ?? inferredConfidence);
+    const lowConfidence = Boolean(
+      candidateSnapshotScore?.low_confidence ?? (confidence < 0.6 || evidenceCount < 2)
+    );
+    const confidenceReason: string[] =
+      candidateSnapshotScore?.confidence_reason?.length
+        ? candidateSnapshotScore.confidence_reason
+        : [
+            ...(confidence < 0.6 ? ["confidence_below_threshold"] : []),
+            ...(evidenceCount < 2 ? ["insufficient_evidence_count"] : []),
+          ];
+    const confidenceLevel: "low" | "medium" | "high" =
+      candidateSnapshotScore?.confidence_level ?? (lowConfidence ? "low" : confidence < 0.8 ? "medium" : "high");
+    const attainment = requiredLevel > 0 ? clamp01(Math.min(candidateScore / requiredLevel, 1)) : 1;
+    const normalizedWeight = activeWeightSum > 0 ? Math.max(targetAxis.weight, 0) / activeWeightSum : 0;
+    const weightedContribution = normalizedWeight * attainment;
+    const gap = candidateScore - requiredLevel;
 
     return {
       capability_id: capabilityId,
       label: capabilityLabel(capabilityId),
-      target_magnitude: targetMagnitude,
-      evidence_magnitude: clamp01(evidenceState.magnitude),
-      evidence_state: evidenceState.magnitude <= 0 ? "missing" : evidenceState.hasVerified ? "strong" : "tentative",
-      supporting_evidence_count: evidenceState.supportingEvidenceIds.size,
+      candidate_score: candidateScore,
+      required_level: requiredLevel,
+      gap,
+      attainment,
+      weighted_contribution: weightedContribution,
+      confidence,
+      evidence_count: evidenceCount,
+      low_confidence: lowConfidence,
+      confidence_reason: confidenceReason,
+      confidence_level: confidenceLevel,
+      weight: Math.max(targetAxis.weight, 0),
+      target_magnitude: requiredLevel,
+      evidence_magnitude: candidateScore,
+      evidence_state:
+        candidateScore <= 0 ? "missing" : lowConfidence ? "tentative" : evidenceState.hasVerified ? "strong" : "tentative",
+      supporting_evidence_count: evidenceCount,
     };
   });
+  const alignmentScore = clamp01(axes.reduce((sum, axis) => sum + axis.weighted_contribution, 0));
+  const averageConfidence =
+    axes.length > 0
+      ? clamp01(axes.reduce((sum, axis) => sum + axis.confidence, 0) / axes.length)
+      : 0;
+  const lowConfidenceAxisCount = axes.filter((axis) => axis.low_confidence).length;
 
   return {
     capability_profile_id: profile.capability_profile_id,
     company_label: profile.company_label,
     role_label: profile.role_label,
+    alignment_score: alignmentScore,
+    overall_alignment: alignmentScore,
+    confidence_summary: {
+      average_confidence: averageConfidence,
+      low_confidence_axis_count: lowConfidenceAxisCount,
+      axis_count: axes.length,
+    },
     axes,
     generated_at: new Date().toISOString(),
     evidence_freshness_marker: evidenceFreshnessMarker,

@@ -5,7 +5,7 @@
 | --- | --- |
 | ATS position | Stu operates behind ATS platforms through integrations and curated handoff workflows. |
 | Decision role | Stu does not score, rank, or automatically filter candidates. |
-| Core function | Stu builds candidate Evidence Profiles, aligns them to selected Capability Profiles, and supports evidence-backed recruiter readiness. |
+| Core function | Stu builds candidate Evidence Profiles, aligns them to selected role capability models, and supports evidence-backed recruiter readiness. |
 | Output intent | Candidate guidance plus recruiter decision readiness through curated package review. |
 
 > **Invariant:** Phase 1 is an evidence and trust system, not an automated hiring decision system.
@@ -27,7 +27,7 @@
 | External profile links | GitHub, LinkedIn, Kaggle, LeetCode | Public profile metadata and source evidence | Candidate evidence layer with provenance |
 | Candidate-entered supporting files | Syllabus and supporting artifacts | Manual evidence attachments and verification support files | Candidate evidence layer |
 | Candidate preferences and goals | Onboarding and profile preferences | Interest areas, work attributes, constraints, motivations | Candidate-owned preference context |
-| Capability Profile library | Company-role capability definitions | `capability_profile_id`, capability requirements, evidence expectations | Recruiter or operator curated |
+| Role capability model library | Company-role capability definitions | `capability_profile_id` (legacy field name), capability requirements, evidence expectations | Recruiter or operator curated |
 
 ## Processing Stages
 | Stage | Description | Required output |
@@ -36,7 +36,7 @@
 | Evidence ingestion and extraction | System captures source inputs and creates artifact candidates. | Raw source records plus structured drafts |
 | Normalization and verification assignment | System normalizes artifact shape and assigns verification state and tier. | Normalized artifacts with trust metadata |
 | Evidence Profile update | System merges records into canonical profile with deterministic merge rules. | Updated canonical profile plus provenance history |
-| Capability selection | Candidate uses Capability Selection Agent to choose at most 2 active Capability Profiles. | Active target set and rationale |
+| Capability selection | Candidate uses Capability Selection Agent to choose at most 2 active role targets. | Active target set and rationale |
 | Capability Fit Coaching loop | Coaching maps evidence strengths and gaps to concrete actions and expected evidence. | Structured coaching recommendations |
 | Evidence improvement | Candidate adds, revises, or verifies artifacts based on coaching guidance. | Improved profile evidence and verification state |
 | Controlled visibility action | Candidate runs Open Profile Visibility to Selected Employers for one selected target. | Visibility request plus candidate-approved package |
@@ -52,7 +52,7 @@
 ## Focused Targeting Rules
 | Rule ID | Rule |
 | --- | --- |
-| PM-FOCUS-001 | Candidate may keep no more than 2 active Capability Profiles at one time. |
+| PM-FOCUS-001 | Candidate may keep no more than 2 active role targets at one time. |
 | PM-FOCUS-002 | Candidate may run Open Profile Visibility to Selected Employers only for one selected active target per request. |
 | PM-FOCUS-003 | Workflow prioritizes depth of evidence for selected targets over broad application broadcasting. |
 | PM-FOCUS-004 | Candidate guidance must explain target tradeoffs and encourage commitment to focused targets. |
@@ -61,7 +61,8 @@
 | Output | Description | Consumer |
 | --- | --- | --- |
 | Evidence Profile | Candidate-owned profile with artifacts, provenance, verification metadata, and capability linkage context. | Candidate UX, recruiter review |
-| Capability alignment summary | Evidence-backed strengths, gaps, and next actions per selected Capability Profile. | Candidate coaching UX |
+| Candidate capability profile | Versioned evidence-derived capability snapshot reusable across multiple role evaluations without per-role recomputation. | Fit, coaching, dashboard, recruiter context |
+| Capability alignment summary | Evidence-backed strengths, gaps, and next actions per selected role target model. | Candidate coaching UX |
 | Decision-Ready Candidate Package | Curated package for one selected company-role target, including evidence-backed strengths and gaps. | Operators and recruiters |
 | Visibility request record | Candidate-authorized handoff request for a selected target. | Internal workflow and audit logs |
 

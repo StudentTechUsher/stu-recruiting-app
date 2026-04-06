@@ -2,6 +2,12 @@
 
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchStudentQuery,
+  invalidateStudentCacheForMutation,
+  setStudentQueryCacheScope,
+} from "@/lib/client/student-query-cache";
+import { endCandidateBoundary, startCandidateBoundary } from "@/lib/client/student-perf";
 import { findBestOptionMatch, normalizeOptionLabel, normalizeOptionSearchKey } from "@/lib/text/fuzzy-option-match";
 
 const toggledClassName =
@@ -13,6 +19,9 @@ const targetPositionChangeConfirmationMessage =
   "Changing target roles updates the capability attributes tracked in your dashboard. Continue?";
 
 type StudentProfileApiData = {
+  identity?: {
+    cache_scope?: string;
+  };
   profile: {
     personal_info?: Record<string, unknown>;
   };
@@ -303,6 +312,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   const resumeInputRef = useRef<HTMLInputElement | null>(null);
   const transcriptInputRef = useRef<HTMLInputElement | null>(null);
   const copiedShareUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const profilePerfHandleRef = useRef<ReturnType<typeof startCandidateBoundary> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -319,21 +329,30 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
 
   useEffect(() => {
     let isActive = true;
+    if (!profilePerfHandleRef.current) {
+      profilePerfHandleRef.current = startCandidateBoundary(view === "targets" ? "targets" : "profile");
+    }
 
     const loadProfile = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch("/api/student/profile", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as
+        const payload = (await fetchStudentQuery({
+          path: "/api/student/profile",
+          resource: "profile_full",
+        })) as
           | { ok: true; data: StudentProfileApiData }
           | { ok: false; error?: string }
           | null;
 
-        if (!response.ok || !payload || !payload.ok) {
+        if (!payload || !payload.ok) {
           throw new Error("profile_load_failed");
         }
 
         if (!isActive) return;
+        const cacheScope = asTrimmedString(payload.data.identity?.cache_scope);
+        if (cacheScope.length > 0) {
+          setStudentQueryCacheScope(cacheScope);
+        }
 
         const personalInfo = payload.data.profile?.personal_info ?? {};
         const studentData = payload.data.student_data ?? {};
@@ -400,7 +419,13 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         if (!isActive) return;
         setStatusMessage("Unable to load profile right now. Please refresh and try again.");
       } finally {
-        if (isActive) setIsLoading(false);
+        if (isActive) {
+          setIsLoading(false);
+          if (profilePerfHandleRef.current) {
+            endCandidateBoundary(profilePerfHandleRef.current);
+            profilePerfHandleRef.current = null;
+          }
+        }
       }
     };
 
@@ -408,7 +433,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [view]);
 
   const graduationYearOptions = useMemo(
     () => Array.from({ length: 11 }, (_, index) => String(currentYearPlusTwo - 2 + index)),
@@ -662,12 +687,14 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   };
 
   const refreshSourceExtractionState = async () => {
-    const response = await fetch("/api/student/artifacts", { cache: "no-store" });
-    const payload = (await response.json().catch(() => null)) as
+    const payload = (await fetchStudentQuery({
+      path: "/api/student/artifacts",
+      resource: "artifacts",
+    })) as
       | { ok: true; data: { source_extraction_log?: unknown; profile_links?: Record<string, unknown> } }
       | { ok: false; error?: string }
       | null;
-    if (!response.ok || !payload || !payload.ok) throw new Error("source_state_refresh_failed");
+    if (!payload || !payload.ok) throw new Error("source_state_refresh_failed");
 
     const extractionLog = toRecord(payload.data.source_extraction_log);
     setSourceExtractionLog(extractionLog as SourceExtractionLog);
@@ -780,6 +807,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         const failureCode = payload && !payload.ok && typeof payload.error === "string" ? payload.error : "extraction_failed";
         throw new Error(failureCode);
       }
+      invalidateStudentCacheForMutation(endpoint);
 
       const status = asTrimmedString(payload.data.status);
       const sourceRun = toRecord(payload.data.source_run);
@@ -853,6 +881,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
         const errorCode = payload && !payload.ok && typeof payload.error === "string" ? payload.error : "extraction_failed";
         throw new Error(errorCode);
       }
+      invalidateStudentCacheForMutation(endpoint);
 
       await refreshSourceExtractionState();
       const addedArtifacts = Array.isArray(payload.data.artifacts) ? payload.data.artifacts.length : 0;
@@ -944,6 +973,8 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       if (!saveResponse.ok || !savePayload || !savePayload.ok) {
         throw new Error("avatar_profile_save_failed");
       }
+      invalidateStudentCacheForMutation("/api/student/artifacts/files");
+      invalidateStudentCacheForMutation("/api/student/profile");
 
       const savedPersonalInfo = toRecord(savePayload.data.profile?.personal_info);
       setAvatarUrl(asTrimmedString(savedPersonalInfo.avatar_url) || asTrimmedString(savedPersonalInfo.avatarUrl));
@@ -1003,6 +1034,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       if (!response.ok || !payload || !payload.ok) {
         throw new Error("external_links_save_failed");
       }
+      invalidateStudentCacheForMutation("/api/student/profile");
 
       const sourceCount = (hasPortfolioLink ? 1 : 0) + (hasIntroVideo ? 1 : 0);
       setHasSavedExternalSignals(true);
@@ -1063,6 +1095,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       if (!response.ok || !payload || !payload.ok) {
         throw new Error("profile_save_failed");
       }
+      invalidateStudentCacheForMutation("/api/student/profile");
 
       const savedStudentData = payload.data.student_data ?? {};
       const savedRoles = toStringArray(savedStudentData.target_roles);
@@ -1126,6 +1159,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
       if (!response.ok || !payload || !payload.ok) {
         throw new Error("profile_details_save_failed");
       }
+      invalidateStudentCacheForMutation("/api/student/profile");
 
       const savedPersonalInfo = toRecord(payload.data.profile?.personal_info);
       setFirstName(asTrimmedString(savedPersonalInfo.first_name) || firstName.trim());
