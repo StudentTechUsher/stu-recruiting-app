@@ -15,7 +15,7 @@ export const defaultStudentViewReleaseFlags: StudentViewReleaseFlags = {
   capabilityDashboard: true,
   pathwayPlanner: false,
   capabilityCoach: false,
-  networkingCoach: false,
+  networkingCoach: true,
   aiGuidance: true,
   interviewPrep: false,
   manageRoles: true,

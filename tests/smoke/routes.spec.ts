@@ -78,7 +78,8 @@ test("student routes render with Storybook nav", async ({ page }) => {
 
   await page.goto("/student/networking-coach");
   await expect(page).toHaveURL(/\/student\/networking-coach$/);
-  await expect(page.getByText("Networking Coach (Design Preview)")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Networking Coach" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate suggestion" })).toBeVisible();
 });
 
 test("admin route renders with Storybook nav", async ({ page }) => {

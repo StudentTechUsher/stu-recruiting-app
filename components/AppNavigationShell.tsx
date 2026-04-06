@@ -144,7 +144,7 @@ const studentNavItems: NavItem[] = [
   {
     key: "student-networking-coach",
     label: "Networking Coach",
-    shortLabel: "Networking",
+    shortLabel: "Network",
     description: "Expand your network",
     icon: CandidateIcon,
     href: "/student/networking-coach",
@@ -230,7 +230,11 @@ export function AppNavigationShell({
   const mobileBottomNavItems =
     audience === "student"
       ? navItems.filter(
-          (item) => item.key === "student-artifacts" || item.key === "student-targets" || item.key === "student-profile"
+          (item) =>
+            item.key === "student-artifacts" ||
+            item.key === "student-targets" ||
+            item.key === "student-networking-coach" ||
+            item.key === "student-profile"
         )
       : [];
   const showMobileBottomNav = showNavigation && audience === "student" && mobileBottomNavItems.length > 0;
@@ -449,7 +453,15 @@ export function AppNavigationShell({
           className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[999] w-[calc(100%-1rem)] max-w-sm -translate-x-1/2 lg:hidden"
         >
           <div className="rounded-2xl border border-[#cad9d2] bg-white/85 p-1.5 shadow-[0_12px_36px_-20px_rgba(10,31,26,0.65)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/85">
-            <div className={`grid gap-1 ${mobileBottomNavItems.length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+            <div
+              className={`grid gap-1 ${
+                mobileBottomNavItems.length >= 4
+                  ? "grid-cols-4"
+                  : mobileBottomNavItems.length >= 3
+                    ? "grid-cols-3"
+                    : "grid-cols-2"
+              }`}
+            >
               {mobileBottomNavItems.map((item) => {
                 const isActive = pathname === item.href;
                 const Icon = item.icon;

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
+    "networking:build-data": "node scripts/networking/build-connections-json.mjs",
     "observability:check-changed-api": "node scripts/observability/check-changed-api-observability.mjs",
     "observability:validate-config": "node scripts/observability/validate-phase1-config.mjs",
     "observability:guard": "npm run observability:check-changed-api && npm run observability:validate-config",
