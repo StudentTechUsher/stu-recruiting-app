@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { fetchGreenhousePipeline, getGreenhouseConfig } from "@/lib/ats/greenhouse";
+import {
+  fetchGreenhousePipeline,
+  getGreenhouseConfig,
+  GreenhouseNotConfiguredError,
+} from "@/lib/ats/greenhouse";
 
 const makeApplication = (overrides: Record<string, unknown> = {}) => ({
   id: 101,
@@ -56,7 +60,9 @@ describe("fetchGreenhousePipeline", () => {
 
   it("throws when not configured", async () => {
     delete process.env.GREENHOUSE_API_KEY;
-    await expect(fetchGreenhousePipeline(TEST_ORG, {})).rejects.toThrow("greenhouse_not_configured");
+    await expect(fetchGreenhousePipeline(TEST_ORG, {})).rejects.toBeInstanceOf(
+      GreenhouseNotConfiguredError
+    );
   });
 
   it("normalizes a Greenhouse application into NormalizedATSCandidate", async () => {

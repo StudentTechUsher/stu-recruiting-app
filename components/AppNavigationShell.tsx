@@ -22,7 +22,6 @@ type NavItem = {
   label: string;
   shortLabel: string;
   description: string;
-  badge?: string;
   icon: ComponentType<{ className?: string }>;
   href: string;
   releaseKey?: StudentViewReleaseKey;
@@ -89,7 +88,7 @@ const recruiterNavItems: NavItem[] = [
     key: "recruiter-review-candidates",
     label: "Review Candidates",
     shortLabel: "Review",
-    description: "Review ATS applicants with capability evidence",
+    description: "Review applicants and evidence",
     icon: ChartIcon,
     href: "/recruiter/review-candidates"
   },
@@ -97,10 +96,10 @@ const recruiterNavItems: NavItem[] = [
     key: "recruiter-model",
     label: "Capability Model",
     shortLabel: "Model",
-    description: "Build and manage role-based capability models to improve hiring alignment over time",
-    badge: "Coming Soon",
+    description: "Build role-specific hiring models",
     icon: ModelIcon,
-    href: "/recruiter/capability-models"
+    href: "/recruiter/capability-models",
+    recruiterReleaseKey: "capabilityModel"
   }
 ];
 
@@ -109,7 +108,7 @@ const studentNavItems: NavItem[] = [
     key: "student-dashboard",
     label: "Capability Dashboard",
     shortLabel: "Dashboard",
-    description: "Track readiness and priority actions",
+    description: "See your current hiring signal",
     icon: ChartIcon,
     href: "/student/dashboard",
     releaseKey: "capabilityDashboard"
@@ -118,7 +117,7 @@ const studentNavItems: NavItem[] = [
     key: "student-artifacts",
     label: "Evidence Profile",
     shortLabel: "Evidence",
-    description: "Manage your evidence profile",
+    description: "Add and verify your evidence",
     icon: LayersIcon,
     href: "/student/artifacts",
     releaseKey: "artifactRepository"
@@ -127,7 +126,7 @@ const studentNavItems: NavItem[] = [
     key: "student-pathway",
     label: "Pathway Planner",
     shortLabel: "Pathway",
-    description: "Plan new milestones",
+    description: "Plan your next milestones",
     icon: LoopIcon,
     href: "/student/pathway",
     releaseKey: "pathwayPlanner"
@@ -136,7 +135,7 @@ const studentNavItems: NavItem[] = [
     key: "student-guidance",
     label: "Capability Coach",
     shortLabel: "Coach",
-    description: "Improve your hiring signal",
+    description: "Get guidance on what to improve",
     icon: GuidanceIcon,
     href: "/student/capability-coach",
     releaseKey: "capabilityCoach"
@@ -145,7 +144,7 @@ const studentNavItems: NavItem[] = [
     key: "student-networking-coach",
     label: "Networking Coach",
     shortLabel: "Network",
-    description: "Expand your network",
+    description: "Find outreach steps that work",
     icon: CandidateIcon,
     href: "/student/networking-coach",
     releaseKey: "networkingCoach"
@@ -154,7 +153,7 @@ const studentNavItems: NavItem[] = [
     key: "student-targets",
     label: "My Roles & Employers",
     shortLabel: "Roles",
-    description: "Set capability targets by role and employer",
+    description: "Set the roles you're aiming for",
     icon: CompassIcon,
     href: "/student/targets",
     releaseKey: "manageRoles"
@@ -163,7 +162,7 @@ const studentNavItems: NavItem[] = [
     key: "student-interview-prep",
     label: "Interview Prep",
     shortLabel: "Interview",
-    description: "Practice interview responses",
+    description: "Practice before real interviews",
     icon: InterviewPrepIcon,
     href: "/student/interview-prep",
     releaseKey: "interviewPrep"
@@ -172,7 +171,7 @@ const studentNavItems: NavItem[] = [
     key: "student-profile",
     label: "Profile",
     shortLabel: "Profile",
-    description: "Manage profile details & visibility",
+    description: "Update profile and visibility",
     icon: CandidateIcon,
     href: "/student/profile"
   }
@@ -311,22 +310,22 @@ export function AppNavigationShell({
   }, [audience]);
 
   return (
-    <div className="min-h-[100dvh] w-full overflow-x-clip bg-[#f1f7f4] text-[#0a1f1a] dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-[100dvh] w-full overflow-x-clip bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {showNavigation ? (
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[300px] border-r border-[#cad9d2] bg-white/90 p-4 backdrop-blur lg:block dark:border-slate-700 dark:bg-slate-900/90">
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[300px] border-r border-slate-200 bg-white p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] lg:block dark:border-slate-700 dark:bg-slate-900">
           <div className="flex h-full flex-col overflow-y-auto">
             <Link
               href={navItems[0]?.href ?? "/"}
-              className="self-start text-3xl font-bold leading-none tracking-tight text-[#0a1f1a] transition-opacity hover:opacity-80 dark:text-slate-100"
+              className="self-start text-3xl font-bold leading-none tracking-tight text-slate-900 transition-opacity hover:opacity-80 dark:text-slate-100"
               aria-label="Go to first app view"
             >
               stu.
             </Link>
 
             {audience === "student" ? (
-              <div className="mt-4 rounded-2xl border border-[#d4e1db] bg-[#f6fbf8] p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex items-center gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e5f2ec] text-xs font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
+                  <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
                     {studentIdentity?.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={studentIdentity.avatarUrl} alt="Candidate avatar" className="h-full w-full object-cover" />
@@ -335,10 +334,8 @@ export function AppNavigationShell({
                     )}
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-[#5a776e] dark:text-slate-400">
-                      Candidate
-                    </span>
-                    <span className="block truncate text-sm font-semibold text-[#173f33] dark:text-slate-100">
+                    <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Candidate</span>
+                    <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {studentIdentity?.displayName ?? "Candidate"}
                     </span>
                   </span>
@@ -346,7 +343,7 @@ export function AppNavigationShell({
               </div>
             ) : null}
 
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-[#446258] dark:text-slate-400">
+            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
               {audience === "admin"
                 ? "Admin Navigation"
                 : `${audience === "recruiter" ? "Recruiter" : audience === "referrer" ? "Referrer" : "Candidate"} Navigation`}
@@ -363,30 +360,23 @@ export function AppNavigationShell({
                     href={item.href}
                     className={`block w-full rounded-2xl border px-3 py-3 text-left transition-colors ${
                       isActive
-                        ? "border-[#0fd978] bg-[#ecfff5] dark:border-emerald-500 dark:bg-emerald-500/10"
-                        : "border-[#d4e1db] bg-white hover:bg-[#f2f8f5] dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                        ? "border-emerald-500 bg-emerald-50 dark:border-emerald-500 dark:bg-emerald-500/10"
+                        : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
                     }`}
                   >
                     <span className="flex items-start gap-3">
                       <span
                         className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
                           isActive
-                            ? "bg-[#12f987] text-[#0a1f1a]"
-                            : "bg-[#e9f2ee] text-[#2b4b41] dark:bg-slate-800 dark:text-slate-300"
+                            ? "bg-emerald-400 text-slate-900"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                         }`}
                       >
                         <Icon className="h-4 w-4" />
                       </span>
                       <span>
-                        <span className="block text-sm font-semibold text-[#143a2f] dark:text-slate-100">
-                          {item.label}
-                          {item.badge ? (
-                            <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                              {item.badge}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-[#4a665d] dark:text-slate-300">{item.description}</span>
+                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">{item.label}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-300">{item.description}</span>
                       </span>
                     </span>
                   </Link>
@@ -397,7 +387,7 @@ export function AppNavigationShell({
             <form action="/api/auth/logout" method="post" className="mt-auto pt-4">
               <button
                 type="submit"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#cddbd5] bg-[#f5fbf8] px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#2a4d41] hover:bg-white"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
                   <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
@@ -412,11 +402,11 @@ export function AppNavigationShell({
       ) : null}
 
       {showMobileTopBar ? (
-        <header className="fixed left-0 right-0 top-0 z-[995] border-b border-[#d7e4de] bg-white/95 backdrop-blur lg:hidden dark:border-slate-700 dark:bg-slate-900/95">
+        <header className="fixed left-0 right-0 top-0 z-[995] border-b border-slate-200 bg-white lg:hidden dark:border-slate-700 dark:bg-slate-900">
           <div className="flex h-16 items-center justify-between px-4 pt-[env(safe-area-inset-top)]">
             <Link
               href={navItems[0]?.href ?? "/student/dashboard"}
-              className="text-3xl font-bold leading-none tracking-tight text-[#0a1f1a] transition-opacity hover:opacity-80 dark:text-slate-100"
+              className="text-3xl font-bold leading-none tracking-tight text-slate-900 transition-opacity hover:opacity-80 dark:text-slate-100"
               aria-label="Go to student home"
             >
               stu.
@@ -424,7 +414,7 @@ export function AppNavigationShell({
             <Link
               href="/student/profile"
               aria-label="Open profile"
-              className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-[#bfd2ca] bg-[#e5f2ec] text-xs font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             >
               {studentIdentity?.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -452,7 +442,7 @@ export function AppNavigationShell({
           aria-label="Mobile tab navigation"
           className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[999] w-[calc(100%-1rem)] max-w-sm -translate-x-1/2 lg:hidden"
         >
-          <div className="rounded-2xl border border-[#cad9d2] bg-white/85 p-1.5 shadow-[0_12px_36px_-20px_rgba(10,31,26,0.65)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/85">
+          <div className="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.45)] dark:border-slate-700 dark:bg-slate-900">
             <div
               className={`grid gap-1 ${
                 mobileBottomNavItems.length >= 4
@@ -472,8 +462,8 @@ export function AppNavigationShell({
                     href={item.href}
                     className={`inline-flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                       isActive
-                        ? "border-[#0fd978] bg-[#e9fef3] text-[#12392f] dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-100"
-                        : "border-transparent bg-transparent text-[#46655b] hover:bg-[#f3f9f6] dark:text-slate-300 dark:hover:bg-slate-800/80"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-900 dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-100"
+                        : "border-transparent bg-transparent text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/80"
                     }`}
                   >
                     <Icon className="h-4 w-4" />

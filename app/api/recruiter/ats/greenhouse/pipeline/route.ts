@@ -1,7 +1,7 @@
 import { getAuthContext } from "@/lib/auth-context";
 import { hasPersona } from "@/lib/authorization";
 import { ok, badRequest, forbidden } from "@/lib/api-response";
-import { fetchGreenhousePipeline } from "@/lib/ats/greenhouse";
+import { fetchGreenhousePipeline, GreenhouseNotConfiguredError } from "@/lib/ats/greenhouse";
 
 export async function GET(request: Request) {
   const context = await getAuthContext();
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     });
     return ok(result);
   } catch (e) {
-    if (e instanceof Error && e.message === "greenhouse_not_configured")
+    if (e instanceof GreenhouseNotConfiguredError)
       return badRequest("Greenhouse integration not configured");
     throw e;
   }

@@ -20,7 +20,6 @@ type VerifyCodeResponse = {
 };
 
 type MagicLinkLoginScreenProps = {
-  sessionCheckEnabled: boolean;
   submitPath: string;
   eyebrow: string;
   heading: string;
@@ -55,7 +54,6 @@ const parseRetryAfterSeconds = (response: Response, data: MagicLinkResponse | nu
 };
 
 export function MagicLinkLoginScreen({
-  sessionCheckEnabled,
   submitPath,
   eyebrow,
   heading,
@@ -142,7 +140,7 @@ export function MagicLinkLoginScreen({
         } else if (errorCode === "magic_link_send_failed" && data?.details) {
           setError(`Unable to send magic link. ${data.details}`);
         } else {
-          setError("Unable to send magic link.");
+          setError("We couldn't send a sign-in link. Please try again.");
         }
         return;
       }
@@ -155,7 +153,7 @@ export function MagicLinkLoginScreen({
         setNotice("Magic link sent. Check your inbox and open the sign-in link, or enter the email code below.");
       }
     } catch {
-      setError("Unable to send magic link.");
+      setError("We couldn't send a sign-in link. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -213,7 +211,7 @@ export function MagicLinkLoginScreen({
         } else if (errorCode === "otp_verify_failed" && data?.details) {
           setError(`Unable to verify code. ${data.details}`);
         } else {
-          setError("Unable to verify code.");
+          setError("We couldn't verify that code. Request a new link and try again.");
         }
         return;
       }
@@ -221,18 +219,18 @@ export function MagicLinkLoginScreen({
       router.push(data.redirectPath);
       router.refresh();
     } catch {
-      setError("Unable to verify code.");
+      setError("We couldn't verify that code. Request a new link and try again.");
     } finally {
       setVerifyingCode(false);
     }
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,#d7ffe8_0,#f4fbf7_45%,#f8fff9_100%)] px-4 py-12">
-      <section className="w-full max-w-md rounded-[28px] border border-emerald-200 bg-white p-7 shadow-[0_24px_54px_-36px_rgba(10,31,26,0.5)]">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12 dark:bg-slate-950">
+      <section className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-7 shadow-[0_18px_46px_-34px_rgba(15,23,42,0.45)] dark:border-slate-700 dark:bg-slate-900">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">{eyebrow}</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a]">{heading}</h1>
-        <p className="mt-2 text-sm text-[#3c5f52]">{description}</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{heading}</h1>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{description}</p>
 
         {hasGoogleOAuth ? (
           <div className="mt-5">
@@ -254,21 +252,21 @@ export function MagicLinkLoginScreen({
               <span>Sign in with Google</span>
             </a>
 
-            <div className="mt-4 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#56766a]">
-              <span className="h-px flex-1 bg-[#d6e1db]" />
+            <div className="mt-4 flex items-center gap-3 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
               <span>Or use email</span>
-              <span className="h-px flex-1 bg-[#d6e1db]" />
+              <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
             </div>
           </div>
         ) : null}
 
         <form className={`${hasGoogleOAuth ? "mt-4" : "mt-5"} space-y-4`} onSubmit={onSubmit}>
-          <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#476a5d]">
+          <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
             {emailLabel}
             <input
               type="email"
               autoComplete="email"
-              className="mt-1 w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
+              className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
               placeholder={emailPlaceholder}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
@@ -279,22 +277,22 @@ export function MagicLinkLoginScreen({
           <button
             type="submit"
             disabled={loading || isCooldownActive}
-            className="w-full rounded-xl bg-[#0fd978] px-3 py-2 text-sm font-semibold text-[#0a1f1a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-xl bg-emerald-400 px-3 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? loadingLabel : isCooldownActive ? `Wait ${cooldownSeconds}s` : submitLabel}
           </button>
         </form>
 
         {lastRequestedEmail ? (
-          <div className="mt-4 rounded-xl border border-[#d6e1db] bg-[#f8fcfa] p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#48695d]">Have a code instead?</p>
-            <p className="mt-1 text-xs text-[#3f6055]">Enter the code from your email to finish sign-in.</p>
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Have a code instead?</p>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Enter the code from your email to finish signing in.</p>
             <form className="mt-3 space-y-3" onSubmit={onVerifyCode}>
               <input
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                className="w-full rounded-xl border border-[#bfd2ca] px-3 py-2 text-sm text-[#0a1f1a]"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                 placeholder="Enter code"
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
@@ -303,7 +301,7 @@ export function MagicLinkLoginScreen({
               <button
                 type="submit"
                 disabled={verifyingCode}
-                className="w-full rounded-xl border border-[#86c8a8] bg-white px-3 py-2 text-sm font-semibold text-[#225744] transition-colors hover:bg-[#edf7f2] disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 {verifyingCode ? "Verifying..." : "Verify code"}
               </button>
@@ -311,14 +309,13 @@ export function MagicLinkLoginScreen({
           </div>
         ) : null}
 
-        {error ? <p className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}
-        {notice ? <p className="mt-3 text-sm font-medium text-emerald-700">{notice}</p> : null}
+        {error ? <p className="mt-3 text-sm font-medium text-rose-700 dark:text-rose-300">{error}</p> : null}
+        {notice ? <p className="mt-3 text-sm font-medium text-emerald-700 dark:text-emerald-300">{notice}</p> : null}
 
-        <div className="mt-4 flex items-center justify-between text-xs text-[#3d5f53]">
-          <Link href="/login" className="font-semibold text-emerald-700 underline">
+        <div className="mt-4 text-xs text-slate-600 dark:text-slate-300">
+          <Link href="/login" className="font-semibold text-emerald-700 underline dark:text-emerald-300">
             Back to sign-in options
           </Link>
-          <span>Session: {sessionCheckEnabled ? "enabled" : "disabled"}</span>
         </div>
       </section>
     </main>

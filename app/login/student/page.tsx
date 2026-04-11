@@ -4,6 +4,7 @@ import { getAuthContext } from "@/lib/auth-context";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { buildMagicLinkCallbackRedirectPath } from "@/lib/auth/magic-link-forward";
+import { resolveAuthLoginErrorMessage } from "@/lib/auth/login-error";
 import { isSessionCheckEnabled, isStudentGoogleOAuthEnabled } from "@/lib/session-flags";
 
 export default async function StudentLoginPage({
@@ -12,6 +13,9 @@ export default async function StudentLoginPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = await searchParams;
+  const initialError = resolveAuthLoginErrorMessage(resolvedSearchParams, {
+    intendedPersona: "student"
+  });
   const callbackRedirectPath = buildMagicLinkCallbackRedirectPath(resolvedSearchParams);
   if (callbackRedirectPath) {
     redirect(callbackRedirectPath);
@@ -37,9 +41,9 @@ export default async function StudentLoginPage({
 
   return (
     <StudentMagicLinkLoginScreen
-      sessionCheckEnabled={sessionCheckEnabled}
       claimToken={claimToken}
       googleOAuthEnabled={sessionCheckEnabled && studentGoogleOAuthEnabled}
+      initialError={initialError}
     />
   );
 }

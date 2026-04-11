@@ -33,6 +33,14 @@ const normalizeEnvValue = (value: string | undefined) => {
 
 type GreenhouseConfig = { apiKey: string; baseUrl: string };
 
+export class GreenhouseNotConfiguredError extends Error {
+  code = "greenhouse_not_configured" as const;
+
+  constructor() {
+    super("greenhouse_not_configured");
+  }
+}
+
 function getGreenhouseEnvConfig(): GreenhouseConfig | null {
   const apiKey = normalizeEnvValue(process.env.GREENHOUSE_API_KEY);
   if (!apiKey) return null;
@@ -88,7 +96,7 @@ export async function fetchGreenhousePipeline(
 ): Promise<ATSPipelineResult> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhousePipelineFromApi(config, opts);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhousePipelineFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhousePipelineFromSqlite(opts);
 }
@@ -99,7 +107,7 @@ export async function fetchGreenhouseJobs(
 ): Promise<{ jobs: GreenhouseJobResult[]; total: number; page: number; has_more: boolean }> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseJobsFromApi(config, opts);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseJobsFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseJobsFromSqlite(opts);
 }
@@ -110,7 +118,7 @@ export async function fetchGreenhouseJob(
 ): Promise<GreenhouseJobResult | null> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseJobFromApi(config, id);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseJobFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseJobFromSqlite(id);
 }
@@ -121,7 +129,7 @@ export async function fetchGreenhouseJobStages(
 ): Promise<GreenhouseJobStageResult[]> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseJobStagesFromApi(config, jobId);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseJobStagesFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseJobStagesFromSqlite(jobId);
 }
@@ -132,7 +140,7 @@ export async function fetchGreenhouseCandidates(
 ): Promise<{ candidates: GreenhouseCandidateResult[]; total: number; page: number; has_more: boolean }> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseCandidatesFromApi(config, opts);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseCandidatesFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseCandidatesFromSqlite(opts);
 }
@@ -143,7 +151,7 @@ export async function fetchGreenhouseCandidate(
 ): Promise<GreenhouseCandidateResult | null> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseCandidateFromApi(config, id);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseCandidateFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseCandidateFromSqlite(id);
 }
@@ -154,7 +162,7 @@ export async function fetchGreenhouseApplication(
 ): Promise<NormalizedATSCandidate | null> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseApplicationFromApi(config, id);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseApplicationFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseApplicationFromSqlite(id);
 }
@@ -165,7 +173,7 @@ export async function fetchGreenhouseScorecards(
 ): Promise<GreenhouseScorecardResult[]> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseScorecardsFromApi(config, applicationId);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseScorecardsFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseScorecardsFromSqlite(applicationId);
 }
@@ -176,7 +184,7 @@ export async function fetchGreenhouseCurrentOffer(
 ): Promise<GreenhouseOfferResult | null> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseCurrentOfferFromApi(config, applicationId);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseCurrentOfferFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseCurrentOfferFromSqlite(applicationId);
 }
@@ -186,7 +194,7 @@ export async function fetchGreenhouseDepartments(
 ): Promise<GreenhouseDepartmentResult[]> {
   const config = await getGreenhouseConfig(orgId);
   if (config) return fetchGreenhouseDepartmentsFromApi(config);
-  if (!isSqliteFallbackAllowed()) throw new Error("greenhouse_not_configured");
+  if (!isSqliteFallbackAllowed()) throw new GreenhouseNotConfiguredError();
   const { fetchGreenhouseDepartmentsFromSqlite } = await import("./greenhouse-sqlite");
   return fetchGreenhouseDepartmentsFromSqlite();
 }

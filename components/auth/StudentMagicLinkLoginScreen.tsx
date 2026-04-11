@@ -3,9 +3,9 @@
 import { MagicLinkLoginScreen } from "@/components/auth/MagicLinkLoginScreen";
 
 type StudentMagicLinkLoginScreenProps = {
-  sessionCheckEnabled: boolean;
   claimToken?: string | null;
   googleOAuthEnabled?: boolean;
+  initialError?: string | null;
 };
 
 const buildGoogleAuthPath = (claimToken: string | null) => {
@@ -18,17 +18,16 @@ const buildGoogleAuthPath = (claimToken: string | null) => {
 };
 
 export function StudentMagicLinkLoginScreen({
-  sessionCheckEnabled,
   claimToken = null,
   googleOAuthEnabled = false,
+  initialError = null,
 }: StudentMagicLinkLoginScreenProps) {
   const description = googleOAuthEnabled
-    ? "Continue with Google or use your email to receive a secure sign-in link."
-    : "Use your email to receive a secure sign-in link.";
+    ? "Continue with Google or we'll email you a sign-in link."
+    : "We'll email you a sign-in link.";
 
   return (
     <MagicLinkLoginScreen
-      sessionCheckEnabled={sessionCheckEnabled}
       submitPath="/api/auth/login/student"
       eyebrow="Student sign-in"
       heading="Sign in"
@@ -39,6 +38,7 @@ export function StudentMagicLinkLoginScreen({
       loadingLabel="Sending link..."
       additionalPayload={claimToken ? { claim_token: claimToken } : {}}
       googleOAuthPath={googleOAuthEnabled ? buildGoogleAuthPath(claimToken) : null}
+      initialError={initialError}
     />
   );
 }

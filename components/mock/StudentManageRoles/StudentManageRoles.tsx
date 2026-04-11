@@ -926,6 +926,7 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
   };
 
   const uploadAvatar = async (file: File) => {
+    const MIN_AVATAR_DIMENSION_PX = 512;
     const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
     if (!allowedTypes.has(file.type)) {
       setStatusMessage("Profile photo must be PNG, JPG, or WEBP.");
@@ -933,6 +934,35 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
     }
     if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
       setStatusMessage("Profile photo must be under 5MB.");
+      return;
+    }
+
+    const readDimensions = (source: File): Promise<{ width: number; height: number }> =>
+      new Promise((resolve, reject) => {
+        const previewUrl = URL.createObjectURL(source);
+        const image = new Image();
+
+        image.onload = () => {
+          URL.revokeObjectURL(previewUrl);
+          resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(previewUrl);
+          reject(new Error("avatar_dimension_read_failed"));
+        };
+        image.src = previewUrl;
+      });
+
+    try {
+      const dimensions = await readDimensions(file);
+      if (dimensions.width < MIN_AVATAR_DIMENSION_PX || dimensions.height < MIN_AVATAR_DIMENSION_PX) {
+        setStatusMessage(
+          `Profile photo is too small. Use at least ${MIN_AVATAR_DIMENSION_PX}x${MIN_AVATAR_DIMENSION_PX} pixels for a sharper avatar.`
+        );
+        return;
+      }
+    } catch {
+      setStatusMessage("Couldn't read image dimensions. Try a different photo.");
       return;
     }
 
@@ -1309,7 +1339,9 @@ export function StudentManageRoles({ view = "all" }: { view?: StudentManageRoles
                       >
                         {isUploadingAvatar ? "Uploading..." : "Upload photo"}
                       </button>
-                      <p className="text-[11px] text-[#557168] dark:text-slate-400">PNG, JPG, or WEBP up to 5MB</p>
+                      <p className="text-[11px] text-[#557168] dark:text-slate-400">
+                        PNG, JPG, or WEBP up to 5MB. Use at least 512x512 for best quality.
+                      </p>
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-3">

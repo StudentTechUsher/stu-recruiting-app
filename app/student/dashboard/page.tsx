@@ -121,7 +121,7 @@ type CapabilityTargetsPayload = {
 type MetricTone = "neutral" | "success" | "warning" | "danger";
 type HiringSignalLevel = "Weak" | "Weak-leaning" | "Moderate" | "Strong-leaning" | "Strong";
 
-const skeletonClass = "animate-pulse rounded-xl bg-[#dde9e3] dark:bg-slate-700/70";
+const skeletonClass = "animate-pulse rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/70";
 
 const asPercent = (value: number): string => `${Math.round(value * 100)}%`;
 
@@ -200,7 +200,7 @@ export default function StudentDashboardPage() {
         }
       } catch {
         if (!active) return;
-        setError("Unable to load dashboard right now.");
+        setError("We couldn't load your dashboard. Refresh and try again.");
       } finally {
         if (active) {
           setIsLoading(false);
@@ -277,7 +277,7 @@ export default function StudentDashboardPage() {
         };
       });
     } catch {
-      setError("Unable to dismiss this warning right now.");
+      setError("We couldn't dismiss this warning. Please try again.");
     } finally {
       setIsDismissingMismatch(false);
     }
@@ -285,10 +285,10 @@ export default function StudentDashboardPage() {
 
   const stateLabel = useMemo(() => {
     const state = dashboard?.state;
-    if (state === "no_evidence") return "Add evidence to populate capability coverage.";
-    if (state === "partial_no_verification") return "Evidence found. Verify artifacts to improve trust labels.";
-    if (state === "full_low_trust") return "Coverage complete. Verification is the current priority.";
-    return "Keep your evidence profile current.";
+    if (state === "no_evidence") return "Add your first evidence item to get started.";
+    if (state === "partial_no_verification") return "You have coverage. Verify key evidence to improve trust.";
+    if (state === "full_low_trust") return "Good coverage. Next step: verify your strongest evidence.";
+    return "Keep your evidence profile up to date.";
   }, [dashboard?.state]);
   const primaryTargetCoverage = useMemo(() => {
     const primaryTarget = capabilityTargets?.active_capability_profiles?.[0];
@@ -328,12 +328,12 @@ export default function StudentDashboardPage() {
   const aiLiteracyCardHelperText =
     aiLiteracyStatus === "not_started"
       ? aiLiteracyHasModel
-        ? "No AI Literacy artifact yet. Generate it from your current evidence."
-        : "Select a role target first, then generate your AI Literacy Map."
+        ? "You don't have an AI Literacy map yet. Generate one from your current evidence."
+        : "Select a role target first, then generate your AI Literacy map."
       : aiLiteracyStatus === "in_progress"
-        ? "We are evaluating your current evidence."
+        ? "We're evaluating your current evidence."
         : aiLiteracyStatus === "needs_attention"
-          ? "Regenerate the artifact after adding stronger evidence."
+          ? "Add stronger evidence, then regenerate your map."
           : `${dashboard?.ai_literacy.domains_with_profile_signal ?? 0}/${dashboard?.ai_literacy.total_role_relevant_domains ?? 0} role-relevant domains · Recruiter-safe ${dashboard?.ai_literacy.recruiter_safe_coverage_percent ?? 0}%`;
   const aiLiteracyCardCta =
     aiLiteracyStatus === "not_started" || aiLiteracyStatus === "needs_attention"
@@ -345,13 +345,13 @@ export default function StudentDashboardPage() {
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
-      <section className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[30px] lg:border lg:border-[#cfddd6] lg:bg-[#f8fcfa] lg:p-6 lg:shadow-[0_24px_54px_-36px_rgba(10,31,26,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900/75">
+      <section className="rounded-none border-0 bg-transparent p-0 shadow-none lg:rounded-[30px] lg:border lg:border-slate-200 lg:bg-white lg:p-6 lg:shadow-[0_18px_46px_-34px_rgba(15,23,42,0.45)] dark:border-0 dark:bg-transparent lg:dark:border-slate-700 lg:dark:bg-slate-900">
         <header className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#4f6d64] dark:text-slate-400">Capability Dashboard</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#0a1f1a] dark:text-slate-100 md:text-4xl">
-            {`Hi ${firstName ?? "there"}, here's your hiring signal overview`}
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">Capability Dashboard</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-4xl">
+            {`Hi ${firstName ?? "there"}, here's your hiring signal`}
           </h1>
-          <p className="mt-3 text-sm leading-7 text-[#47635a] dark:text-slate-300">{stateLabel}</p>
+          <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">{stateLabel}</p>
         </header>
 
         {error ? (
@@ -373,7 +373,7 @@ export default function StudentDashboardPage() {
               disabled={isDismissingMismatch}
               className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
             >
-              {isDismissingMismatch ? "Dismissing..." : "Dismiss warning"}
+              {isDismissingMismatch ? "Dismissing..." : "Dismiss"}
             </button>
           </div>
         ) : null}
@@ -381,21 +381,33 @@ export default function StudentDashboardPage() {
           <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-200">
             <p className="font-semibold">Extraction in progress</p>
             <p className="mt-1">
-              We are still processing your latest uploads. Your capability and trust metrics will update automatically.
+              We&apos;re still processing your latest uploads. Your metrics will update automatically.
             </p>
           </div>
         ) : null}
 
-        <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="mt-6 grid gap-3 xl:grid-cols-3">
           {isLoading || !dashboard ? (
             <>
-              <div className={`${skeletonClass} h-20`} />
-              <div className={`${skeletonClass} h-20`} />
-              <div className={`${skeletonClass} h-20`} />
-              <div className={`${skeletonClass} h-20`} />
+              <div className={`${skeletonClass} h-28 xl:col-span-3`} />
+              <div className={`${skeletonClass} h-24`} />
+              <div className={`${skeletonClass} h-24`} />
+              <div className={`${skeletonClass} h-24`} />
             </>
           ) : (
             <>
+              <MetricCard
+                label="Overall hiring signal"
+                value={overallHiringSignal.level}
+                tone={overallHiringSignal.tone}
+                helperText="Add and verify strong evidence to improve what recruiters see first."
+                cta={
+                  overallHiringSignal.level === "Weak" || overallHiringSignal.level === "Weak-leaning"
+                    ? { label: "Improve now", href: "/student/artifacts?focus=verification" }
+                    : undefined
+                }
+                featured
+              />
               <MetricCard
                 label="Capability coverage"
                 value={`${capabilityCoveragePercent}%`}
@@ -420,18 +432,7 @@ export default function StudentDashboardPage() {
                 }
               />
               <MetricCard
-                label="Overall Hiring Signal"
-                value={overallHiringSignal.level}
-                tone={overallHiringSignal.tone}
-                helperText="Adding and verifying a variety of artifacts for your evidence profile will strengthen your overall hiring signal to employers."
-                cta={
-                  overallHiringSignal.level === "Weak" || overallHiringSignal.level === "Weak-leaning"
-                    ? { label: "Fix now", href: "/student/artifacts?focus=verification" }
-                    : undefined
-                }
-              />
-              <MetricCard
-                label="AI Literacy Profile Coverage"
+                label="AI literacy profile coverage"
                 value={aiLiteracyCardValue}
                 tone={aiLiteracyCardTone}
                 helperText={aiLiteracyCardHelperText}
@@ -441,10 +442,10 @@ export default function StudentDashboardPage() {
           )}
         </div>
 
-        <article className="mt-6 rounded-2xl border border-[#d2e1db] bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">Evidence vs Target</p>
-          <p className="mt-1 text-xs text-[#4f6d64] dark:text-slate-400">
-            Explanatory view only. It compares target expectations against current evidence coverage for the selected role target axes.
+        <article className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Evidence vs target</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            This view compares your current evidence coverage with what your selected role target expects.
           </p>
           {isTargetsLoading ? (
             <div className="mt-3 grid gap-4 lg:grid-cols-2">
@@ -466,25 +467,25 @@ export default function StudentDashboardPage() {
                 return (
                   <section
                     key={`target-fit-${target.capability_profile_id}`}
-                    className="rounded-xl border border-[#d2e1db] bg-[#f8fcfa] p-3 dark:border-slate-700 dark:bg-slate-900/70"
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/70"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
+                      <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
                         {target.role_label} @ {target.company_label}
                       </p>
                       <div className="flex items-center gap-1.5">
-                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
                           {alignmentPercent !== null ? `Alignment ${alignmentPercent}%` : "Alignment --"}
                         </span>
                         {showPriorityBadge ? (
-                          <span className="rounded-full border border-[#bfd2ca] bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                          <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
                             {index === 0 ? "Primary" : "Secondary"}
                           </span>
                         ) : null}
                       </div>
                     </div>
                     {fit?.confidence_summary ? (
-                      <p className="mt-2 text-[11px] text-[#4f6d64] dark:text-slate-400">
+                      <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
                         Confidence {Math.round(fit.confidence_summary.average_confidence * 100)}% ·{" "}
                         {fit.confidence_summary.low_confidence_axis_count}/{fit.confidence_summary.axis_count} axes low confidence
                       </p>
@@ -505,17 +506,17 @@ export default function StudentDashboardPage() {
                                   : "text-amber-700 dark:text-amber-300"
                                 : gapValue > 0
                                   ? "text-emerald-700 dark:text-emerald-300"
-                                  : "text-[#4f6d64] dark:text-slate-400";
+                                  : "text-slate-500 dark:text-slate-400";
                             const contributionPercent = Math.round(((axis.weighted_contribution ?? 0) * 100 + Number.EPSILON) * 10) / 10;
                             return (
-                              <div key={`fit-axis-${target.capability_profile_id}-${axis.capability_id}`} className="rounded-lg border border-[#d7e4de] bg-white px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
+                              <div key={`fit-axis-${target.capability_profile_id}-${axis.capability_id}`} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 dark:border-slate-700 dark:bg-slate-900">
                                 <div className="flex items-center justify-between gap-2 text-[11px]">
-                                  <span className="font-semibold text-[#1d483c] dark:text-slate-200">{axis.label}</span>
+                                  <span className="font-semibold text-slate-800 dark:text-slate-200">{axis.label}</span>
                                   <span className={gapToneClass}>
                                     {gapLabel} {Math.abs(Math.round(gapValue * 100))} pts
                                   </span>
                                 </div>
-                                <div className="mt-1.5 h-2 w-full rounded-full bg-[#e4efe9] dark:bg-slate-800">
+                                <div className="mt-1.5 h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800">
                                   <div
                                     className={`h-2 rounded-full ${
                                       gapValue < 0
@@ -529,7 +530,7 @@ export default function StudentDashboardPage() {
                                     style={{ width: `${Math.max(0, Math.min(100, Math.round((axis.candidate_score ?? axis.evidence_magnitude ?? 0) * 100)))}%` }}
                                   />
                                 </div>
-                                <div className="mt-1 flex items-center justify-between text-[10px] text-[#5a766d] dark:text-slate-400">
+                                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                                   <span>Score {Math.round((axis.candidate_score ?? axis.evidence_magnitude ?? 0) * 100)}%</span>
                                   <span>Req {Math.round((axis.required_level ?? axis.target_magnitude ?? 0) * 100)}%</span>
                                   <span>Contribution {contributionPercent}%</span>
@@ -560,7 +561,7 @@ export default function StudentDashboardPage() {
               <p>No active capability targets selected yet.</p>
               <Link
                 href="/student/targets"
-                className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
+                className="mt-2 inline-flex rounded-lg border border-amber-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 transition-colors hover:bg-amber-100 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/15"
               >
                 Open My Roles & Employers
               </Link>
@@ -579,6 +580,7 @@ function MetricCard({
   helperText,
   cta,
   tooltipText,
+  featured = false,
 }: {
   label: string;
   value: string;
@@ -586,15 +588,16 @@ function MetricCard({
   helperText?: string;
   cta?: { label: string; href: string };
   tooltipText?: string;
+  featured?: boolean;
 }) {
   const toneClasses =
     tone === "success"
       ? "border-emerald-200 bg-emerald-50 dark:border-emerald-400/30 dark:bg-emerald-500/10"
       : tone === "warning"
         ? "border-amber-200 bg-amber-50 dark:border-amber-400/35 dark:bg-amber-500/10"
-        : tone === "danger"
+      : tone === "danger"
           ? "border-rose-200 bg-rose-50 dark:border-rose-400/35 dark:bg-rose-500/10"
-          : "border-[#d2e1db] bg-white dark:border-slate-700 dark:bg-slate-900";
+          : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900";
   const valueClasses =
     tone === "success"
       ? "text-emerald-800 dark:text-emerald-200"
@@ -602,36 +605,36 @@ function MetricCard({
         ? "text-amber-800 dark:text-amber-200"
         : tone === "danger"
           ? "text-rose-800 dark:text-rose-200"
-          : "text-[#102922] dark:text-slate-100";
+          : "text-slate-900 dark:text-slate-100";
 
   return (
-    <article className={`rounded-xl border p-3 ${toneClasses}`}>
-      <p className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#4f6d64] dark:text-slate-400">
+    <article className={`rounded-xl border p-3 ${toneClasses} ${featured ? "xl:col-span-3 p-4" : ""}`}>
+      <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
         <span>{label}</span>
         {tooltipText ? (
           <span className="group relative">
             <button
               type="button"
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[#bfd2ca] bg-white text-[10px] font-semibold text-[#21453a] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
               aria-label={`How ${label} is calculated`}
             >
               i
             </button>
             <span
               role="tooltip"
-              className="pointer-events-none absolute left-0 top-6 z-20 w-[min(18rem,calc(100vw-3rem))] rounded-lg border border-[#d2dfd9] bg-white p-2.5 text-[11px] normal-case leading-4 text-[#3f5a52] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+              className="pointer-events-none absolute left-0 top-6 z-20 w-[min(18rem,calc(100vw-3rem))] rounded-lg border border-slate-300 bg-white p-2.5 text-[11px] leading-4 text-slate-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
             >
               {tooltipText}
             </span>
           </span>
         ) : null}
       </p>
-      <p className={`mt-1 text-sm font-semibold ${valueClasses}`}>{value}</p>
-      {helperText ? <p className="mt-1 text-[11px] text-[#4f6d64] dark:text-slate-400">{helperText}</p> : null}
+      <p className={`mt-1 font-semibold ${featured ? "text-lg" : "text-sm"} ${valueClasses}`}>{value}</p>
+      {helperText ? <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{helperText}</p> : null}
       {cta ? (
         <Link
           href={cta.href}
-          className="mt-2 inline-flex rounded-lg border border-rose-500/50 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-rose-700 transition-colors hover:bg-rose-100 dark:bg-transparent dark:text-rose-200 dark:hover:bg-rose-500/15"
+          className="mt-2 inline-flex rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-600 dark:bg-transparent dark:text-slate-200 dark:hover:bg-slate-500/15"
         >
           {cta.label}
         </Link>

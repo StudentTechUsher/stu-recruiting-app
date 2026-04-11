@@ -4,21 +4,8 @@ import { getAuthContext } from "@/lib/auth-context";
 import { resolvePostAuthRedirect } from "@/lib/auth/callback-routing";
 import { defaultStudentViewReleaseFlags } from "@/lib/feature-flags";
 import { buildMagicLinkCallbackRedirectPath } from "@/lib/auth/magic-link-forward";
+import { resolveAuthLoginErrorMessage } from "@/lib/auth/login-error";
 import { isSessionCheckEnabled } from "@/lib/session-flags";
-
-const firstValue = (value: string | string[] | undefined) => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
-  return null;
-};
-
-const resolveRecruiterLoginError = (errorCode: string | null) => {
-  if (errorCode === "wrong_account_type") {
-    return "This email is already assigned to a different account type. Recruiter magic links only work for recruiter profiles.";
-  }
-
-  return null;
-};
 
 export default async function RecruiterLoginPage({
   searchParams
@@ -26,7 +13,9 @@ export default async function RecruiterLoginPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const initialError = resolveRecruiterLoginError(firstValue(resolvedSearchParams.error));
+  const initialError = resolveAuthLoginErrorMessage(resolvedSearchParams, {
+    intendedPersona: "recruiter"
+  });
   const callbackRedirectPath = buildMagicLinkCallbackRedirectPath(resolvedSearchParams);
   if (callbackRedirectPath) {
     redirect(callbackRedirectPath);
@@ -47,5 +36,5 @@ export default async function RecruiterLoginPage({
     }
   }
 
-  return <RecruiterMagicLinkLoginScreen sessionCheckEnabled={sessionCheckEnabled} initialError={initialError} />;
+  return <RecruiterMagicLinkLoginScreen initialError={initialError} />;
 }

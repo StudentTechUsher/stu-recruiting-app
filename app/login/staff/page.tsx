@@ -32,5 +32,5 @@ export default async function StaffLoginPage({
     }
   }
 
-  return <StaffPasswordLoginScreen sessionCheckEnabled={sessionCheckEnabled} />;
+  return <StaffPasswordLoginScreen />;
 }

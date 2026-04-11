@@ -3,11 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type LoginScreenProps = {
-  sessionCheckEnabled: boolean;
-};
-
-export function LoginScreen({ sessionCheckEnabled }: LoginScreenProps) {
+export function LoginScreen() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -91,16 +87,6 @@ export function LoginScreen({ sessionCheckEnabled }: LoginScreenProps) {
 
         {error ? <p className="mt-3 text-sm font-medium text-rose-700">{error}</p> : null}
 
-        <div className="mt-4 rounded-xl border border-[#d4e1db] bg-[#f5faf7] p-3 text-xs text-[#3d5f53]">
-          Session check: <span className="font-semibold">{sessionCheckEnabled ? "enabled" : "disabled"}</span>
-          {!sessionCheckEnabled ? (
-            <div>
-              <a href="/student/dashboard" className="mt-1 inline-block font-semibold text-emerald-700 underline">
-                Continue without session enforcement
-              </a>
-            </div>
-          ) : null}
-        </div>
       </section>
     </main>
   );
